@@ -186,13 +186,21 @@ object YouTubeMusicPages {
         fun walk(value: Any?) {
             when (value) {
                 is JSONObject -> {
-                    val row = value.optJSONObject("musicResponsiveListItemRenderer")
+                    // List rows, and the "top result" card, which carries the best match.
+                    val card = value.optJSONObject("musicCardShelfRenderer")
+                    val row = value.optJSONObject("musicResponsiveListItemRenderer") ?: card
                     if (row != null) {
-                        val browse = row.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")
-                        val id = browse?.optString("browseId").orEmpty()
-                        if (id.matches(Regex("MPREb[A-Za-z0-9_-]{2,120}")) && seen.add(id)) {
+                        val album = Regex("MPREb[A-Za-z0-9_-]{2,120}")
+                        // The album link sits on the row, or only on its title run.
+                        val id = row.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")?.optString("browseId")
+                            ?.takeIf { it.matches(album) }
+                            ?: find(row.opt(if (card != null) "title" else "flexColumns"), setOf("browseEndpoint"))?.optString("browseId")
+                                ?.takeIf { it.matches(album) }
+                            ?: ""
+                        if (id.matches(album) && seen.add(id)) {
                             val columns = row.optJSONArray("flexColumns")
-                            fun column(i: Int) = text(columns?.optJSONObject(i)?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")?.optJSONObject("text"))
+                            fun column(i: Int) = if (card != null) text(card.optJSONObject(if (i == 0) "title" else "subtitle"))
+                                else text(columns?.optJSONObject(i)?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")?.optJSONObject("text"))
                             val title = column(0)
                             val parts = column(1).split(" • ", " · ").map(String::trim).filter(String::isNotBlank)
                             val yearPart = parts.lastOrNull { it.matches(year) }

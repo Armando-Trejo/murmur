@@ -87,9 +87,25 @@ class AuthBridgePlugin : Plugin() {
             remote.play(client, uri); JSObject().put("deviceName", "Este teléfono · Spotify").put("deviceType", "Smartphone")
         } else try { withContext(Dispatchers.IO) { JSObject(spotify.play(uri).toString()) } }
         catch (error: ProviderFailure) {
-            if (error.code != "SPOTIFY_NO_DEVICE" || !client.matches(Regex("[A-Fa-f0-9]{32}"))) throw error
-            remote.play(client, uri)
-            JSObject().put("deviceName", "Este teléfono · Spotify").put("deviceType", "Smartphone")
+            if (error.code != "SPOTIFY_NO_DEVICE") throw error
+            // App Remote needs this build's signature registered in the Spotify developer app; when it
+            // is not (or fails), open the song in the installed Spotify app, which plays it and then
+            // shows up as a Connect device MURMUR can pause, seek and follow.
+            val viaRemote = client.matches(Regex("[A-Fa-f0-9]{32}")) && runCatching { remote.play(client, uri) }.isSuccess
+            if (!viaRemote) openInSpotify(uri)
+            JSObject().put("deviceName", "Este teléfono · Spotify").put("deviceType", "Smartphone").put("transport", "connect")
+                .put("playing", true).put("loading", !viaRemote)
+        }
+    }
+
+    /** Last route: the official app plays the track itself (it comes to the front for a moment). */
+    private fun openInSpotify(uri: String) {
+        require(uri.matches(Regex("spotify:track:[A-Za-z0-9]{22}"))) { "Canción de Spotify inválida" }
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(uri))
+            .setPackage("com.spotify.music").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        try { activity.startActivity(intent) }
+        catch (_: android.content.ActivityNotFoundException) {
+            throw ProviderFailure("SPOTIFY_APP_NOT_INSTALLED", 404, "spotify", "playback", "Instala Spotify o elige otro modo en Conexiones.")
         }
     }
     @PluginMethod fun spotifyAndroidSetup(call: PluginCall) = async(call) { withContext(Dispatchers.IO) {

@@ -220,3 +220,11 @@
 .blend-open small { font-size: 0.7rem; color: var(--secondary); }
 .blend-card.is-skeleton .blend-art { margin-bottom: 8px; }
 @media (prefers-reduced-motion: reduce) { .blend-open { transition: none; } }
+
+/* ---------- Text entry: a visible caret and selection everywhere ---------- */
+/* The global caret used --accent (#FFF), invisible on the white search field. */
+input, textarea { caret-color: currentColor; }
+.search-field input { caret-color: color-mix(in srgb, var(--brand-accent) 55%, #160d2b); }
+.search-field input::selection { background: rgba(var(--brand-rgb), 0.32); color: #121212; }
+::selection { background: rgba(var(--brand-rgb), 0.38); color: #fff; }
+.search-field:focus-within { box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.45); }

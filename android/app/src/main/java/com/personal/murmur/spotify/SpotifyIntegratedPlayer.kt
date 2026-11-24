@@ -112,6 +112,8 @@ class SpotifyIntegratedPlayer(private val context: Context, private val onNext: 
         if(wantPlay && loading && type in listOf("paused","stopped"))return@post
         if(type.startsWith("web_error:")) {
             val code=type.substringAfter(':');pauseIntegrated()
+            // DRM or playback failure of the official Web player on this device: let the service pick another route.
+            if(code in setOf("playback_error","eme_unavailable","initialization_error") && onKeysRefused?.invoke()==true)return@post
             val message=when(code){
                 "authentication_error","http_401","http_403" -> "Spotify Web necesita una autorización válida de tu aplicación. Habilita Web Playback SDK y renueva Autorizar Spotify en Conexiones."
                 "eme_unavailable","initialization_error" -> "Este Android System WebView no permite el reproductor protegido de Spotify. Actualiza WebView y Chrome y reintenta."

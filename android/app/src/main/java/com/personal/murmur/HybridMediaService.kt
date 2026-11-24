@@ -133,20 +133,34 @@ class HybridMediaService : MediaSessionService() {
     private val alternatives = ArrayDeque<PlaybackSource>()
     private var sourceAttempts = 0
     private var refreshedSource=false
-    private val integratedDelegate=lazy { com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={ advanceNative() },onEnded={ spotifyTrackEnded() },onKeysRefused={ fallBackToWeb() }) }
-    private var webFallbackFor = ""
+    private val integratedDelegate=lazy { com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={ advanceNative() },onEnded={ spotifyTrackEnded() },onKeysRefused={ fallBackFromEngine() }) }
+    private var engineFallbackFor = ""
+    private fun spotifyAppInstalled() = runCatching { com.spotify.android.appremote.api.SpotifyAppRemote.isSpotifyInstalled(this) }.getOrDefault(false)
     /**
-     * Spotify sometimes refuses audio keys to the librespot engine while the account still logs in.
-     * When the library authorization carries the Web Playback scopes, the same song continues on the
-     * official Web player and that mode is kept, instead of stopping with an error.
+     * Spotify may refuse audio keys to the librespot engine (it still logs in), and its official Web
+     * player fails on WebViews without the DRM it wants. Instead of stopping:
+     * - with the Spotify app installed, switch to Connect (the official app plays, MURMUR controls it)
+     *   and ask the web layer to replay the same song through that route;
+     * - otherwise, from the integrated engine, try the Web player when its scopes were granted.
+     * The chosen mode is kept and can be changed back in Conexiones. One switch per song.
      */
-    private fun fallBackToWeb(): Boolean {
+    private fun fallBackFromEngine(): Boolean {
         val data = track ?: return false
-        if (!spotifyActive || selectedWeb || !webSession.webReady()) return false
+        if (!spotifyActive) return false
         val id = entryIdentity(data)
-        if (webFallbackFor == id) return false
-        webFallbackFor = id
-        runCatching { com.personal.murmur.spotify.SpotifyEngineAuthorization(this).mode("web") }
+        if (engineFallbackFor == id) return false
+        engineFallbackFor = id
+        val authorization = com.personal.murmur.spotify.SpotifyEngineAuthorization(this)
+        if (spotifyAppInstalled()) {
+            runCatching { authorization.mode("connect") }
+            spotifyIntegrated.deactivate()
+            NativeEvents.emit("onSpotifyEngineError", JSObject().put("trackId", data.optString("id")).put("queueId", data.optString("queueId"))
+                .put("code", "SPOTIFY_RETRY_CONNECT")
+                .put("message", "Spotify no permitió el reproductor integrado en este teléfono. MURMUR cambió a Connect: suena por la app de Spotify y la controlas desde aquí."))
+            return true
+        }
+        if (selectedWeb || !webSession.webReady()) return false
+        runCatching { authorization.mode("web") }
         NativeEvents.emit("onPlaybackNotice", JSObject().put("message",
             "Spotify rechazó el motor integrado. MURMUR siguió con Integrado · Web; puedes cambiarlo en Conexiones."))
         scope.launch {
@@ -161,7 +175,7 @@ class HybridMediaService : MediaSessionService() {
     }
     private val nativeIntegrated by integratedDelegate
     private val webSession by lazy{SpotifySession.stored(this)}
-    private val webDelegate=lazy{com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={advanceNative()},backend=com.personal.murmur.spotify.SpotifyWebBackend(this,tokenProvider={force->webSession.webToken(force)}),manageFocus=false,deviceLabel="MURMUR · Web",tokenSupplier={webSession.webToken()},onEnded={spotifyTrackEnded()})}
+    private val webDelegate=lazy{com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={advanceNative()},backend=com.personal.murmur.spotify.SpotifyWebBackend(this,tokenProvider={force->webSession.webToken(force)}),manageFocus=false,deviceLabel="MURMUR · Web",tokenSupplier={webSession.webToken()},onEnded={spotifyTrackEnded()},onKeysRefused={fallBackFromEngine()})}
     private val webIntegrated by webDelegate
     private var selectedWeb=false
     private val spotifyIntegrated get()=if(selectedWeb)webIntegrated else nativeIntegrated

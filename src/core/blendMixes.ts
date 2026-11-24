@@ -1,4 +1,4 @@
-import { Auth, Voice, isNative } from "../native";
+import { Audio, Auth, Voice, isNative } from "../native";
 import { db } from "./db";
 import { normalize } from "./FanUploadParser";
 import { listeningStats } from "./musicOrder";
@@ -109,7 +109,31 @@ async function semanticFamilies(genres: string[]) {
   return result;
 }
 
-const CACHE_KEY = "blend:v1";
+/**
+ * Groups favourite artists that are related to each other. The anchor is the most-played artist of
+ * each group; an artist already in a circle does not start another one.
+ */
+export function artistCircles(favourites: string[], related: Map<string, string[]>) {
+  const key = (name: string) => normalize(name);
+  const linked = (a: string, b: string) => {
+    const ra = (related.get(key(a)) ?? []).map(key);
+    const rb = (related.get(key(b)) ?? []).map(key);
+    return ra.includes(key(b)) || rb.includes(key(a)) || ra.some((x) => rb.includes(x));
+  };
+  const used = new Set<string>();
+  const circles: { anchor: string; members: string[]; related: string[] }[] = [];
+  for (const anchor of favourites) {
+    if (used.has(key(anchor))) continue;
+    const members = [anchor, ...favourites.filter((other) => other !== anchor && !used.has(key(other)) && linked(anchor, other))];
+    members.forEach((m) => used.add(key(m)));
+    const relatedNames = [...new Set(members.flatMap((m) => related.get(key(m)) ?? []))]
+      .filter((r) => !members.some((m) => key(m) === key(r)));
+    if (relatedNames.length || members.length > 1) circles.push({ anchor, members, related: relatedNames });
+  }
+  return circles;
+}
+
+const CACHE_KEY = "blend:v2";
 const FRESH_MS = 12 * 60 * 60 * 1000;
 
 export async function cachedBlendMixes(): Promise<{ at: number; mixes: BlendMix[] } | undefined> {
@@ -143,9 +167,15 @@ export async function generateBlendMixes(force = false): Promise<BlendMix[]> {
   const local = Object.entries(stats).sort((a, b) => b[1].plays - a[1].plays)
     .flatMap(([id]) => (byId.get(id) ? [byId.get(id)!] : [])).slice(0, 40);
 
-  // YouTube's own algorithm: the radio it builds after a song you like.
+  // YouTube's own algorithm: the radio it builds after a song you like (one seed per artist).
+  const seedArtists = new Set<string>();
   const seeds = [...local.filter((t) => t.source === "youtube" && t.videoId), ...ytHome.filter((t) => t.videoId)]
-    .filter((t, i, all) => all.findIndex((x) => x.videoId === t.videoId) === i).slice(0, 4);
+    .filter((t) => {
+      const artist = normalize(creditedArtists(t.artist)[0] ?? t.artist);
+      if (seedArtists.has(artist)) return false;
+      seedArtists.add(artist);
+      return true;
+    }).slice(0, 4);
   const radios = await Promise.all(seeds.map(async (seed) => ({
     seed,
     tracks: (await settle(Auth.youtubeCollection({ id: "RDAMVM" + seed.videoId })))?.tracks?.filter((t) => t.videoId !== seed.videoId) ?? [],
@@ -190,6 +220,37 @@ export async function generateBlendMixes(force = false): Promise<BlendMix[]> {
     const made = mix("blend-" + normalize(family).replace(/\s+/g, "-"), "Mezcla · " + family,
       "Spotify y YouTube Music sobre tu " + family.toLowerCase(), blend([fromSpotify, fromYouTube], 30));
     if (made) mixes.push(made);
+  }
+
+  // Spotify no longer shares artist genres with apps like this one. Without families, group your
+  // favourite artists into circles of related artists (Deezer's "related" graph) instead.
+  if (mixes.length < 3) {
+    const favourites = [...new Set([
+      ...topArtists.map((a) => a.name),
+      ...local.map((t) => creditedArtists(t.artist)[0]).filter((a): a is string => !!a),
+    ])].slice(0, 8);
+    const related = new Map<string, string[]>();
+    for (const name of favourites) {
+      const info = await settle(Audio.lookupArtist({ artist: name }));
+      related.set(normalize(name), (info?.related ?? []).slice(0, 5));
+    }
+    const circles = artistCircles(favourites, related);
+    const pool = [...spShort, ...spMedium, ...spArtistTracks, ...ytHome, ...local, ...radioTracks];
+    for (const circle of circles.slice(0, 3)) {
+      const names = new Set([...circle.members, ...circle.related].map(normalize));
+      const inCircle = (t: QueueItem) => creditedArtists(t.artist).some((a) => names.has(normalize(a)));
+      // Discovery from Spotify's catalogue: the related artists you do not play yet.
+      const fresh = (await Promise.all(circle.related.slice(0, 2).map(async (artist) =>
+        spotifyTracks((await settle(Auth.spotifyRequest({
+          path: "/search?type=track&limit=6&q=" + encodeURIComponent(`artist:"${artist}"`),
+        })))?.data?.tracks?.items)))).flat();
+      const radio = radios.filter((r) => inCircle(r.seed)).flatMap((r) => r.tracks);
+      const made = mix("blend-circle-" + normalize(circle.anchor).replace(/\s+/g, "-"),
+        "Mezcla · " + circle.anchor + " y afines",
+        "Spotify y YouTube Music alrededor de " + [circle.anchor, ...circle.members.filter((m) => m !== circle.anchor)].slice(0, 3).join(", "),
+        blend([pool.filter((t) => t.source === "spotify" && inCircle(t)), [...radio, ...pool.filter((t) => t.source === "youtube" && inCircle(t))], fresh], 30));
+      if (made && !mixes.some((m) => m.id === made.id)) mixes.splice(1, 0, made);
+    }
   }
 
   // Only songs you have never saved or played: each provider's algorithm, interleaved.

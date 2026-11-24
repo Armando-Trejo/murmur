@@ -80,7 +80,8 @@ export async function searchAlbums(query: string) {
   const q = query.trim().slice(0, 200);
   const [youtube, spotify] = await Promise.allSettled([
     Auth.youtubeAlbums({ query: q }).then((r) => fromYouTube(r.albums ?? [])),
-    Auth.spotifyRequest({ path: "/search?type=album&limit=12&q=" + encodeURIComponent(q) })
+    // Spotify answers 400 above limit=10 for apps in development mode.
+    Auth.spotifyRequest({ path: "/search?type=album&limit=10&q=" + encodeURIComponent(q) })
       .then((r) => fromSpotify(r.data?.albums?.items ?? [])),
   ]);
   const failed = [youtube.status === "rejected" ? "YouTube Music" : "", spotify.status === "rejected" ? "Spotify" : ""].filter(Boolean);

@@ -172,6 +172,13 @@ export class AudioOrchestrator {
       )
         return;
       this.loadedId = "";
+      // The service switched Spotify to Connect (official app): replay the same song that way.
+      if (event.code === "SPOTIFY_RETRY_CONNECT") {
+        this.spotifyTransport = "connect";
+        this.update({ error: "", errorCode: "", loading: true, playing: false });
+        void this.playCurrent();
+        return;
+      }
       this.update({
         playing: false,
         loading: false,

@@ -139,7 +139,8 @@ class WebSdkEngine(private val context: android.content.Context, private val tok
                 android.util.Log.i(TAG, "SDK ready")
             }
             "not_ready" -> fail("device_offline")
-            "error" -> fail(event.optString("code"))
+            // The SDK repeats playback_error many times a second once DRM fails; handle it once.
+            "error" -> if (!(state.value.stage == "error" && state.value.error == event.optString("code"))) fail(event.optString("code"))
             "inactive" -> update(state.value.copy(paused = true))
             "state" -> {
                 update(state.value.copy(paused = event.optBoolean("paused", true),

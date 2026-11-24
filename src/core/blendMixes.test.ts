@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blend, keywordFamily, songKey } from "./blendMixes";
+import { artistCircles, blend, keywordFamily, songKey } from "./blendMixes";
 import type { QueueItem } from "./types";
 
 const t = (id: string, title: string, artist: string, source: "spotify" | "youtube"): QueueItem =>
@@ -24,6 +24,18 @@ describe("blend mixes", () => {
     expect(out.map((x) => x.id)).toEqual(["s1", "y2", "s2", "s3"]);
     for (let i = 1; i < out.length; i++) expect(out[i].artist).not.toBe(out[i - 1].artist);
     expect(new Set(out.map((x) => songKey(x))).size).toBe(out.length);
+  });
+
+  it("groups favourite artists into circles of related artists", () => {
+    const related = new Map([
+      ["misfits", ["Dead Kennedys", "Bad Religion"]],
+      ["dead kennedys", ["Black Flag", "Misfits"]],
+      ["enjambre", ["Zoé", "Odisseo"]],
+      ["odisseo", ["Enjambre", "Zoé"]],
+    ]);
+    const circles = artistCircles(["Misfits", "Enjambre", "Dead Kennedys", "Odisseo"], related);
+    expect(circles.map((c) => c.members)).toEqual([["Misfits", "Dead Kennedys"], ["Enjambre", "Odisseo"]]);
+    expect(circles[0].related).toEqual(["Bad Religion", "Black Flag"]);
   });
 
   it("excludes songs already known", () => {
