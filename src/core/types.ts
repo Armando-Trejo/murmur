@@ -4,7 +4,19 @@ export interface Chapter {
   title: string;
   positionMs: number;
 }
-export interface QueueItem {
+/** How a cover is framed: focal point (0–100 %), zoom (1–3) and whether it fills or fits the square. */
+export interface ArtworkFrame {
+  x: number;
+  y: number;
+  zoom: number;
+  fit: "cover" | "contain";
+}
+export interface CustomArtwork {
+  /** An image the user picked, resized and kept on the phone (data:image/jpeg). */
+  customArtwork?: string;
+  artworkFrame?: ArtworkFrame;
+}
+export interface QueueItem extends CustomArtwork {
   id: string;
   source: Source;
   title: string;
@@ -28,8 +40,10 @@ export interface QueueItem {
   userQueued?: boolean;
   /** A Spotify track playing its YouTube Music twin through MURMUR's own engine. */
   bridgedFrom?: "spotify";
+  /** Added by "Aleatorio mágico": related to the context, removed when shuffle is turned off. */
+  smart?: boolean;
 }
-export interface Playlist {
+export interface Playlist extends CustomArtwork {
   kind?: "playlist" | "album";
   id: string;
   title: string;

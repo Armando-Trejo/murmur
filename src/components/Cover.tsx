@@ -1,8 +1,25 @@
 import { useEffect, useState } from "react";
 import { AudioLines } from "lucide-react";
-import { artworkOptions, isLetterboxed } from "../core/artwork";
+import { artworkOptions, isLetterboxed, type ArtworkSize } from "../core/artwork";
+import type { ArtworkFrame } from "../core/types";
 
-type CoverItem = { artworkUrl?: string; videoId?: string };
+type CoverItem = { artworkUrl?: string; videoId?: string; customArtwork?: string; artworkFrame?: ArtworkFrame };
+
+/** The user's framing of a cover: focal point, zoom, and fill or fit. */
+export function frameStyle(frame?: ArtworkFrame): React.CSSProperties | undefined {
+  if (!frame) return undefined;
+  // Zoom crops inside the image itself (object-view-box), so a zoomed cover never spills out of
+  // its square in a list row; the focal point decides where the crop sits.
+  const hidden = Math.max(0, 1 - 1 / Math.max(1, frame.zoom)) * 100;
+  const left = (hidden * frame.x) / 100;
+  const top = (hidden * frame.y) / 100;
+  return {
+    objectFit: frame.fit,
+    objectPosition: `${frame.x}% ${frame.y}%`,
+    backgroundColor: frame.fit === "contain" ? "#0d0c11" : undefined,
+    ...(hidden > 0.1 ? { objectViewBox: `inset(${top}% ${hidden - left}% ${hidden - top}% ${left}%)` } : {}),
+  } as React.CSSProperties;
+}
 
 /**
  * Album/track artwork with ordered fallbacks. When every candidate fails (a flaky network or a
@@ -14,13 +31,16 @@ export function Cover({
   kind = 0,
   className = "",
   large = false,
+  size,
 }: {
   track?: CoverItem;
   kind?: number;
   className?: string;
   large?: boolean;
+  /** small: list rows (~300 px source), medium: cards, large: the player. */
+  size?: ArtworkSize;
 }) {
-  const candidates = artworkOptions(track, large);
+  const candidates = artworkOptions(track, large ? "large" : size ?? "medium");
   const key = candidates.join("\n");
   const [attempt, setAttempt] = useState({ key: "", index: 0, retry: 0 });
   const current = attempt.key === key ? attempt : { key, index: 0, retry: 0 };
@@ -57,6 +77,7 @@ export function Cover({
       loading={large ? "eager" : "lazy"}
       decoding="async"
       draggable={false}
+      style={frameStyle(track?.artworkFrame)}
       referrerPolicy="no-referrer"
       onError={next}
       onLoad={(event) => {

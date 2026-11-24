@@ -60,6 +60,7 @@ import {
   ShieldCheck,
   ArrowUp,
   ArrowDown,
+  Image as ImageIcon,
 } from "lucide-react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { App as CapacitorApp } from "@capacitor/app";
@@ -112,7 +113,13 @@ import { haptic, hapticsEnabled, setHapticsEnabled } from "./core/haptics";
 import { prefetchAudio } from "./core/prefetch";
 import { albumLink, SPOTIFY_ALBUM_PREFIX, type AlbumResult } from "./core/albumSearch";
 import { AlbumResults } from "./components/AlbumResults";
-import { BlendMixes } from "./components/BlendMixes";
+import { MadeForYou } from "./components/MadeForYou";
+import { DAILY_ID } from "./core/autoMixes";
+import { magicPicks } from "./core/magicShuffle";
+import { useFitCover } from "./core/useFitCover";
+import { normalize } from "./core/FanUploadParser";
+import { CoverEditor } from "./components/CoverEditor";
+import type { CustomArtwork } from "./core/types";
 import { useHeaderScroll } from "./core/useHeaderScroll";
 import { WakeWordSetting } from "./components/WakeWordSetting";
 import {
@@ -427,6 +434,7 @@ export default function App() {
     lastCoverIndex.current = state.index;
   }
   const coverDirection = lastCoverDirection.current;
+  useFitCover(expanded, current?.queueId ?? current?.id ?? "");
   useHeaderScroll();
   const reduced = useReducedMotion();
   const modalRef = useRef<HTMLDivElement>(null);
@@ -719,7 +727,7 @@ export default function App() {
       void add("onPlaybackNotice", (e) => notify(e.message, "error"));
       void add("onShortcutReceived", (e) => {
         if (e.target === "mix")
-          void guard(() => latestNative.current.runMix("daily"));
+          latestNative.current.nav.push({ view: "library", playlistId: DAILY_ID });
         else
           latestNative.current.setTab(
             e.target === "search" ? "search" : "library",
@@ -944,7 +952,7 @@ export default function App() {
         {numbered ? (
           <span className="track-number" aria-hidden="true">{index + 1}</span>
         ) : (
-          <Cover track={track} kind={index} />
+          <Cover track={track} kind={index} size="small" />
         )}
         <span className="song-copy">
           <strong className={current?.id === track.id ? "highlight" : ""}>
@@ -974,6 +982,37 @@ export default function App() {
   const orderedResults = useMemo(() => orderMusic(results, searchOrder, stats), [results, searchOrder, stats]);
   useEffect(() => prefetchAudio(orderedResults.slice(0, 2), 2), [orderedResults]);
   const savedPlaylistIds = useMemo(() => new Set(playlists.map((p) => p.id)), [playlists]);
+  // Search inside the open playlist or album (title, artist, album; accents and case ignored).
+  const [collectionQuery, setCollectionQuery] = useState("");
+  // Cover editor target: a saved playlist/album or a song.
+  const [coverTarget, setCoverTarget] = useState<{ kind: "playlist" | "track"; id: string }>();
+  const coverItem = useLiveQuery(
+    async () => coverTarget ? (coverTarget.kind === "playlist" ? db.playlists.get(coverTarget.id) : db.tracks.get(coverTarget.id)) : undefined,
+    [coverTarget?.kind, coverTarget?.id],
+  );
+  const saveCover = async (change: CustomArtwork) => {
+    if (!coverTarget) return;
+    const table = coverTarget.kind === "playlist" ? db.playlists : db.tracks;
+    await (table as typeof db.tracks).update(coverTarget.id, { customArtwork: change.customArtwork, artworkFrame: change.artworkFrame } as never);
+    // The song may be in the queue right now: show the new cover there too.
+    if (coverTarget.kind === "track") {
+      const live = player.getSnapshot();
+      if (live.queue.some((t) => t.id === coverTarget.id))
+        player.update({ queue: live.queue.map((t) => t.id === coverTarget.id ? { ...t, ...change } : t) });
+    }
+  };
+  useEffect(() => setCollectionQuery(""), [nav.route.playlistId]);
+  const collectionMatches = useMemo(() => {
+    const words = normalize(collectionQuery).split(" ").filter(Boolean);
+    if (!words.length) return displayedPlaylistItems;
+    return displayedPlaylistItems.filter((t) => {
+      const text = normalize(`${t.title} ${t.artist} ${t.album ?? ""}`);
+      return words.every((w) => text.includes(w));
+    });
+  }, [collectionQuery, displayedPlaylistItems]);
+  // Playlists without a cover of their own (liked songs, local ones) show their first song's artwork.
+  const trackArt = useMemo(() => new Map(allTracks.map((t) => [t.id, t.artworkUrl] as const)), [allTracks]);
+  const playlistArt = (p: Playlist) => p.artworkUrl || p.customArtwork ? p : { artworkUrl: p.trackIds.slice(0, 40).map((id) => trackArt.get(id)).find(Boolean) };
   const openAlbum = (album: AlbumResult) => {
     haptic();
     rememberSearch(query);
@@ -1064,7 +1103,9 @@ export default function App() {
             notify(`${displayedPlaylistItems.length} canciones añadidas a la cola`);
           } },
         ...(!feedLink
-          ? (["divider", { heading: "Mostrar como" },
+          ? ([{ label: "Cambiar carátula", icon: <ImageIcon size={18} />, hint: "Subir, recortar o ajustar",
+                onSelect: () => setCoverTarget({ kind: "playlist", id: activePlaylist.id }) },
+              "divider", { heading: "Mostrar como" },
               { label: "Playlist", checked: activePlaylist.kind !== "album", onSelect: () => setCollectionKind("playlist") },
               { label: "Álbum", checked: activePlaylist.kind === "album", onSelect: () => setCollectionKind("album") }] as MenuEntry[])
           : []),
@@ -1267,9 +1308,9 @@ export default function App() {
           </div>
         )}
         <div hidden={tab !== "home"} className="home-provider-region">
-          <BlendMixes
-            enabled={tab === "home" && isNative && !status.preview && !!(status.spotify || status.oauth || status.youtube || status.youtubeSession)}
-            onPlay={(items, index) => void player.playList(items, index)}
+          <MadeForYou
+            enabled={tab === "home" && isNative && !status.preview}
+            onOpen={(playlistId) => nav.push({ view: "library", playlistId })}
             notify={notify}
           />
           <HomeFeed
@@ -1306,11 +1347,7 @@ export default function App() {
               ))}
             </div>
             <div className="section-heading">
-              <h2>
-                {filter === "Música"
-                  ? "Guardadas de Spotify"
-                  : "Mixes de MURMUR"}
-              </h2>
+              <h2>{filter === "Música" ? "Guardadas de Spotify" : "Tu biblioteca"}</h2>
             </div>
             <>
               {filter === "Música" &&
@@ -1332,86 +1369,6 @@ export default function App() {
                     </button>
                   </div>
                 ))}
-              <div className="mix-carousel">
-                {homeMixKinds
-                  .map((kind) => ({
-                    kind,
-                    i: ["daily", "bridge", "radar"].indexOf(kind),
-                  }))
-                  .map(({ kind, i }) => (
-                    <motion.button
-                      whileTap={{ scale: 0.97 }}
-                      key={kind}
-                      className="mix-card"
-                      onClick={() => void guard(() => runMix(kind))}
-                    >
-                      <div
-                        className={
-                          "mix-art art-" +
-                          i +
-                          (tracks.some((t) => artworkFor(t)) ? " has-art" : "")
-                        }
-                      >
-                        {tracks.some((t) => artworkFor(t)) ? (
-                          <div className="mix-collage">
-                            {musicArt
-                              .slice(i % musicArt.length)
-                              .concat(musicArt.slice(0, i % musicArt.length))
-                              .slice(0, 4)
-                              .map((t) => (
-                                <Cover key={t.id} track={t} />
-                              ))}
-                          </div>
-                        ) : (
-                          <Cover kind={i} />
-                        )}
-                        <span className="mix-art-label">
-                          {i === 0 ? (
-                            <>
-                              DAILY
-                              <br />
-                              HYBRID
-                              <br />
-                              <em>MIX.</em>
-                            </>
-                          ) : i === 1 ? (
-                            <>
-                              THE
-                              <br />
-                              OTHER
-                              <br />
-                              <em>SIDE.</em>
-                            </>
-                          ) : (
-                            <>
-                              DEEP
-                              <br />
-                              <em>RADAR.</em>
-                            </>
-                          )}
-                        </span>
-                        <span className="mix-art-bottom">
-                          <span>MURMUR</span>
-                          <span>
-                            {busy === kind ? (
-                              <RefreshCw size={17} className="spin" />
-                            ) : (
-                              <Play size={17} fill="currentColor" />
-                            )}
-                          </span>
-                        </span>
-                      </div>
-                      <strong>{mixNames[kind]}</strong>
-                      <p>
-                        {i === 0
-                          ? "Spotify + YouTube. Una sola frecuencia."
-                          : i === 1
-                            ? "Demos, directos y versiones que faltaban."
-                            : "Nuevos artistas. Conexiones inesperadas."}
-                      </p>
-                    </motion.button>
-                  ))}
-              </div>
             </>
             {filter !== "Música" && filter !== "Mix Híbrido" && (
               <>
@@ -1438,7 +1395,7 @@ export default function App() {
                           onClick={() => void player.playList([t])}
                         >
                           <div>
-                            <Cover track={t} />
+                            <Cover track={t} size="small" />
                             <span className="video-time">
                               {time(t.duration)}
                             </span>
@@ -1492,7 +1449,7 @@ export default function App() {
                         className="playlist-row"
                         onClick={() => void guard(() => openPlaylist(p))}
                       >
-                        <Cover track={p} />
+                        <Cover track={playlistArt(p)} size="small" />
                         <span>
                           <strong>{p.title}</strong>
                           <small>{p.trackIds.length} canciones</small>
@@ -1615,7 +1572,7 @@ export default function App() {
                     key={p.id}
                     onClick={() => void guard(() => openPlaylist(p))}
                   >
-                    <Cover track={p} />
+                    <Cover track={playlistArt(p)} size="small" />
                     <span>
                       <strong>{p.title}</strong>
                       <small>{p.trackIds.length} canciones</small>
@@ -1781,7 +1738,7 @@ export default function App() {
               onBack={() => nav.push({ view: "library" })}
               onPlay={(items, index) => void player.playList(items, index)}
               onArtist={artist => nav.push({ view: "library", artist })}
-              renderCover={track => <Cover track={track} />}
+              renderCover={track => <Cover track={track} size="small" />}
             /> : nav.route.artist ? <ArtistProfile
               key={nav.route.artistId || nav.route.artist}
               name={nav.route.artist}
@@ -1813,7 +1770,7 @@ export default function App() {
                   transition={{ duration: reduced ? 0.1 : 0.35, ease: settle }}
                 >
                   <div className="collection-backdrop" aria-hidden="true">
-                    <Cover track={{ artworkUrl: collectionArt }} />
+                    <Cover track={{ artworkUrl: collectionArt, customArtwork: activePlaylist.customArtwork }} />
                   </div>
                   <motion.div
                     className="collection-cover"
@@ -1821,7 +1778,7 @@ export default function App() {
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     transition={{ duration: reduced ? 0.1 : 0.5, ease: settle }}
                   >
-                    <Cover track={{ artworkUrl: collectionArt, videoId: displayedPlaylistItems[0]?.videoId }} large />
+                    <Cover track={{ artworkUrl: collectionArt, videoId: displayedPlaylistItems[0]?.videoId, customArtwork: activePlaylist.customArtwork, artworkFrame: activePlaylist.artworkFrame }} large />
                   </motion.div>
                   <div className="collection-copy">
                     <span className="eyebrow">
@@ -1884,10 +1841,39 @@ export default function App() {
                     <OverflowMenu label="Más opciones de la colección" entries={collectionMenu} />
                   </div>
                 </motion.header>
-                {displayedPlaylistItems
+                {displayedPlaylistItems.length > 8 && (
+                  <label className="collection-search">
+                    <Search size={18} aria-hidden="true" />
+                    <input
+                      type="search"
+                      enterKeyHint="search"
+                      aria-label={isAlbum ? "Buscar en este álbum" : "Buscar en esta playlist"}
+                      placeholder={isAlbum ? "Buscar en este álbum" : "Buscar en esta playlist"}
+                      value={collectionQuery}
+                      onChange={(event) => setCollectionQuery(event.target.value)}
+                    />
+                    {collectionQuery && (
+                      <button className="icon-button" aria-label="Limpiar búsqueda" onClick={() => setCollectionQuery("")}>
+                        <X size={17} />
+                      </button>
+                    )}
+                  </label>
+                )}
+                {collectionQuery.trim() ? (
+                  collectionMatches.length ? (
+                    <>
+                      <p className="collection-count">{collectionMatches.length} de {displayedPlaylistItems.length} canciones</p>
+                      {/* A match plays the whole collection from that song, not only the results. */}
+                      {collectionMatches.slice(0, 120).map((t) =>
+                        songRow(t, displayedPlaylistItems.indexOf(t), displayedPlaylistItems, undefined, isAlbum))}
+                    </>
+                  ) : (
+                    <p className="collection-count">Ninguna canción coincide con «{collectionQuery.trim()}».</p>
+                  )
+                ) : displayedPlaylistItems
                   .slice(0, visibleSongs)
                   .map((t, i) => songRow(t, i, displayedPlaylistItems, undefined, isAlbum))}
-                {displayedPlaylistItems.length > visibleSongs && (
+                {!collectionQuery.trim() && displayedPlaylistItems.length > visibleSongs && (
                   <button
                     className="button secondary full"
                     onClick={() => setVisibleSongs((n) => n + 80)}
@@ -1950,7 +1936,7 @@ export default function App() {
                         key={p.id}
                         onClick={() => void guard(() => openPlaylist(p))}
                       >
-                        <Cover track={p} />
+                        <Cover track={playlistArt(p)} size="small" />
                         <span>
                           <strong>{p.title}</strong>
                           <small>
@@ -2287,7 +2273,7 @@ export default function App() {
               aria-label="Abrir reproductor"
               onClick={() => setExpanded(true)}
             >
-              <Cover track={current} />
+              <Cover track={current} size="small" />
               <span className="mini-copy" key={current.queueId || current.id}>
                 <strong><MarqueeTitle text={current.title} /></strong>
                 <small>
@@ -2435,8 +2421,11 @@ export default function App() {
                   transition={{ duration: reduced ? 0.1 : 0.32, ease: settle, delay: reduced ? 0 : 0.04 }}
                 >
                   <h1><MarqueeTitle text={current.title} /></h1>
-                  <button className="text-button artist-link" onClick={()=>nav.push({view:"library",artist:current.artist.split(", ")[0]})}>{current.artist}</button>
-                  {current.album&&<button className="text-button artist-link" onClick={()=>void guard(()=>openTrackAlbum(current))}>Ver álbum · {current.album}</button>}
+                  {/* Artist and album share one truncated line so long names never push the controls off screen. */}
+                  <div className="now-sub">
+                    <button className="text-button artist-link" onClick={()=>nav.push({view:"library",artist:current.artist.split(", ")[0]})}>{current.artist}</button>
+                    {current.album&&<><span aria-hidden="true">·</span><button className="text-button artist-link album-link" aria-label={"Ver álbum " + current.album} onClick={()=>void guard(()=>openTrackAlbum(current))}>{current.album}</button></>}
+                  </div>
                 </motion.div>
                 <button
                   className="icon-button"
@@ -2479,19 +2468,21 @@ export default function App() {
               </div>
               <div className="transport">
                 <button
-                  className="icon-button"
-                  aria-label="Volver a sortear la cola"
-                  aria-pressed={state.shuffled}
-                  disabled={state.queue.length - state.index - 1 < 2}
+                  className={"icon-button shuffle-button mode-" + state.shuffleMode}
+                  aria-label={
+                    state.shuffleMode === "off" ? "Activar aleatorio"
+                      : state.shuffleMode === "on" ? "Activar aleatorio mágico"
+                        : "Desactivar aleatorio"
+                  }
+                  aria-pressed={state.shuffleMode !== "off"}
+                  disabled={state.shuffleMode === "off" && state.queue.length - state.index - 1 < 2}
                   onClick={() => {
-                    player.reshuffle();
-                    notify("Cola sorteada de nuevo");
+                    haptic(state.shuffleMode === "on" ? "confirm" : undefined);
+                    void player.cycleShuffle(magicPicks).then((message) => message && notify(message));
                   }}
                 >
-                  <Shuffle
-                    className={state.shuffled ? "highlight" : ""}
-                    size={23}
-                  />
+                  <Shuffle className={state.shuffleMode !== "off" ? "highlight" : ""} size={23} />
+                  {state.shuffleMode === "magic" && <Sparkles className="shuffle-magic" size={12} aria-hidden="true" />}
                 </button>
                 <button
                   className="icon-button"
@@ -2727,14 +2718,14 @@ export default function App() {
                           <ArrowDown size={16} />
                         </button>
                       </div>
-                      <Cover track={t} />
+                      <Cover track={t} size="small" />
                       <button
                         className="queue-track"
                         aria-label={"Reproducir ahora " + t.title}
                         onClick={() => void player.playQueueEntry(t.queueId!)}
                       >
                         <strong><MarqueeTitle text={t.title} /></strong>
-                        <small>{t.artist}</small>
+                        <small>{t.smart && <span className="smart-mark">✦ Sugerida · </span>}{t.artist}</small>
                       </button>
                       <Badge source={t.source} />
                     </QueueRow>
@@ -2747,6 +2738,18 @@ export default function App() {
           </>
         )}
       </PlayerLayer>
+      <AnimatePresence>
+        {coverTarget && coverItem && (
+          <CoverEditor
+            key="cover-editor"
+            title={coverItem.title}
+            item={coverItem}
+            onSave={saveCover}
+            onClose={() => setCoverTarget(undefined)}
+            notify={notify}
+          />
+        )}
+      </AnimatePresence>
       <AnimatePresence>
         {(actionTrack || playlistPicker || newPlaylist || shared || sleepSheet) && (
           <motion.div
@@ -2941,7 +2944,7 @@ export default function App() {
               ) : (
                 <>
                   <div className="sheet-track">
-                    <Cover track={actionTrack || shared} />
+                    <Cover track={actionTrack || shared} size="small" />
                     <div>
                       <strong><MarqueeTitle text={(actionTrack || shared)?.title || ""} /></strong>
                       <p>{(actionTrack || shared)?.artist}</p>
@@ -2957,6 +2960,18 @@ export default function App() {
                     >
                       <Play size={20} />
                       Reproducir ahora
+                    </button>
+                  )}
+                  {actionTrack && (
+                    <button
+                      className="sheet-action"
+                      onClick={() => {
+                        setCoverTarget({ kind: "track", id: actionTrack.id });
+                        setActionTrack(undefined);
+                      }}
+                    >
+                      <ImageIcon size={20} />
+                      Cambiar portada
                     </button>
                   )}
                   <button

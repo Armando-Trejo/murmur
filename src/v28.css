@@ -421,3 +421,116 @@ body:has(input:not([type="checkbox"]):not([type="range"]):not([type="color"]):fo
 .queue .queue-item > .queue-track strong,
 .queue .queue-item > .queue-track small { display: block; min-width: 0; text-align: left; justify-self: stretch; }
 .queue .queue-item > .queue-track { justify-content: stretch; grid-template-columns: minmax(0, 1fr); }
+
+/* ---------- Aleatorio mágico ---------- */
+.shuffle-button { position: relative; }
+.shuffle-button.mode-magic svg:first-child { filter: drop-shadow(0 0 6px rgba(var(--brand-rgb), 0.75)); }
+.shuffle-magic {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  color: var(--brand-readable);
+  animation: magic-twinkle 1.6s ease-in-out 2;
+}
+@keyframes magic-twinkle { 50% { transform: scale(1.35) rotate(18deg); opacity: 0.7; } }
+.smart-mark { color: var(--brand-readable); font-weight: 700; }
+@media (prefers-reduced-motion: reduce) { .shuffle-magic { animation: none; } }
+
+/* ---------- Now playing fits the screen ---------- */
+/* --cover-fit comes from useFitCover: the height left after title, scrubber and controls. */
+.expanded-player .ambient-cover {
+  width: var(--cover-fit, min(100%, 370px));
+  max-width: 100%;
+  margin: 14px auto 18px;
+}
+.now-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--secondary);
+}
+.now-sub > .artist-link {
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.now-sub > .album-link { flex: 1 1 0; font-weight: 500; color: var(--secondary); }
+.now-sub > span { flex: none; }
+.now-title h1 { margin-bottom: 2px; }
+
+/* ---------- Search inside a playlist or album ---------- */
+.collection-search {
+  position: sticky;
+  top: calc(76px + env(safe-area-inset-top, 0px));
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  margin: 6px 0 10px;
+  padding: 0 6px 0 14px;
+  border-radius: 14px;
+  color: var(--secondary);
+  background: rgba(28, 27, 34, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  transition: top 260ms cubic-bezier(0.2, 0.9, 0.3, 1), box-shadow 200ms ease;
+}
+:root[data-header="hidden"] .collection-search { top: calc(10px + env(safe-area-inset-top, 0px)); }
+.collection-search:focus-within { box-shadow: 0 0 0 2px rgba(var(--brand-rgb), 0.5); color: #fff; }
+.collection-search input {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #fff;
+  font-size: 16px;
+}
+.collection-search input::placeholder { color: var(--secondary); }
+.collection-search input::-webkit-search-cancel-button { display: none; }
+.collection-count { margin: 4px 2px 8px; font-size: 0.78rem; color: var(--secondary); }
+
+/* ---------- Cover editor ---------- */
+.cover-editor { display: grid; gap: 14px; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+.cover-editor-head { display: flex; align-items: center; justify-content: space-between; }
+.cover-editor-head strong { font-size: 1.05rem; }
+.cover-editor-stage {
+  position: relative;
+  justify-self: center;
+  width: min(72vw, 300px);
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #0d0c11;
+  touch-action: none;
+  cursor: grab;
+  box-shadow: 0 24px 50px -24px rgba(var(--brand-rgb), 0.6);
+}
+.cover-editor-stage:active { cursor: grabbing; }
+.cover-editor-stage .cover { width: 100%; height: 100%; border-radius: 0; }
+/* Rule-of-thirds guide while framing. */
+.cover-editor-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(to right, transparent 33.2%, rgba(255, 255, 255, 0.28) 33.3%, transparent 33.5%, transparent 66.5%, rgba(255, 255, 255, 0.28) 66.6%, transparent 66.8%),
+    linear-gradient(to bottom, transparent 33.2%, rgba(255, 255, 255, 0.28) 33.3%, transparent 33.5%, transparent 66.5%, rgba(255, 255, 255, 0.28) 66.6%, transparent 66.8%);
+  opacity: 0.7;
+}
+.cover-editor-title { margin: 0; text-align: center; font-weight: 700; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cover-editor-fit { justify-self: center; }
+.cover-editor-zoom { display: flex; align-items: center; gap: 12px; font-size: 0.82rem; color: var(--secondary); }
+.cover-editor-zoom input { flex: 1; accent-color: var(--brand-accent); height: 32px; }
+.cover-editor-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.cover-editor-actions .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }

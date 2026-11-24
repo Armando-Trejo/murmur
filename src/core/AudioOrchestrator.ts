@@ -5,6 +5,7 @@ import { parseChapters } from "./FanUploadParser";
 import { db } from "./db";
 import { SelectionTimer } from "./PlaybackMetrics";
 import { bridged, setSpotifyViaYouTube, spotifyViaYouTube, youtubeTwin } from "./spotifyBridge";
+import { interleaveMagic } from "./magicShuffle";
 export interface PlayerState {
   queue: QueueItem[];
   index: number;
@@ -17,6 +18,8 @@ export interface PlayerState {
   deviceName: string;
   carMode: boolean;
   shuffled: boolean;
+  /** off → on (shuffle) → magic (shuffle + related songs) → off, like the shuffle button cycles. */
+  shuffleMode: "off" | "on" | "magic";
 }
 export class AudioOrchestrator {
   private state: PlayerState = {
@@ -31,7 +34,48 @@ export class AudioOrchestrator {
     deviceName: "",
     carMode: false,
     shuffled: false,
+    shuffleMode: "off",
   };
+  /** Upcoming order before shuffling, to put it back when shuffle is turned off. */
+  private originalOrder: string[] = [];
+  /**
+   * The shuffle button: 1st tap shuffles, 2nd adds related songs ("Aleatorio mágico"), 3rd restores
+   * the original order and removes the added songs. Returns a short message for the UI.
+   */
+  async cycleShuffle(pickMagic: (queue: QueueItem[], current: QueueItem | undefined, count: number) => Promise<QueueItem[]>) {
+    const mode = this.state.shuffleMode;
+    if (mode === "off") {
+      this.originalOrder = this.state.queue.slice(this.state.index + 1).map((t) => t.queueId!);
+      this.reshuffle();
+      this.update({ shuffleMode: "on", shuffled: true });
+      return "Aleatorio activado";
+    }
+    if (mode === "on") {
+      this.update({ shuffleMode: "magic" });
+      const generation = this.generation;
+      const upcoming = this.state.queue.slice(this.state.index + 1);
+      const wanted = Math.min(30, Math.max(3, Math.ceil(upcoming.length / 3)));
+      const picks = (await pickMagic(this.state.queue, this.current, wanted).catch(() => []))
+        .map((t) => ({ ...t, queueId: crypto.randomUUID(), smart: true }));
+      if (this.state.shuffleMode !== "magic") return "";
+      if (!picks.length) return "Aleatorio mágico activado: no encontré canciones afines ahora.";
+      const live = this.state.queue.slice(this.state.index + 1);
+      const mixed = interleaveMagic(live, picks);
+      this.update({ queue: [...this.state.queue.slice(0, this.state.index + 1), ...mixed] });
+      this.syncQueue();
+      void generation;
+      return `Aleatorio mágico: agregué ${picks.length} canciones afines.`;
+    }
+    // Back to normal: drop the added songs and restore the original order of what remains.
+    const head = this.state.queue.slice(0, this.state.index + 1);
+    const rest = this.state.queue.slice(this.state.index + 1).filter((t) => !t.smart);
+    const position = new Map(this.originalOrder.map((id, i) => [id, i]));
+    const known = rest.filter((t) => position.has(t.queueId!)).sort((a, b) => position.get(a.queueId!)! - position.get(b.queueId!)!);
+    const added = rest.filter((t) => !position.has(t.queueId!));
+    this.update({ queue: [...head, ...known, ...added], shuffleMode: "off", shuffled: false });
+    this.syncQueue();
+    return "Aleatorio desactivado";
+  }
   private listeners = new Set<() => void>();
   private generation = 0;
   private poll?: ReturnType<typeof setInterval>;
@@ -273,9 +317,11 @@ export class AudioOrchestrator {
       position: 0,
       playing: false,
       shuffled: false,
+      shuffleMode: "off",
       error: "",
       errorCode: "",
     });
+    this.originalOrder = [];
     await this.playCurrent();
   }
   /** Resolves the YouTube twins of the next Spotify entries so the native queue can preload them. */
