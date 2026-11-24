@@ -16,7 +16,9 @@ Causa raíz de los cortes y del adelanto: tras el primer cambio preparado, el re
 
 Compilación sin Rust en esta PC: `libmurmurspotify.so` (arm64) se tomó del APK 2.7.0 que entregó el usuario y se compila con `-Pabi=arm64-v8a -x compileSpotifyNative`. `jniLibs/` sigue fuera de git.
 
-Firma: el APK 2.7.0 del usuario está firmado con la clave de depuración de la otra PC (SHA-256 `78d2b623…`). La de esta PC es distinta (`b2c540f0…`), así que el 2.8.0 compilado aquí **no se instala encima**: hace falta copiar `debug.keystore` de la otra PC a `%USERPROFILE%\.android\` y recompilar, o desinstalar 2.7.0 (se pierden biblioteca y sesiones; exportar respaldo antes).
+Instalación del 24 nov 2026: el teléfono (HONOR Magic8 Lite, Android 16) tenía **2.7.1, código 21**, compilado fuera de este repo. Su único cambio frente a 2.7.0 era la precarga de enlaces (`prefetchAudio`), que se trasladó a 2.8.0 (`src/core/prefetch.ts` y `YouTubeAudioPlugin.prefetchAudio`). 2.8.0 pasó a **código 22**. Como 2.7.1 estaba firmado con la clave de otra PC (`78d2b623…`), se desinstaló y se instaló 2.8.0 firmado con la clave de esta PC (`b2c540f0…`); las siguientes versiones compiladas aquí ya se instalan encima. Los datos se respaldaron antes con `run-as … tar` (la app de depuración lo permite) en `D:\Armando\Nueva carpeta\murmur-respaldo-2.7.1\`, junto con el APK 2.7.1, y se restauraron. Las sesiones cifradas no sobreviven a la desinstalación (la llave de Keystore se borra): `SecurePrefs` las descarta en vez de cerrar la app, y hay que reconectar YouTube Music y Spotify.
+
+ADB en esta PC: Windows asignaba WinUSB genérico a la interfaz ADB del HONOR (VID 339B). Se agregó `DeviceInterfaceGUIDs = {F72FE0D4-CBCB-407d-8814-9ED673D0DD6B}` en `HKLM\SYSTEM\CurrentControlSet\Enum\USB\VID_339B&PID_107D&MI_01\…\Device Parameters`, con permiso del usuario.
 
 ### Primera prueba en teléfono para 2.8.0
 
