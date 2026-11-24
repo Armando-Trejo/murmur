@@ -139,6 +139,21 @@ class YouTubeAudioPlugin : Plugin() {
     @PluginMethod fun setDucking(call: PluginCall) = async(call) { HybridMediaService.instance?.setDucking(call.getBoolean("ducking") ?: false); null }
     @PluginMethod fun getState(call: PluginCall) = async(call) { val s = HybridMediaService.instance; val integrated=if(s?.spotifyActive==true)s.integratedState()else null; val result = JSObject().put("playing", integrated?.optBoolean("is_playing") ?: s?.primaryPlayer?.isPlaying ?: false).put("positionMs", integrated?.optLong("progress_ms") ?: s?.youtubePositionMs ?: 0).put("durationMs", integrated?.optJSONObject("item")?.optLong("duration_ms") ?: s?.primaryPlayer?.duration ?: 0).put("loading",integrated?.optBoolean("loading")?:(s?.youtubeLoading ?: false)).put("transport",if(integrated!=null)"integrated" else "youtube"); s?.track?.let { result.put("track", it); result.put("queue", s.snapshotQueue()) }; result }
     @PluginMethod fun showVideo(call: PluginCall) { val id = call.getString("videoId") ?: return call.reject("Falta ID"); activity.startActivity(Intent(context, VideoActivity::class.java).putExtra("videoId", id)); call.resolve() }
+    /** Smart downloads only run on an unmetered network (Wi-Fi/Ethernet), never on mobile data. */
+    @PluginMethod fun networkState(call: PluginCall) {
+        val manager = context.getSystemService(android.net.ConnectivityManager::class.java)
+        val caps = manager?.getNetworkCapabilities(manager.activeNetwork)
+        call.resolve(JSObject().put("online", caps != null).put("metered", manager?.isActiveNetworkMetered ?: true)
+            .put("charging", context.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                ?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0)?.let { it != 0 } ?: false))
+    }
+    /** Deletes one downloaded file, only inside MURMUR's own offline folder. */
+    @PluginMethod fun deleteOfflineAudio(call: PluginCall) {
+        val root = File(context.filesDir, "offline_tracks").canonicalFile
+        val file = call.getString("path")?.let { File(it).canonicalFile }
+        if (file == null || file.parentFile != root) return call.reject("Ruta de descarga inválida.")
+        call.resolve(JSObject().put("deleted", !file.exists() || file.delete()))
+    }
     @PluginMethod fun downloadOfflineAudio(call: PluginCall) = async(call) {
         val path = withContext(Dispatchers.IO) {
             val id = call.getString("videoId") ?: error("Falta ID"); val stream = NativeNetwork.downloadableAudio(NativeNetwork.extract(id)); val directory = File(context.filesDir, "offline_tracks").apply { mkdirs() }

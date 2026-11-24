@@ -59,6 +59,8 @@ interface AudioBridge {
   seekTo(o: { positionMs: number }): Promise<void>;
   triggerManualMix(): Promise<void>;
   setAutoMixMode(o: { mode: string }): Promise<void>;
+  networkState(): Promise<{ online: boolean; metered: boolean; charging: boolean }>;
+  deleteOfflineAudio(o: { path: string }): Promise<{ deleted: boolean }>;
   downloadOfflineAudio(o: {
     videoId: string;
     fileName: string;

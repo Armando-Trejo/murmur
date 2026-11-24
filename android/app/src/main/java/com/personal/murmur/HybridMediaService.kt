@@ -671,6 +671,55 @@ class HybridMediaService : MediaSessionService() {
         }
         return true
     }
+    // ---------- Beat-aligned Auto-Mix ----------
+    private val beatTimes = ArrayDeque<Long>()
+    private var beatIdentity = ""
+    private var beatMixFor = ""
+    private var sampling = false
+    private val beatSampler = object : Runnable {
+        override fun run() {
+            if (!sampling) return
+            val identity = entryIdentity(track)
+            if (identity != beatIdentity) { beatIdentity = identity; beatTimes.clear() }
+            val spectrum = visualSpectrum(System.nanoTime())
+            if (spectrum.beat) {
+                beatTimes.addLast(android.os.SystemClock.elapsedRealtime())
+                while (beatTimes.size > 48) beatTimes.removeFirst()
+            }
+            handler.postDelayed(this, 30)
+        }
+    }
+    private fun startBeatSampling() { if (!sampling) { sampling = true; handler.post(beatSampler) } }
+    private fun stopBeatSampling() { sampling = false; handler.removeCallbacks(beatSampler) }
+
+    /**
+     * The track's beat period from the last onsets: the median interval, only when the pulse is steady
+     * (most intervals within 12 % of it) and plausible (40–240 BPM). Null for ballads and loose intros.
+     */
+    private fun beatPeriodMs(): Long? {
+        if (beatIdentity != entryIdentity(track) || beatTimes.size < 8) return null
+        val times = beatTimes.toList()
+        val intervals = times.zipWithNext { a, b -> b - a }.filter { it in 250..1500 }
+        if (intervals.size < 6) return null
+        val median = intervals.sorted()[intervals.size / 2]
+        val steady = intervals.count { kotlin.math.abs(it - median) <= median * 0.12 }
+        return if (steady >= intervals.size * 0.6) median else null
+    }
+
+    /** Starts the crossfade on the next predicted beat, lasting a whole number of beats. */
+    private fun scheduleBeatMix(fadeMs: Long, period: Long) {
+        val identity = entryIdentity(track)
+        if (beatMixFor == identity || fade != null) return
+        val last = beatTimes.lastOrNull() ?: return
+        val now = android.os.SystemClock.elapsedRealtime()
+        var next = last
+        while (next < now + 40) next += period
+        beatMixFor = identity
+        handler.postDelayed({
+            if (entryIdentity(track) == identity && fade == null) startOverlap(fadeMs)
+        }, next - now)
+    }
+
     private var tailIdentity = ""
     private var quietSince = 0L
     private var signalIdentity = ""
@@ -760,7 +809,13 @@ class HybridMediaService : MediaSessionService() {
                     fadeVolume(maxOf(1_200L, remaining - 400))
                     NativeEvents.emit("onSleepTimerFinished", JSObject().put("reason", "track_end"))
                 }
-                if (!sleepAtTrackEnd && volumeFade?.isActive != true && !spotifyActive && mode != "off" && remaining in 1..fadeMs) startOverlap(fadeMs)
+                val mixing = !sleepAtTrackEnd && volumeFade?.isActive != true && !spotifyActive && mode != "off" && nextTrack != null
+                // Listen for the beat in the last 25 s so the mix can land on the music's pulse.
+                if (mixing && primaryPlayer.isPlaying && remaining in 1..25_000) startBeatSampling() else if (remaining > 25_000 || !mixing) stopBeatSampling()
+                val period = beatPeriodMs()
+                val beatFade = period?.let { (it * (if (mode == "dj") 16 else 8)).coerceIn(3_000L, if (mode == "dj") 12_000L else 7_000L).coerceAtMost(duration / 3) }
+                if (mixing && beatFade != null && period != null && remaining in 1..(beatFade + period * 2)) scheduleBeatMix(beatFade, period)
+                else if (mixing && beatFade == null && remaining in 1..fadeMs) startOverlap(fadeMs)
                 watchTail(duration, remaining, now)
                 if (sleepAt > 0 && System.currentTimeMillis() >= sleepAt - 15_000) { sleepAt = 0; fadeVolume(15_000); NativeEvents.emit("onSleepTimerFinished", JSObject().put("reason", "timer")) }
             }

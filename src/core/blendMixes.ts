@@ -1,6 +1,6 @@
 import { Audio, Auth, Voice, isNative } from "../native";
 import { db } from "./db";
-import { normalize } from "./FanUploadParser";
+import { normalize, stripTitleNoise } from "./FanUploadParser";
 import { listeningStats } from "./musicOrder";
 import { unwrapSpotifyTrack } from "./SpotifyLibrary";
 import { creditedArtists } from "../components/ArtistProfile";
@@ -261,7 +261,7 @@ export async function generateBlendMixes(force = false): Promise<BlendMix[]> {
   if (discovery) mixes.push(discovery);
 
   for (const r of radios.slice(0, 2)) {
-    const made = mix("blend-radio-" + r.seed.videoId, "Radio de " + r.seed.title,
+    const made = mix("blend-radio-" + r.seed.videoId, "Radio de " + (stripTitleNoise(r.seed.title) || r.seed.title),
       "YouTube Music a partir de " + r.seed.artist + ", con tus favoritas de Spotify",
       blend([r.tracks, spShort.filter((t) => trackFamily(t) && trackFamily(t) === trackFamily(r.seed))], 30));
     if (made) mixes.push(made);

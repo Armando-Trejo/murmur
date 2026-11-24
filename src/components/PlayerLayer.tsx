@@ -28,27 +28,39 @@ export function PlayerLayer({ open, children }: { open: boolean; children: React
       : undefined;
     artAnimation.current?.cancel();
     const duration = reduced ? motionMs.reduced : open ? motionMs.playerIn : motionMs.playerOut;
+    // The backdrop turns opaque early so the travelling cover is seen the whole way, not faded.
     panelAnimation.current = panel.animate(
-      [{ opacity: from }, { opacity: open ? 1 : 0 }],
+      open ? [{ opacity: from }, { opacity: 1, offset: 0.32 }, { opacity: 1 }] : [{ opacity: from }, { opacity: 1, offset: 0.55 }, { opacity: 0 }],
       { duration, easing: settleCss, fill: "forwards" },
     );
     const mini = document.querySelector<HTMLElement>(".mini-info .cover");
-    if (!reduced && cover && mini) {
+    let frame = 0;
+    // Start the morph a frame later: by then the cover has its fitted size (useFitCover),
+    // so the end of the flight matches where the cover really rests (no jump at the end).
+    const morph = () => {
+      if (cover) cover.style.opacity = "";
+      if (reduced || !cover || !mini) return;
       const end = cover.getBoundingClientRect();
       const start = mini.getBoundingClientRect();
-      if (visible(start) && visible(end)) {
-        const deltaX = center(start).x - center(end).x;
-        const deltaY = center(start).y - center(end).y;
-        const anchor = { transform: `translate(${deltaX}px, ${deltaY}px) scale(${start.width / end.width})` };
-        const full = { transform: "none" };
-        artAnimation.current = cover.animate(
-          [inFlight ?? (open ? anchor : full), open ? full : anchor],
-          { duration, easing: settleCss },
-        );
-      }
-    }
+      if (!visible(start) || !visible(end)) return;
+      const deltaX = center(start).x - center(end).x;
+      const deltaY = center(start).y - center(end).y;
+      const anchor = { transform: `translate(${deltaX}px, ${deltaY}px) scale(${start.width / end.width})`, borderRadius: "28px" };
+      const full = { transform: "none", borderRadius: "0px" };
+      mini.style.visibility = "hidden"; // one object travelling, not two
+      artAnimation.current = cover.animate(
+        [inFlight ?? (open ? anchor : full), open ? full : anchor],
+        { duration: duration * 1.1, easing: "cubic-bezier(0.2, 0.9, 0.22, 1.04)" },
+      );
+      artAnimation.current.finished.catch(() => {}).finally(() => { mini.style.visibility = ""; });
+    };
+    if (open) {
+      // Hidden for the two frames before the flight starts, so it never flashes at its final spot.
+      if (cover && mini && !reduced) cover.style.opacity = "0";
+      frame = requestAnimationFrame(() => requestAnimationFrame(morph));
+    } else morph();
     const timeout = !open ? setTimeout(() => setPresent(false), duration) : undefined;
-    return () => clearTimeout(timeout);
+    return () => { clearTimeout(timeout); cancelAnimationFrame(frame); if (cover) cover.style.opacity = ""; };
   }, [open, present, reduced]);
   useLayoutEffect(() => () => {
     panelAnimation.current?.cancel();

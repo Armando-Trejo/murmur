@@ -1,4 +1,28 @@
-# Continuidad de MURMUR 2.10.0
+# Continuidad de MURMUR 2.11.0
+
+## Estado de 2.11.0 (24 nov 2026, código 25)
+
+Instalado en el HONOR del usuario. Novedades y dónde viven:
+
+- **Hecho para ti** (`src/core/autoMixes.ts`, `src/components/MadeForYou.tsx`): Descubrimiento diario (10, se renueva cada día) y semanal (20, cada lunes) que aprenden de escuchas completas, guardados y saltos (`tasteProfile`; un salto de una recomendación pesa más). Candidatos: radio de YouTube (`RDAMVM`) de tus más escuchadas, artistas relacionados (Deezer vía `lookupArtist`) buscados en Spotify y YouTube Music; puntuación con acuerdo de fuentes, cercanía a tus artistas y el modelo local (`Voice.rankTags`). Solo canciones nunca escuchadas ni guardadas. Se renueva al abrir y cada 30 min si toca. Todo se guarda como playlists `auto:*` que **se abren** antes de reproducir. Se borran los mixes fijos `local:mix:*` de las primeras versiones y su carrusel del Inicio. Comprobado: diario y semanal generados con artistas afines (Psychedelic Porn Crumpets, Ween, IDLES, Death Grips…).
+- **Mezclas por círculos de artistas** (`artistCircles` en `blendMixes.ts`): Spotify ya no entrega géneros de artistas; se agrupan por artistas relacionados.
+- **Aleatorio mágico** (`AudioOrchestrator.cycleShuffle`, `src/core/magicShuffle.ts`): el botón cicla aleatorio → mágico (intercala ~1 canción afín cada 3, marcadas `smart` y «✦ Sugerida») → apagado (quita las agregadas y restaura el orden). Comprobado en el teléfono: 10 → 13 → 10.
+- **Buscador dentro de playlists y álbumes** (más de 8 canciones), fijo al desplazar; un resultado reproduce la colección completa desde esa canción.
+- **Carátulas propias** (`CoverEditor.tsx`): subir imagen (se guarda como JPEG 640 px en el teléfono), mover, zoom (`object-view-box`), recortar o completa, restaurar. En playlists/álbumes (menú ⋮) y canciones (opciones). Campos `customArtwork` y `artworkFrame`.
+- **Portadas**: tamaños por uso (`Cover size="small"` pide ~300 px en listas, antes 640 px por miniatura de 44 px), playlists sin carátula con la de su primera canción.
+- **Reproductor que cabe** (`useFitCover`): la portada toma el alto que sobra tras título, barra y controles; artista y álbum en una línea. Probado a 360×640.
+- **Biblioteca sin duplicados** (`src/core/dedupe.ts`): misma canción en Spotify y YouTube se muestra una vez (mismo título sin «Remaster/feat.», artista principal y duración ±4 s); versiones en vivo/remix quedan aparte.
+- **Transición mini → reproductor**: la portada vuela del mini a la grande con el fondo opaco temprano y tamaño final ya calculado (`PlayerLayer`).
+- **Descargas inteligentes** (`src/core/smartDownloads.ts`): solo en red no medida (Wi-Fi), tus 30 más escuchadas (Spotify vía gemelo de YouTube), se borran solo las propias al salir del top; interruptor en Conexiones. Nativo: `networkState`, `deleteOfflineAudio`.
+- **Mezcla DJ al ritmo** (`HybridMediaService`): en los últimos 25 s mide el tempo con los golpes del analizador; el fundido dura 8 (Suave) o 16 (DJ) tiempos y arranca sobre un golpe. Sin pulso estable usa el fundido normal. **Pendiente: escucharlo en el teléfono.**
+
+YouTube Music aparece desconectado porque su sesión se borró en la reinstalación de 2.8.0 (llave de Keystore); hay que volver a iniciar sesión en Conexiones.
+
+Verificación: 189 pruebas web, 97 Android, lint 0 errores.
+
+---
+
+# Historial: continuidad de MURMUR 2.10.0
 
 ## Estado de 2.10.0 (24 nov 2026, código 24)
 

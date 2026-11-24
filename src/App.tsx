@@ -119,6 +119,9 @@ import { magicPicks } from "./core/magicShuffle";
 import { useFitCover } from "./core/useFitCover";
 import { normalize } from "./core/FanUploadParser";
 import { CoverEditor } from "./components/CoverEditor";
+import { uniqueSongs } from "./core/dedupe";
+import { SmartDownloadsSetting } from "./components/SmartDownloadsSetting";
+import { runSmartDownloads } from "./core/smartDownloads";
 import type { CustomArtwork } from "./core/types";
 import { useHeaderScroll } from "./core/useHeaderScroll";
 import { WakeWordSetting } from "./components/WakeWordSetting";
@@ -319,13 +322,17 @@ export default function App() {
     [],
     {},
   );
+  // The library shows each song once even when it is saved on Spotify and on YouTube.
   const tracks = useMemo(
     () =>
-      orderMusic(
-        allTracks.filter((t) => t.saved !== false),
-        libraryOrder,
+      uniqueSongs(
+        orderMusic(
+          allTracks.filter((t) => t.saved !== false),
+          libraryOrder,
+          stats,
+        ),
         stats,
-      ),
+      ).songs,
     [allTracks, libraryOrder, stats],
   );
   const trackLookup = useMemo(
@@ -436,6 +443,15 @@ export default function App() {
   const coverDirection = lastCoverDirection.current;
   useFitCover(expanded, current?.queueId ?? current?.id ?? "");
   useHeaderScroll();
+  // Smart downloads: on start, every hour and when the connection returns (Wi-Fi only, inside).
+  useEffect(() => {
+    if (!isNative) return;
+    const run = () => void runSmartDownloads().catch(() => {});
+    const first = setTimeout(run, 20_000);
+    const hourly = setInterval(run, 3_600_000);
+    window.addEventListener("online", run);
+    return () => { clearTimeout(first); clearInterval(hourly); window.removeEventListener("online", run); };
+  }, []);
   const reduced = useReducedMotion();
   const modalRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<HTMLDivElement>(null);
@@ -2111,6 +2127,7 @@ export default function App() {
                 <ArrowUpRight size={18} />
               </button>
               <WakeWordSetting notify={notify} />
+              <SmartDownloadsSetting notify={notify} />
               <button
                 className="setting-label setting-button"
                 onClick={() =>
