@@ -248,7 +248,10 @@ export class AudioOrchestrator {
       });
     }
     this.poll = setInterval(() => {
-      if (this.current?.source === "spotify") void this.pollSpotify();
+      // A paused Spotify track in a hidden app has nothing to sync: skip the request (data and battery).
+      const idle = !this.state.playing && !this.state.loading &&
+        typeof document !== "undefined" && document.visibilityState === "hidden";
+      if (this.current?.source === "spotify") { if (!idle) void this.pollSpotify(); }
       else if (this.state.loading && !this.ignoreNative) void this.reconcile();
     }, 2000);
     await Audio.setAutoMixMode({ mode: this.state.mode });

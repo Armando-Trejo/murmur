@@ -45,10 +45,17 @@ object NativeNetwork {
     }
     fun downloadableAudio(info: StreamInfo) = audioCandidates(info).firstOrNull { it.deliveryMethod == org.schabi.newpipe.extractor.stream.DeliveryMethod.PROGRESSIVE_HTTP }
         ?: error("Esta emisión no ofrece un archivo de audio descargable. Puedes escucharla en línea.")
-    private val resolved = AudioSourceCache<YouTubeMusicResolver.Audio>()
+    /** Signed links last ~6 h; keep them while they have margin so revisits and skips skip the resolver. */
+    private val resolved = AudioSourceCache<YouTubeMusicResolver.Audio>(capacity = 48, lifetimeMs = 3 * 60 * 60_000L)
+    private const val EXPIRY_MARGIN_MS = 20 * 60_000L
+    fun linkStillValid(audio: YouTubeMusicResolver.Audio, now: Long = System.currentTimeMillis()): Boolean {
+        val expire = audio.sources.firstOrNull()?.uri?.let { Regex("[?&]expire=(\\d+)").find(it)?.groupValues?.get(1)?.toLongOrNull() }
+            ?: return true
+        return expire * 1000 - now > EXPIRY_MARGIN_MS
+    }
     fun resolveAudio(videoId:String,preferNewPipe:Boolean=false,forceRefresh:Boolean=false):YouTubeMusicResolver.Audio {
-        if (!preferNewPipe && !forceRefresh) resolved.get(videoId)?.let { return it }
-        else resolved.remove(videoId)
+        if (!preferNewPipe && !forceRefresh) resolved.get(videoId)?.takeIf { linkStillValid(it) }?.let { return it }
+        resolved.remove(videoId)
         val result = resolveUncached(videoId, preferNewPipe)
         resolved.put(videoId, result)
         return result

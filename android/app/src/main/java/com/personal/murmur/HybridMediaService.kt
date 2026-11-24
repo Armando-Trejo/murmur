@@ -43,6 +43,11 @@ class HybridMediaService : MediaSessionService() {
         const val TAIL_HANDOFF_MS = 240L
         /** RMS below this (about -52 dBFS) counts as the silent tail many uploads end with. */
         const val SILENT_TAIL = 0.0025f
+        /** A parked preload must still be at its start; beyond this it is rewound before use. */
+        const val PRELOAD_START_TOLERANCE_MS = 400L
+        const val METERED_PRELOAD_AFTER_MS = 12_000L
+        /** True while MURMUR's own screen is visible; progress events to the WebView slow down otherwise. */
+        @Volatile var uiVisible = true
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
@@ -239,12 +244,24 @@ class HybridMediaService : MediaSessionService() {
         }
         val http = OkHttpDataSource.Factory(NativeNetwork.client)
             .setDefaultRequestProperties(mapOf("User-Agent" to NativeNetwork.USER_AGENT,"Referer" to "https://www.youtube.com/"))
-        val sources = DefaultMediaSourceFactory(AudioRangeDataSource.Factory(DefaultDataSource.Factory(this, http)))
+        val upstream = AudioRangeDataSource.Factory(DefaultDataSource.Factory(this, http))
+        val cached = androidx.media3.datasource.cache.CacheDataSource.Factory()
+            .setCache(MediaCache.get(this))
+            .setUpstreamDataSourceFactory(upstream)
+            .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        val sources = DefaultMediaSourceFactory(MediaCache.RoutingFactory(cached, upstream))
         val selector = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(this).apply { setParameters(buildUponParameters().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO,true)) }
-        return ExoPlayer.Builder(this, factory).setLoadControl(androidx.media3.exoplayer.DefaultLoadControl.Builder().setBufferDurationsMs(15000,50000,900,2200).build()).setLooper(Looper.getMainLooper()).setMediaSourceFactory(sources).setTrackSelector(selector).build().apply {
+        // 20–60 s of audio: the radio wakes in fewer, longer bursts (battery) and rides out weak signal.
+        // 700 ms to start keeps a tap feeling immediate; 2 s after a stall avoids stutter loops.
+        val load = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(20_000, 60_000, 700, 2_000)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+        return ExoPlayer.Builder(this, factory).setLoadControl(load).setLooper(Looper.getMainLooper()).setMediaSourceFactory(sources).setTrackSelector(selector).build().apply {
             meters[this] = meter
             setAudioAttributes(audioAttributes(), handleAudioFocus)
-            setHandleAudioBecomingNoisy(true); setWakeMode(C.WAKE_MODE_LOCAL)
+            // NETWORK also holds a Wi-Fi lock while playing, so streaming does not stall with the screen off.
+            setHandleAudioBecomingNoisy(true); setWakeMode(C.WAKE_MODE_NETWORK)
         }
     }
     override fun onCreate() {
@@ -356,7 +373,8 @@ class HybridMediaService : MediaSessionService() {
         if (id == C.AUDIO_SESSION_ID_UNSET || gain == 0) return
         try { enhancer = LoudnessEnhancer(id).apply { setTargetGain(gain); enabled = true } } catch (_: Exception) { }
     }
-    private fun item(url: String, data: JSONObject, mime: String? = null) = MediaItem.Builder().setUri(url).setMimeType(mime).setMediaId(data.optString("id")).setMediaMetadata(MediaMetadata.Builder().setTitle(data.optString("title")).setArtist(data.optString("artist")).setArtworkUri(data.optString("artworkUrl").takeIf { it.startsWith("https://") }?.let { android.net.Uri.parse(YouTubeArtwork.hd(it, 1080)) }).build()).build()
+    private fun item(url: String, data: JSONObject, mime: String? = null) = MediaItem.Builder().setUri(url).setMimeType(mime).setMediaId(data.optString("id"))
+        .setCustomCacheKey(MediaCache.key(url, data.optString("videoId"))).setMediaMetadata(MediaMetadata.Builder().setTitle(data.optString("title")).setArtist(data.optString("artist")).setArtworkUri(data.optString("artworkUrl").takeIf { it.startsWith("https://") }?.let { android.net.Uri.parse(YouTubeArtwork.hd(it, 1080)) }).build()).build()
     fun play(url: String, data: JSONObject) = playSources(listOf(PlaybackSource(url)), data)
     private fun sourcesFor(data:JSONObject):List<PlaybackSource> {
         val local=data.optString("offlinePath")
@@ -408,13 +426,19 @@ class HybridMediaService : MediaSessionService() {
     fun playPrepared(data: JSONObject, announce: Boolean = false): Boolean {
         if (entryIdentity(data) != entryIdentity(nextTrack)) return false
         cancelOverlap()
-        if (secondaryPlayer.playbackState != Player.STATE_READY || secondaryPlayer.currentPosition != 0L) return false
+        val state = secondaryPlayer.playbackState
+        // A preload that is still buffering keeps its progress: promoting it is faster than a cold start.
+        if (state != Player.STATE_READY && state != Player.STATE_BUFFERING) return false
+        if (secondaryPlayer.currentPosition > PRELOAD_START_TOLERANCE_MS) secondaryPlayer.seekTo(0)
         promotePrepared(data, announce)
         return true
     }
 
     fun preloadSource(source: PlaybackSource, data: JSONObject) {
         if (fade != null) return
+        // The standby player may be a former primary whose playWhenReady is still true:
+        // without this it would play the next song silently and enter it a minute late.
+        secondaryPlayer.playWhenReady = false
         secondaryPlayer.setMediaItem(item(source.uri, data, source.mime), 0L)
         secondaryPlayer.volume = 0f
         secondaryPlayer.prepare()
@@ -496,6 +520,8 @@ class HybridMediaService : MediaSessionService() {
             spotifyActive = false
         }
         outgoing.removeListener(listener)
+        // stop() keeps playWhenReady; clear it so the next preload on this player stays silent and parked.
+        outgoing.playWhenReady = false
         outgoing.stop()
         outgoing.clearMediaItems()
         outgoing.setAudioAttributes(audioAttributes(), false)
@@ -527,6 +553,12 @@ class HybridMediaService : MediaSessionService() {
         if ((mode == "off" && !force) || fade != null || spotifyActive || !primaryPlayer.isPlaying ||
             secondaryPlayer.playbackState != Player.STATE_READY || selectionPending != null ||
             entryIdentity(upcoming.firstOrNull()) != entryIdentity(target)) return false
+        if (secondaryPlayer.currentPosition > PRELOAD_START_TOLERANCE_MS) {
+            // Never mix in a preload that drifted from its start; rewind and let the end handoff take it.
+            secondaryPlayer.playWhenReady = false
+            secondaryPlayer.seekTo(0)
+            return false
+        }
         fade = scope.launch {
             val outgoing = primaryPlayer
             val incoming = secondaryPlayer
@@ -586,16 +618,34 @@ class HybridMediaService : MediaSessionService() {
             startOverlap(if (mode == "off") 450 else minOf(if (mode == "dj") 10_000L else 5_000L, remaining.coerceAtLeast(800)), force = true)
         }
     }
+    private val connectivity by lazy { getSystemService(android.net.ConnectivityManager::class.java) }
+    /** On mobile data a quick skip should not have paid for the next song: wait a few seconds first. */
+    private fun meteredNetwork() = runCatching { connectivity?.isActiveNetworkMetered == true }.getOrDefault(false)
+    private var tickCount = 0L
+    private var lastProgress = ""
+    /** Something time-critical is happening: transitions, preloads and fades need the fast tick. */
+    private val busy get() = (!spotifyActive && (primaryPlayer.isPlaying || youtubeLoading)) ||
+        (spotifyActive && spotifyIntegrated.playing) || fade != null || preparing?.isActive == true
     private val ticker = object : Runnable {
         override fun run() {
             if (::primaryPlayer.isInitialized) {
+                tickCount++
                 val duration = primaryPlayer.duration.takeIf { it > 0 } ?: 0L; val position = youtubePositionMs
-                if(!spotifyActive)NativeEvents.emit("onPlaybackProgress", JSObject().put("trackId",track?.optString("id")).put("queueId",track?.optString("queueId")).put("positionMs", position).put("durationMs", duration))
+                // Progress wakes the WebView: every 500 ms on screen, every 2 s in the background,
+                // and only on change while paused, so an idle or locked phone does no repaint work.
+                val progress = "${track?.optString("queueId")}:${position / 500}:$duration"
+                val playingNow = !spotifyActive && (primaryPlayer.isPlaying || youtubeLoading)
+                val due = if (playingNow) uiVisible || tickCount % 4 == 0L else progress != lastProgress
+                if (!spotifyActive && due) {
+                    lastProgress = progress
+                    NativeEvents.emit("onPlaybackProgress", JSObject().put("trackId",track?.optString("id")).put("queueId",track?.optString("queueId")).put("positionMs", position).put("durationMs", duration))
+                }
                 val remaining = duration - position; val next = upcoming.firstOrNull()
                 val now = android.os.SystemClock.elapsedRealtime()
                 if ((primaryPlayer.isPlaying && !spotifyActive || spotifyActive && spotifyIntegrated.playing) &&
                     selectionPending == null && next?.optString("source") == "youtube" &&
-                    nextTrack == null && pendingTrack == null && fade == null && now >= preloadRetryAt) {
+                    nextTrack == null && pendingTrack == null && fade == null && now >= preloadRetryAt &&
+                    (!meteredNetwork() || position >= METERED_PRELOAD_AFTER_MS || remaining in 1..90_000)) {
                     pendingTrack = next
                     preparing = scope.launch {
                         try {
@@ -624,7 +674,7 @@ class HybridMediaService : MediaSessionService() {
                 watchTail(duration, remaining, now)
                 if (sleepAt > 0 && System.currentTimeMillis() >= sleepAt - 15_000) { sleepAt = 0; fadeVolume(15_000); NativeEvents.emit("onSleepTimerFinished", JSObject().put("reason", "timer")) }
             }
-            handler.postDelayed(this, 500)
+            handler.postDelayed(this, if (!::primaryPlayer.isInitialized || busy || sleepAt > 0) 500 else 2_000)
         }
     }
     override fun onTaskRemoved(rootIntent: Intent?) { PlaybackRequests.next();pausePlayback();preparing?.cancel();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();super.onTaskRemoved(rootIntent) }

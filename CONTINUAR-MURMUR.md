@@ -1,4 +1,36 @@
-# Continuidad de MURMUR 2.7.0
+# Continuidad de MURMUR 2.8.0
+
+## Estado de 2.8.0 (24 nov 2026)
+
+Repositorio local en `D:/Armando/Nueva carpeta/murmur`, remoto `https://github.com/Armando-Trejo/murmur.git`, rama `main`. Responde a la prueba del usuario con 2.7.0: cortes breves entre canciones, siguiente canción que entra adelantada un minuto o más, reproducción poco inmediata, bloques sólidos en la interfaz y uso de caché, buffer, batería y datos.
+
+Causa raíz de los cortes y del adelanto: tras el primer cambio preparado, el reproductor de reserva es el antiguo principal y `stop()` conserva `playWhenReady = true`. Cada precarga siguiente sonaba en silencio (volumen 0) mientras se escuchaba la actual. Al llegar el relevo, `startOverlap` la metía ya avanzada, o `playPrepared` la rechazaba (`currentPosition != 0`) y abría la pista en frío, con un corte. Además descargaba y decodificaba la canción entera de más (datos y batería).
+
+- `HybridMediaService.preloadSource` y `promotePrepared` dejan la reserva con `playWhenReady = false`. `playPrepared` acepta una precarga en `BUFFERING` y rebobina si se desvió más de `PRELOAD_START_TOLERANCE_MS`; `startOverlap` nunca mezcla una precarga desviada. Prueba: `PreloadParkingTest`.
+- Caché de audio en disco: `MediaCache.kt` (`SimpleCache` de 256 MB en `cacheDir/media3_audio`, LRU). La clave es `yt:<videoId>:<itag>:<clen>` porque la firma del enlace cambia en cada resolución. Sólo pasa por caché el audio progresivo de googlevideo; locales, HLS y DASH van directo. Prueba: `MediaCacheTest`.
+- Enlaces resueltos: `NativeNetwork.resolveAudio` los reutiliza hasta 3 h (48 entradas) mientras les queden más de 20 min antes de `expire`; antes caducaban a los 5 min.
+- Buffer: 20–60 s (ráfagas de radio más largas y espaciadas), 700 ms para arrancar y 2 s tras una pausa por red. `WAKE_MODE_NETWORK` mantiene el Wi-Fi activo con la pantalla apagada.
+- Datos móviles: con red medida la siguiente canción se precarga después de 12 s de escucha o en los últimos 90 s, así que un salto rápido no paga la descarga.
+- Batería: el ticker nativo baja a 2 s cuando no suena nada y el progreso a la WebView va cada 500 ms en pantalla, cada 2 s en segundo plano y sólo si cambia en pausa (`MainActivity.onStart/onStop` → `HybridMediaService.uiVisible`). El sondeo de Spotify no consulta mientras está en pausa y la app oculta.
+- Interfaz: `src/v28.css` (importado al final). Barra superior, minirreproductor y pestañas pasan de bloques negros opacos (~230 px) a vidrio translúcido con desenfoque sobre un degradado corto; el minirreproductor es una tarjeta flotante de 16 px de radio; la lista termina libre bajo los controles. Respaldo casi opaco si no hay `backdrop-filter`.
+
+Compilación sin Rust en esta PC: `libmurmurspotify.so` (arm64) se tomó del APK 2.7.0 que entregó el usuario y se compila con `-Pabi=arm64-v8a -x compileSpotifyNative`. `jniLibs/` sigue fuera de git.
+
+Firma: el APK 2.7.0 del usuario está firmado con la clave de depuración de la otra PC (SHA-256 `78d2b623…`). La de esta PC es distinta (`b2c540f0…`), así que el 2.8.0 compilado aquí **no se instala encima**: hace falta copiar `debug.keystore` de la otra PC a `%USERPROFILE%\.android\` y recompilar, o desinstalar 2.7.0 (se pierden biblioteca y sesiones; exportar respaldo antes).
+
+### Primera prueba en teléfono para 2.8.0
+
+| Caso | Resultado esperado |
+| --- | --- |
+| Lista de 5+ canciones de YouTube con Auto-Mix apagado, dejarla correr | Cada canción entra desde 0:00, sin corte audible. |
+| Lo mismo en Suave y DJ | Fundido; la entrante empieza desde el inicio. |
+| Siguiente en la app y en la notificación tras 20 s de escucha | Cambio inmediato (precarga lista). |
+| Repetir una canción ya escuchada sin red | Suena desde la caché mientras esté guardada. |
+| Pantalla apagada 30 min con Wi-Fi | Sin cortes ni pausas por red. |
+
+---
+
+# Historial: continuidad de MURMUR 2.7.0
 
 ## Estado para retomar
 

@@ -35,6 +35,8 @@ class MainActivity : BridgeActivity() {
         handleIntent(intent)
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleIntent(intent) }
+    override fun onStart() { super.onStart(); HybridMediaService.uiVisible = true }
+    override fun onStop() { HybridMediaService.uiVisible = false; super.onStop() }
     override fun onResume() {
         super.onResume()
         if(intent?.getBooleanExtra("open_player",false)==true){intent.removeExtra("open_player");NativeEvents.emit("onOpenPlayer")}
