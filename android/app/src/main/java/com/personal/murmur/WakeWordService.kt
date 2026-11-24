@@ -221,21 +221,43 @@ class WakeWordService : Service() {
         handler.post { captureCommand() }
     }
 
-    /** The wake phrase was heard: free the microphone and let Android's recognizer take the request. */
-    private fun captureCommand() {
-        capturing = true
-        pauseListening()
-        VoiceTriggerManager.beginListening()
-        val local = Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+    /** Each capture gets a token so a late callback from an abandoned recognizer is ignored. */
+    private var attempt = 0
+
+    /**
+     * The wake phrase was heard: free the microphone and take the request with Android's recognizer.
+     * Order: the phone's offline recognizer; if it lacks Spanish (or fails to start), the system
+     * recognizer (Google, online); if there is no usable service either, the local Vosk model.
+     */
+    private fun captureCommand(system: Boolean = false) {
+        if (!system) {
+            capturing = true
+            pauseListening()
+            VoiceTriggerManager.beginListening()
+            handler.postDelayed({ if (capturing) finishCommand(null, "No escuché un comando después de «Ok MURMUR».") }, 14_000)
+        }
+        val token = ++attempt
+        val local = !system && Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+        if (!local && !SpeechRecognizer.isRecognitionAvailable(this)) { localCommand(); return }
         val recognizer = try {
             if (local && Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(this) else SpeechRecognizer.createSpeechRecognizer(this)
-        } catch (_: Exception) { finishCommand(null, "No hay un servicio de reconocimiento de voz activo."); return }
+        } catch (_: Exception) { if (local) captureCommand(system = true) else localCommand(); return }
         command = recognizer
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onResults(results: Bundle?) {
+                if (token != attempt) return
                 finishCommand(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull { it.isNotBlank() }, null)
             }
-            override fun onError(error: Int) { finishCommand(null, VoiceRecognitionPolicy.message(error)) }
+            override fun onError(error: Int) {
+                if (token != attempt) return
+                when {
+                    // No Spanish pack / offline engine unusable: same request through the online one.
+                    VoiceRecognitionPolicy.retryWithSystem(error, local, false) -> { command?.destroy(); command = null; captureCommand(system = true) }
+                    // No network or service at all: fall back to the on-device Spanish model.
+                    error in setOf(1, 2, 5, 12, 13) -> { command?.destroy(); command = null; localCommand() }
+                    else -> finishCommand(null, VoiceRecognitionPolicy.message(error))
+                }
+            }
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
@@ -249,12 +271,40 @@ class WakeWordService : Service() {
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-MX")
             .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, local)
             .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3))
-        handler.postDelayed({ if (capturing) finishCommand(null, "No escuché un comando después de «Ok MURMUR».") }, 12_000)
+    }
+
+    /** Last resort, fully offline: free-form Spanish from the wake-word model, up to 7 s. */
+    private fun localCommand() {
+        val current = model ?: return finishCommand(null, VoiceRecognitionPolicy.message(13))
+        val token = ++attempt
+        Thread({
+            val rate = 16000
+            val frame = rate / 10
+            val text = try {
+                val record = android.media.AudioRecord(android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION, rate,
+                    android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT, frame * 4)
+                val recognizer = Recognizer(current, rate.toFloat())
+                val buffer = ShortArray(frame)
+                var heardVoice = false; var quiet = 0; var frames = 0
+                try {
+                    record.startRecording()
+                    while (token == attempt && capturing && frames++ < 70 && !(heardVoice && quiet >= 10)) {
+                        val read = record.read(buffer, 0, frame); if (read <= 0) continue
+                        var sum = 0.0; for (i in 0 until read) sum += buffer[i] * buffer[i].toDouble()
+                        if (kotlin.math.sqrt(sum / read) > 800) { heardVoice = true; quiet = 0 } else if (heardVoice) quiet++
+                        recognizer.acceptWaveForm(buffer, read)
+                    }
+                    JSONObject(recognizer.finalResult).optString("text")
+                } finally { runCatching { record.stop() }; record.release(); recognizer.close() }
+            } catch (failure: Exception) { "" }
+            handler.post { if (token == attempt) finishCommand(text.takeIf { it.isNotBlank() }, if (text.isBlank()) "No escuché un comando después de «Ok MURMUR»." else null) }
+        }, "MurmurVoiceCommand").start()
     }
 
     private fun finishCommand(text: String?, error: String?) {
         if (!capturing) return
         capturing = false
+        attempt++
         command?.destroy(); command = null
         VoiceTriggerManager.restoreAudio()
         if (!text.isNullOrBlank()) NativeEvents.emit("onVoiceCommandCaptured", JSObject().put("text", text.take(1000)).put("source", "wake"))
