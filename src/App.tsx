@@ -419,6 +419,14 @@ export default function App() {
     return () => observer.disconnect();
   }, []);
   const seq = useRef(0);
+  // Which way the cover moves on a song change: forward (next) or back (previous).
+  const lastCoverIndex = useRef(-1);
+  const lastCoverDirection = useRef(1);
+  if (state.index !== lastCoverIndex.current) {
+    if (lastCoverIndex.current >= 0) lastCoverDirection.current = state.index > lastCoverIndex.current ? 1 : -1;
+    lastCoverIndex.current = state.index;
+  }
+  const coverDirection = lastCoverDirection.current;
   useHeaderScroll();
   const reduced = useReducedMotion();
   const modalRef = useRef<HTMLDivElement>(null);
@@ -2417,14 +2425,19 @@ export default function App() {
                   void guard(() => (distance < 0 ? player.next() : player.previous()));
                 }}
               >
-                <AmbientCover track={current} />
+                <AmbientCover track={current} direction={coverDirection} />
               </motion.div>
               <div className="now-title">
-                <div>
+                <motion.div
+                  key={current.queueId || current.id}
+                  initial={{ opacity: 0, y: reduced ? 0 : 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: reduced ? 0.1 : 0.32, ease: settle, delay: reduced ? 0 : 0.04 }}
+                >
                   <h1><MarqueeTitle text={current.title} /></h1>
                   <button className="text-button artist-link" onClick={()=>nav.push({view:"library",artist:current.artist.split(", ")[0]})}>{current.artist}</button>
                   {current.album&&<button className="text-button artist-link" onClick={()=>void guard(()=>openTrackAlbum(current))}>Ver álbum · {current.album}</button>}
-                </div>
+                </motion.div>
                 <button
                   className="icon-button"
                   aria-label="Guardar canción actual"
@@ -3067,21 +3080,33 @@ export default function App() {
   );
 }
 
-function AmbientCover({ track }: { track: QueueItem }) {
+/**
+ * Song change: the new cover comes in from the side you are moving to (right on Siguiente, left on
+ * Anterior) while the old one leaves the other way, so the gesture and the swipe read as one motion.
+ */
+function AmbientCover({ track, direction = 1 }: { track: QueueItem; direction?: number }) {
   const reduced = useReducedMotion();
+  const shift = reduced ? 0 : 44;
   return (
     <div className="ambient-cover">
-      <AnimatePresence initial={false} mode="sync">
+      <AnimatePresence initial={false} mode="sync" custom={direction}>
         <motion.div
           className="art-stage"
           key={track.queueId || track.id}
-          initial={{ opacity: 0, scale: reduced ? 1 : 1.035 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{
-            opacity: 0,
-            scale: reduced ? 1 : 0.985,
-            transition: { duration: (reduced ? motionMs.reduced : motionMs.swapOut) / 1000, ease: release },
+          custom={direction}
+          variants={{
+            enter: (dir: number) => ({ opacity: 0, x: dir * shift, scale: reduced ? 1 : 0.97 }),
+            center: { opacity: 1, x: 0, scale: 1 },
+            leave: (dir: number) => ({
+              opacity: 0,
+              x: -dir * shift * 0.7,
+              scale: reduced ? 1 : 0.97,
+              transition: { duration: (reduced ? motionMs.reduced : motionMs.swapOut) / 1000, ease: release },
+            }),
           }}
+          initial="enter"
+          animate="center"
+          exit="leave"
           transition={{ duration: (reduced ? motionMs.reduced : motionMs.swapIn) / 1000, ease: settle }}
         >
           <Cover track={track} large />
@@ -3119,6 +3144,10 @@ function QueueRow({
     <Reorder.Item
       value={track.queueId!}
       className="queue-item"
+      layout="position"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, x: -24, transition: { duration: 0.16 } }}
       onDragStart={() => {
         onDragStart();
         scrollOwner.current = document.querySelector(".expanded-player");
@@ -3201,6 +3230,7 @@ function PlaybackQueue({
           setIds(draft.current);
         }}
       >
+        <AnimatePresence initial={false}>
         {visible.map((id, index) => {
           const track = lookup.get(id);
           if (!track) return null;
@@ -3220,6 +3250,7 @@ function PlaybackQueue({
             },
           });
         })}
+        </AnimatePresence>
       </Reorder.Group>
       {ids.length > limit && (
         <button
