@@ -30,7 +30,7 @@ class AuthBridgePlugin : Plugin() {
     private var loginDialog: Dialog? = null
     private var loginView: WebView? = null
     private var loginCall: PluginCall? = null
-    private fun async(call: PluginCall, block: suspend () -> JSObject) { scope.launch { try { call.resolve(block()) } catch (e: ProviderFailure) { if(e.provider=="youtube")prefs.edit().putBoolean("youtube_verified",false).apply(); call.reject(e.message ?: "Acceso denegado", e.code, JSObject().put("status", e.status).put("provider", e.provider).put("operation", e.operation)) } catch (e: java.io.IOException) { call.reject("No se pudo contactar con el servicio. Revisa la conexión e intenta nuevamente.", "NETWORK_ERROR") } catch (e: Exception) { call.reject(e.message ?: "No se pudo conectar") } } }
+    private fun async(call: PluginCall, block: suspend () -> JSObject) { scope.launch { try { call.resolve(block()) } catch (e: ProviderFailure) { if(e.provider=="youtube"&&e.operation!="public_music")prefs.edit().putBoolean("youtube_verified",false).apply(); call.reject(e.message ?: "Acceso denegado", e.code, JSObject().put("status", e.status).put("provider", e.provider).put("operation", e.operation)) } catch (e: java.io.IOException) { call.reject("No se pudo contactar con el servicio. Revisa la conexión e intenta nuevamente.", "NETWORK_ERROR") } catch (e: Exception) { call.reject(e.message ?: "No se pudo conectar") } } }
     @PluginMethod fun status(call: PluginCall) { call.resolve(connectionStatus()) }
     private fun connectionStatus(): JSObject {
         val result=spotify.status().put("youtube", prefs.getBoolean("youtube_verified", false) && !prefs.getString("youtube_cookie", null).isNullOrBlank()).put("youtubeSession", !prefs.getString("youtube_cookie", null).isNullOrBlank()).put("youtubePublicAudio", true)
@@ -165,17 +165,80 @@ class AuthBridgePlugin : Plugin() {
     }
     private var youtubeReader: YouTubeLibraryReader? = null
     private fun youtube(): YouTubeLibraryReader = youtubeReader ?: YouTubeLibraryReader(prefs.getString("youtube_cookie",null) ?: error("Renueva la sesión de YouTube para importar canciones privadas"),runCatching{JSONObject(prefs.getString("youtube_config","{}")!!)}.getOrDefault(JSONObject())).also { youtubeReader=it }
+    private fun storedYouTube(): Pair<String, JSONObject> =
+        prefs.getString("youtube_cookie","").orEmpty() to
+            runCatching{JSONObject(prefs.getString("youtube_config","{}")!!)}.getOrDefault(JSONObject())
+
+    /** Tries the signed-in reader first and falls back to public readers, keeping the first real failure. */
+    private fun firstReadable(attempts: List<() -> JSONObject>): JSONObject {
+        var failure: Exception? = null
+        for (attempt in attempts) {
+            try {
+                val data = attempt()
+                if ((data.optJSONArray("tracks")?.length() ?: 1) > 0) return data
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                if (failure == null || failure !is ProviderFailure) failure = error
+            }
+        }
+        val reason = failure
+        if (reason is ProviderFailure && reason.code in setOf("RATE_LIMITED", "PROVIDER_UNAVAILABLE")) throw reason
+        if (reason is java.io.IOException) throw reason
+        throw IllegalStateException("YouTube no entregó esta colección ahora. Reintenta en unos segundos o abre otra.", reason)
+    }
+
     @PluginMethod fun youtubeCollection(call:PluginCall)=async(call){
         val id=call.getString("id")?:error("Falta colección")
         require(id.matches(Regex("[A-Za-z0-9_-]{2,120}"))){"Identificador inválido"}
+        val personalized=call.getBoolean("personalized", false)==true
         withContext(Dispatchers.IO){
-            val data=if(call.getBoolean("personalized", false)==true) youtube().collection(id)
-            else if(id.startsWith("MPREb"))YouTubeLibraryReader(prefs.getString("youtube_cookie","").orEmpty(),runCatching{JSONObject(prefs.getString("youtube_config","{}")!!)}.getOrDefault(JSONObject())).collection(id)
-            else try{YouTubeCollectionReader.read(id)}catch(failure:Exception){
-                try{YouTubeLibraryReader(prefs.getString("youtube_cookie","").orEmpty(),runCatching{JSONObject(prefs.getString("youtube_config","{}")!!)}.getOrDefault(JSONObject())).collection(id)}
-                catch(fallback:Exception){throw IllegalStateException("No se pudo leer esta colección. Revisa el enlace y conecta YouTube si es privada. "+fallback.message,fallback)}
+            val (cookie, config) = storedYouTube()
+            val attempts = buildList<() -> JSONObject> {
+                when {
+                    id.startsWith("RD") -> {
+                        if (cookie.isNotBlank()) add { YouTubeLibraryReader(cookie, config).mix(id) }
+                        add { YouTubeLibraryReader("").mix(id) }
+                        add { YouTubeCollectionReader.read(id) }
+                    }
+                    id.startsWith("MPREb") -> {
+                        if (cookie.isNotBlank()) add { YouTubeLibraryReader(cookie, config).collection(id) }
+                        add { YouTubeLibraryReader("").collection(id) }
+                    }
+                    else -> {
+                        if (personalized && cookie.isNotBlank()) add { youtube().collection(id) }
+                        add { YouTubeCollectionReader.read(id) }
+                        add { YouTubeLibraryReader("").collection(id) }
+                    }
+                }
             }
+            JSObject(firstReadable(attempts).toString())
+        }
+    }
+
+    @PluginMethod fun youtubeArtist(call:PluginCall)=async(call){
+        val id=call.getString("id")?.takeIf{it.matches(Regex("UC[A-Za-z0-9_-]{10,120}"))}
+        val name=call.getString("name")?.trim()?.take(120)?.takeIf{it.isNotBlank()}
+        require(id!=null||name!=null){"Falta el artista"}
+        withContext(Dispatchers.IO){
+            val (cookie, config) = storedYouTube()
+            val data = firstReadable(buildList<() -> JSONObject> {
+                if (cookie.isNotBlank()) add { YouTubeLibraryReader(cookie, config).artist(id, name) }
+                add { YouTubeLibraryReader("").artist(id, name) }
+            })
             JSObject(data.toString())
+        }
+    }
+
+    @PluginMethod fun youtubeLyrics(call:PluginCall)=async(call){
+        val video=call.getString("videoId")?.takeIf{it.matches(Regex("[A-Za-z0-9_-]{11}"))}
+        val query=call.getString("query")?.trim()?.take(200).orEmpty()
+        require(video!=null||query.isNotBlank()){"Falta la canción"}
+        withContext(Dispatchers.IO){
+            val reader=YouTubeLibraryReader("")
+            val target=video?:reader.songVideo(query)
+            val found=target?.let{reader.lyrics(it)}
+            if(found==null)JSObject().put("found",false)
+            else JSObject().put("found",true).put("text",found.text).put("source",found.source)
         }
     }
     @PluginMethod fun youtubeHome(call: PluginCall) = async(call) {

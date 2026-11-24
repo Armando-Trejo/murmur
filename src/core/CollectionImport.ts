@@ -24,20 +24,23 @@ export async function readCollectionLink(input:string, personalized=false){
  const link=parseCollectionLink(input);
  if(!isNative)throw Error("Importa enlaces desde MURMUR en Android.");
  let title:string,artworkUrl:string|undefined,items:QueueItem[];
+ let details:Pick<Playlist,"artist"|"year"|"subtitle">={};
  if(link.source==="spotify"){
   const base=`/${link.kind}s/${link.id}`;
   const {data}=await Auth.spotifyRequest({path:base});
   title=data.name;artworkUrl=data.images?.[0]?.url;
+  if(link.kind==="album")details={artist:data.artists?.map((a:{name?:string})=>a.name).filter(Boolean).join(", ")||undefined,year:typeof data.release_date==="string"?data.release_date.slice(0,4):undefined};
   if(typeof title!=="string"||!title.trim())throw Error("Spotify no entregó el nombre de esta colección.");
   const raw=await fetchSpotifyPages(base+(link.kind==="album"?"/tracks":"/items"));
   items=raw.map(value=>link.kind==="album"?{...value,album:{id:link.id,name:data.name,images:data.images}}:value).map(unwrapSpotifyTrack).filter((t):t is QueueItem=>!!t);
  }else{
   const result=await Auth.youtubeCollection({id:link.id,personalized});title=result.title;artworkUrl=result.artworkUrl;items=result.tracks;
+  details={artist:result.artist,year:result.year,subtitle:result.subtitle};
  }
  if(!Array.isArray(items))throw Error("El proveedor no entregó las canciones de la colección.");
  if(!items.length)throw Error("La colección está vacía o el proveedor no permitió leer sus canciones. No se reemplazó tu biblioteca.");
- if(link.kind==="album")items=items.map(t=>({...t,album:title,albumId:link.id}));
- const playlist:Playlist={id:link.source==="spotify"?(link.kind==="album"?"sp:album:":"")+link.id:"ytpl:"+(link.id.startsWith("MPREb")?link.id:"VL"+link.id),title,kind:link.kind==="album"?"album":"playlist",source:link.source,artworkUrl,trackIds:items.map(t=>t.id)};
+ if(link.kind==="album")items=items.map(t=>({...t,album:title,albumId:link.id,artworkUrl:t.artworkUrl||artworkUrl}));
+ const playlist:Playlist={id:link.source==="spotify"?(link.kind==="album"?"sp:album:":"")+link.id:"ytpl:"+(link.id.startsWith("MPREb")?link.id:"VL"+link.id),title,kind:link.kind==="album"?"album":"playlist",source:link.source,artworkUrl,trackIds:items.map(t=>t.id),...Object.fromEntries(Object.entries(details).filter(([,v])=>typeof v==="string"&&v))};
  return { playlist, items };
 }
 export async function saveCollection({playlist, items}: Awaited<ReturnType<typeof readCollectionLink>>){

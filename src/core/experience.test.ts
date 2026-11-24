@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { intentAxis, swipeAction } from "./gestures";
 import { validAccent, accentInk, readableAccent } from "./appearance";
 import { orderMusic, listeningStats } from "./musicOrder";
-import { artworkFor } from "./artwork";
+import { artworkFor, artworkOptions, isLetterboxed, sizedArtwork } from "./artwork";
 import type { QueueItem } from "./types";
 const item = (
   id: string,
@@ -71,7 +71,7 @@ it("uses qualifying listening rather than accidental taps for personal ordering"
 });
 it("recovers real YouTube thumbnails when an older local record has no artwork", () => {
   expect(artworkFor({ videoId: "abcdefghijk" })).toBe(
-    "https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg",
+    "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg",
   );
   expect(
     artworkFor({
@@ -80,6 +80,21 @@ it("recovers real YouTube thumbnails when an older local record has no artwork",
     }),
   ).toBe("https://image.example/cover.jpg");
   expect(artworkFor({ artworkUrl: "javascript:alert(1)" })).toBeUndefined();
+});
+it("asks the CDN for sharp covers and keeps fallbacks for broken ones", () => {
+  const music = "https://lh3.googleusercontent.com/abc=w120-h120-l90-rj";
+  expect(sizedArtwork(music, 1200)).toBe("https://lh3.googleusercontent.com/abc=w1200-h1200-l90-rj");
+  expect(sizedArtwork("https://yt3.ggpht.com/xyz=s88-c-k-c0x00ffffff-no-rj", 544))
+    .toBe("https://yt3.ggpht.com/xyz=w544-h544-l90-rj");
+  expect(sizedArtwork("https://i.scdn.co/image/ab67616d00001e02aaaa", 1200))
+    .toBe("https://i.scdn.co/image/ab67616d0000b273aaaa");
+  const options = artworkOptions({ artworkUrl: music, videoId: "abcdefghijk" }, true);
+  expect(options[0]).toContain("=w1200-h1200");
+  expect(options).toContain(music);
+  expect(options.at(-1)).toBe("https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg");
+  expect(isLetterboxed("https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg")).toBe(true);
+  expect(isLetterboxed("https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg")).toBe(false);
+  expect(isLetterboxed("https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg")).toBe(false);
 });
 
 it("keeps an arbitrary dark accent readable on AMOLED surfaces", () => {

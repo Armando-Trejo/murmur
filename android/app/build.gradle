@@ -9,9 +9,13 @@ android {
         applicationId "com.personal.murmur"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 19
-        versionName "2.6.0"
+        versionCode 20
+        versionName "2.7.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // Optional single-ABI build for direct phone downloads, e.g. -Pabi=arm64-v8a.
+        if (project.hasProperty('abi')) {
+            ndk { abiFilters project.property('abi').toString() }
+        }
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61

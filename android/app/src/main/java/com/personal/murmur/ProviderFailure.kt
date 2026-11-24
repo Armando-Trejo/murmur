@@ -14,6 +14,7 @@ object ProviderFailures {
             spotify && operation == "playback" && status == 404 -> "SPOTIFY_NO_DEVICE" to "No hay un dispositivo Spotify disponible. Abre la app oficial, reproduce una canción y vuelve a MURMUR."
             spotify && operation == "playlist" && status == 403 -> "SPOTIFY_PLAYLIST_NOT_ACCESSIBLE" to "Spotify no permite importar esta playlist. Comprueba que eres su propietario o colaborador; tus datos locales se conservan."
             spotify && status == 403 -> "SPOTIFY_PERMISSION_DENIED" to "Spotify no autorizó ${if (operation == "playback") "la reproducción" else "esta consulta"}. Reautoriza con OAuth y comprueba los permisos y usuarios permitidos de tu aplicación Spotify."
+            !spotify && operation == "public_music" && status in listOf(401, 403) -> "YOUTUBE_CONTENT_UNAVAILABLE" to "YouTube Music no entregó este contenido ahora. Reintenta en unos segundos o elige otro."
             !spotify && status in listOf(401, 403) -> "YOUTUBE_PRIVATE_ACCESS_DENIED" to "YouTube no autorizó la biblioteca privada. Renueva esa sesión; puedes seguir buscando y escuchando audio público sin conectarla."
             status >= 500 -> "PROVIDER_UNAVAILABLE" to "El servicio no está disponible temporalmente. Intenta nuevamente."
             else -> "PROVIDER_REQUEST_FAILED" to "${if (spotify) "Spotify" else "YouTube"} respondió HTTP $status durante $operation. Intenta nuevamente."

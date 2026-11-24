@@ -9,16 +9,28 @@ import okhttp3.MediaType.Companion.toMediaType
 import java.security.MessageDigest
 
 class YouTubeLibraryReader(private val cookie: String,private val config:JSONObject=JSONObject()) {
+    companion object {
+        /** Used only for anonymous public requests when the page does not expose its client version. */
+        const val PUBLIC_CLIENT_VERSION = "1.20241118.01.00"
+    }
     private var version: String? = config.optString("clientVersion").takeIf(YouTubeSessionConfiguration::validVersion)
+    private val signedIn get() = cookie.split(';').any {
+        val name = it.trim().substringBefore('=')
+        name == "SAPISID" || name == "__Secure-3PAPISID"
+    }
     private fun clientVersion(): String {
         version?.let { return it }
-        val html=NativeNetwork.client.newCall(Request.Builder().url("https://music.youtube.com/").header("Cookie",cookie).build()).execute().use { response -> if(!response.isSuccessful)throw ProviderFailures.response(response.code,"youtube","private_library"); response.body?.string().orEmpty() }
+        val html=runCatching {
+            NativeNetwork.client.newCall(Request.Builder().url("https://music.youtube.com/").header("User-Agent",NativeNetwork.USER_AGENT).apply { if(cookie.isNotBlank())header("Cookie",cookie) }.build()).execute().use { response -> if(!response.isSuccessful)throw ProviderFailures.response(response.code,"youtube","private_library"); response.body?.string().orEmpty() }
+        }.getOrElse { if (signedIn) throw it else "" }
         val found=YouTubeSessionConfiguration.fromHtml(html)
-            ?: error("Renueva la sesión de YouTube, espera a volver a YouTube Music y pulsa Guardar conexión para capturar su configuración.")
+            ?: if (!signedIn) PUBLIC_CLIENT_VERSION
+            else error("Renueva la sesión de YouTube, espera a volver a YouTube Music y pulsa Guardar conexión para capturar su configuración.")
         version=found;return found
     }
     private fun request(browseId: String? = null, continuation: String? = null,
-                        home: Boolean = false, accountMenu: Boolean = false): JSONObject {
+                        home: Boolean = false, accountMenu: Boolean = false,
+                        watch: JSONObject? = null, search: String? = null): JSONObject {
         val pairs=cookie.split(';').map { it.trim() }
         val sapisid=(pairs.firstOrNull { it.startsWith("SAPISID=") } ?: pairs.firstOrNull { it.startsWith("__Secure-3PAPISID=") })?.substringAfter('=')
         val now=System.currentTimeMillis()/1000
@@ -27,24 +39,27 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
         val body=JSONObject().put("context",JSONObject().put("client",JSONObject().put("clientName","WEB_REMIX").put("clientVersion",client).put("hl","es")))
         config.optString("visitorData").takeIf{it.isNotBlank()}?.let{body.getJSONObject("context").getJSONObject("client").put("visitorData",it)}
         config.optString("pageId").takeIf{it.isNotBlank()}?.let{body.getJSONObject("context").put("user",JSONObject().put("onBehalfOfUser",it))}
-        if (home && !accountMenu) body.put("browseId", "FEmusic_home")
+        if (watch != null) watch.keys().forEach { body.put(it, watch.get(it)) }
+        else if (search != null) body.put("query", search)
+        else if (home && !accountMenu) body.put("browseId", "FEmusic_home")
         else if (continuation != null) body.put("continuation", continuation)
         else if (browseId != null) body.put("browseId", browseId)
-        val endpoint = if (accountMenu) "account/account_menu" else "browse"
+        val endpoint = when { accountMenu -> "account/account_menu"; watch != null -> "next"; search != null -> "search"; else -> "browse" }
+        val operation = if (watch != null || search != null || !signedIn) "public_music" else "private_library"
         val url = "https://music.youtube.com/youtubei/v1/$endpoint".toHttpUrl().newBuilder()
             .addQueryParameter("prettyPrint", "false").apply {
-                if (home && continuation != null) {
+                if ((home || watch != null) && continuation != null) {
                     addQueryParameter("ctoken", continuation)
                     addQueryParameter("continuation", continuation)
                     addQueryParameter("type", "next")
                 }
             }.build()
-        val builder=Request.Builder().url(url).header("Cookie",cookie).header("User-Agent",NativeNetwork.USER_AGENT).header("Origin","https://music.youtube.com").header("X-Origin","https://music.youtube.com").header("X-Youtube-Client-Name","67").header("X-Youtube-Client-Version",client).header("X-Goog-AuthUser",config.optString("sessionIndex","0"))
+        val builder=Request.Builder().url(url).apply { if(cookie.isNotBlank())header("Cookie",cookie) }.header("User-Agent",NativeNetwork.USER_AGENT).header("Origin","https://music.youtube.com").header("X-Origin","https://music.youtube.com").header("X-Youtube-Client-Name","67").header("X-Youtube-Client-Version",client).header("X-Goog-AuthUser",config.optString("sessionIndex","0"))
         if(sapisid!=null)builder.header("Authorization","SAPISIDHASH ${now}_$hash")
         config.optString("visitorData").takeIf{it.isNotBlank()}?.let{builder.header("X-Goog-Visitor-Id",it)}
         config.optString("pageId").takeIf{it.isNotBlank()}?.let{builder.header("X-Goog-PageId",it)}
-        val data=NativeNetwork.client.newCall(builder.post(body.toString().toRequestBody("application/json".toMediaType())).build()).execute().use { response -> if(!response.isSuccessful)throw ProviderFailures.response(response.code,"youtube","private_library");JSONObject(response.body?.string() ?: "{}") }
-        if(data.has("error") || (!accountMenu && !data.has("contents")&&!data.has("continuationContents")&&!data.has("onResponseReceivedActions")))throw ProviderFailures.response(403,"youtube","private_library")
+        val data=NativeNetwork.client.newCall(builder.post(body.toString().toRequestBody("application/json".toMediaType())).build()).execute().use { response -> if(!response.isSuccessful)throw ProviderFailures.response(response.code,"youtube",operation);JSONObject(response.body?.string() ?: "{}") }
+        if(data.has("error") || (!accountMenu && !data.has("contents")&&!data.has("continuationContents")&&!data.has("onResponseReceivedActions")))throw ProviderFailures.response(403,"youtube",operation)
         return data
     }
     fun home(): JSONArray {
@@ -88,13 +103,60 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
     }
     fun collection(id:String):JSONObject {
         val browse=if(id.startsWith("MPREb"))id else "VL$id"
-        val data=request(browse)
-        fun title(value:Any?):String?{
-            when(value){is JSONObject->{for(key in listOf("musicDetailHeaderRenderer","musicResponsiveHeaderRenderer")){value.optJSONObject(key)?.optJSONObject("title")?.let{t->val runs=t.optJSONArray("runs");val text=t.optString("simpleText").ifBlank{runs?.let{(0 until it.length()).joinToString(""){i->it.optJSONObject(i)?.optString("text").orEmpty()}}.orEmpty()};if(text.isNotBlank())return text}};for(key in value.keys())title(value.opt(key))?.let{return it}}
-            is JSONArray->for(i in 0 until value.length())title(value.opt(i))?.let{return it}}
-            return null
+        val header=YouTubeMusicPages.header(request(browse))
+        val tracks=tracks("ytpl:$browse")
+        val artwork=header.optString("artworkUrl")
+        val artist=header.optString("artist")
+        // Album rows carry neither cover nor artist: inherit them from the album header.
+        for(i in 0 until tracks.length()){
+            val track=tracks.getJSONObject(i)
+            if(track.optString("artworkUrl").isBlank()&&artwork.isNotBlank())track.put("artworkUrl",artwork)
+            if(artist.isNotBlank()&&track.optString("artist")=="Artista no identificado")track.put("artist",artist)
         }
-        return JSONObject().put("title",title(data)?:"Colección de YouTube").put("tracks",tracks("ytpl:$browse"))
+        val result=JSONObject().put("title",header.optString("title").ifBlank{"Colección de YouTube"}).put("tracks",tracks)
+        for(key in listOf("artworkUrl","artist","year","subtitle"))header.optString(key).takeIf{it.isNotBlank()}?.let{result.put(key,it)}
+        return result
+    }
+
+    /** Mixes and radios live in the watch queue, not in a browsable playlist. */
+    fun mix(id:String, videoId:String?=null):JSONObject {
+        require(id.matches(Regex("RD[A-Za-z0-9_-]{2,120}"))){"Mix de YouTube inválido"}
+        val watch=JSONObject().put("playlistId",id).put("enablePersistentPlaylistPanel",true)
+            .put("isAudioOnly",true).put("tunerSettingValue","AUTOMIX_SETTING_NORMAL")
+        videoId?.takeIf{it.matches(Regex("[A-Za-z0-9_-]{11}"))}?.let{watch.put("videoId",it)}
+        val result=JSONArray();val ids=mutableSetOf<String>();val tokens=mutableSetOf<String>()
+        var title:String?=null;var token:String?=null
+        for(page in 0 until 4){
+            val data=YouTubeMusicPages.watchPlaylist(request(continuation=token,watch=watch))
+            if(title==null)title=data.title
+            for(i in 0 until data.tracks.length()){val track=data.tracks.getJSONObject(i);if(ids.add(track.getString("id")))result.put(track)}
+            token=data.continuation?.takeIf(tokens::add)?:break
+            if(result.length()>=100)break
+        }
+        check(result.length()>0){"YouTube no entregó canciones para este mix."}
+        return JSONObject().put("title",title?:"Mix de YouTube").put("tracks",result)
+            .put("artworkUrl",result.getJSONObject(0).optString("artworkUrl"))
+    }
+
+    /** Lyrics as YouTube Music shows them (plain text and its licensed source). */
+    fun lyrics(videoId:String):YouTubeMusicPages.Lyrics? {
+        require(videoId.matches(Regex("[A-Za-z0-9_-]{11}"))){"Video inválido"}
+        val watch=JSONObject().put("videoId",videoId).put("enablePersistentPlaylistPanel",true).put("isAudioOnly",true)
+        val browse=YouTubeMusicPages.lyricsBrowseId(request(watch=watch))?:return null
+        return YouTubeMusicPages.lyrics(request(browse))
+    }
+
+    /** Best song match on YouTube Music, used to find lyrics for tracks without a video. */
+    fun songVideo(query:String):String? {
+        val page=YouTubeMusicPages.find(request(search=query.take(200)),setOf("musicShelfRenderer","musicCardShelfRenderer"))?:return null
+        return YouTubeMusicPages.find(page,setOf("playlistItemData","watchEndpoint"))?.optString("videoId")?.takeIf{it.matches(Regex("[A-Za-z0-9_-]{11}"))}
+    }
+
+    fun artist(id:String?, name:String?):JSONObject {
+        val channel=id?.takeIf{it.matches(Regex("UC[A-Za-z0-9_-]{10,120}"))}
+            ?: name?.trim()?.takeIf{it.isNotBlank()}?.let{YouTubeMusicPages.artistChannel(request(search=it.take(120)),it)}
+            ?: throw IllegalStateException("YouTube Music no encontró a este artista.")
+        return YouTubeMusicPages.artist(request(channel),channel)
     }
     fun tracks(id: String): JSONArray {
         val browse=id.removePrefix("ytpl:")

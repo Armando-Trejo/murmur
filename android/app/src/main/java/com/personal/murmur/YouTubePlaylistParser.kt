@@ -16,7 +16,7 @@ object YouTubePlaylistParser {
             ?.optJSONObject("thumbnail")?.optJSONArray("thumbnails") ?: return ""
         return (0 until images.length()).mapNotNull(images::optJSONObject)
             .maxByOrNull { it.optInt("width") * it.optInt("height").coerceAtLeast(1) }
-            ?.optString("url").orEmpty()
+            ?.optString("url").orEmpty().let { YouTubeArtwork.hd(it) }
     }
 
     fun hasSignedInAccount(data: JSONObject): Boolean =

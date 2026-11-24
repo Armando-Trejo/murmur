@@ -20,6 +20,7 @@ import androidx.core.view.WindowInsetsCompat
 import kotlinx.coroutines.*
 import java.io.ByteArrayOutputStream
 import java.util.Date
+import java.util.Locale
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -33,7 +34,7 @@ class MusicVisualActivity : Activity() {
     private lateinit var controlsPanel: View
     private lateinit var title: TextView
     private lateinit var artist: TextView
-    private lateinit var clock: TextView
+    private lateinit var clock: DotClockView
     private lateinit var date: TextView
     private lateinit var elapsed: TextView
     private lateinit var total: TextView
@@ -61,8 +62,11 @@ class MusicVisualActivity : Activity() {
             artist.visibility = if (artist.text.isEmpty()) View.GONE else View.VISIBLE
 
             val now = Date()
-            clock.updateText(android.text.format.DateFormat.getTimeFormat(this@MusicVisualActivity).format(now))
-            date.updateText(android.text.format.DateFormat.format("EEE, d MMM", now).toString())
+            val hours24 = android.text.format.DateFormat.is24HourFormat(this@MusicVisualActivity)
+            clock.setTime(android.text.format.DateFormat.format(if (hours24) "H:mm" else "h:mm", now).toString(),
+                if (hours24) "" else android.text.format.DateFormat.format("a", now).toString().uppercase(Locale.getDefault()),
+                android.text.format.DateFormat.getTimeFormat(this@MusicVisualActivity).format(now))
+            date.updateText(android.text.format.DateFormat.format("EEE, d MMM", now).toString().replace(".", ""))
             val state = if (service.spotifyActive) service.integratedState() else null
             val position = (state?.optLong("progress_ms") ?: service.youtubePositionMs).coerceAtLeast(0L)
             val reportedDuration = if (service.spotifyActive) {
@@ -104,7 +108,7 @@ class MusicVisualActivity : Activity() {
             View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
 
         val wide = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val root = FrameLayout(this).apply { setBackgroundColor(0xFF05060B.toInt()) }
+        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
             view.setPadding(cutout.left, cutout.top, cutout.right, cutout.bottom)
@@ -121,6 +125,17 @@ class MusicVisualActivity : Activity() {
             if (wide) Gravity.END or Gravity.CENTER_VERTICAL else Gravity.BOTTOM)
         root.addView(header, headerParams)
         root.addView(panel, panelParams)
+        val brand = TextView(this).apply {
+            setText(R.string.app_name)
+            textSize = 10.5f
+            letterSpacing = .42f
+            setTextColor(0x9EE6DAFF.toInt())
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        root.addView(brand, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
+            setMargins(dp(22), dp(29), 0, 0)
+        })
 
         val close = TransportButton(Control.Close, "Volver a MURMUR") { finish() }
         val closeParams = FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.END).apply {
@@ -140,37 +155,41 @@ class MusicVisualActivity : Activity() {
     private fun createHeader(wide: Boolean): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
-        setPadding(dp(18), dp(if (wide) 12 else 20), dp(18), dp(4))
-        date = label(if (wide) 11f else 13f, secondary).apply {
+        setPadding(dp(18), dp(if (wide) 14 else 28), dp(18), dp(4))
+        date = label(if (wide) 10.5f else 11.5f, secondary, "sans-serif-condensed", Typeface.BOLD).apply {
             gravity = Gravity.CENTER
             maxLines = 1
+            isAllCaps = true
+            letterSpacing = .3f
         }
         addView(date)
-        clock = label(if (wide) 37f else 53f, Color.WHITE, "sans-serif-light").apply {
-            gravity = Gravity.CENTER
-            letterSpacing = -.045f
-            includeFontPadding = false
-            maxLines = 1
+        // Dot-matrix clock: LED dots that swell with the bass and catch a light sweep on beats.
+        clock = DotClockView(this@MusicVisualActivity, art, DotMatrixText.FACE_ROWS, if (wide) 4.7f else 6.3f).apply {
+            setPadding(0, dp(if (wide) 8 else 14), 0, dp(2))
         }
-        addView(clock)
+        art.follower = clock
+        addView(clock, LinearLayout.LayoutParams(-1, -2))
     }
 
     private fun createControls(wide: Boolean): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(if (wide) 18 else 26), dp(9), dp(if (wide) 18 else 26), dp(if (wide) 7 else 26))
-        title = label(if (wide) 24f else 29f, 0xFFF7F3FD.toInt(), "sans-serif-medium").apply {
+        title = label(if (wide) 25f else 31f, 0xFFF7F3FD.toInt(), "sans-serif-condensed", Typeface.BOLD).apply {
             setSingleLine(true)
             ellipsize = TextUtils.TruncateAt.MARQUEE
             marqueeRepeatLimit = -1
             isSelected = true
-            letterSpacing = -.024f
+            letterSpacing = -.012f
+            includeFontPadding = false
         }
         addView(title, LinearLayout.LayoutParams(-1, -2))
-        artist = label(15f, secondary).apply {
+        artist = label(12f, 0xD9E6DAFF.toInt(), "sans-serif-medium").apply {
             setSingleLine(true)
             ellipsize = TextUtils.TruncateAt.END
+            isAllCaps = true
+            letterSpacing = .2f
         }
-        addView(artist, LinearLayout.LayoutParams(-1, -2))
+        addView(artist, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
         timeline = SeekBar(this@MusicVisualActivity).apply {
             contentDescription = "Posición de reproducción"
             max = 1000
@@ -194,8 +213,15 @@ class MusicVisualActivity : Activity() {
         }
         addView(timeline, LinearLayout.LayoutParams(-1, dp(48)))
         val times = LinearLayout(this@MusicVisualActivity)
-        elapsed = label(12f, accent)
-        total = label(12f, secondary).apply { gravity = Gravity.END }
+        elapsed = label(12.5f, accent, "sans-serif-condensed", Typeface.BOLD).apply {
+            fontFeatureSettings = "tnum"
+            letterSpacing = .08f
+        }
+        total = label(12.5f, secondary, "sans-serif-condensed", Typeface.BOLD).apply {
+            gravity = Gravity.END
+            fontFeatureSettings = "tnum"
+            letterSpacing = .08f
+        }
         times.addView(elapsed, LinearLayout.LayoutParams(0, -2, 1f))
         times.addView(total, LinearLayout.LayoutParams(0, -2, 1f))
         addView(times, LinearLayout.LayoutParams(-1, -2))
@@ -211,10 +237,10 @@ class MusicVisualActivity : Activity() {
         addView(controls, LinearLayout.LayoutParams(-1, dp(90)))
     }
 
-    private fun label(size: Float, color: Int, family: String = "sans-serif") = TextView(this).apply {
+    private fun label(size: Float, color: Int, family: String = "sans-serif", style: Int = Typeface.NORMAL) = TextView(this).apply {
         textSize = size
         setTextColor(color)
-        typeface = Typeface.create(family, Typeface.NORMAL)
+        typeface = Typeface.create(family, style)
     }
     private fun TextView.updateText(value: String) {
         if (text.toString() != value) text = value

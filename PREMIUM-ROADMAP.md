@@ -2,6 +2,22 @@
 
 Propuesta para llevar MURMUR al nivel de una app de música premium sin perder su identidad: negro AMOLED, acento configurable, carátulas a color, biblioteca local y privacidad. Cada bloque indica impacto para el usuario, esfuerzo, riesgo técnico y si necesita un teléfono para validarse.
 
+## Entregado en 2.7.0
+
+Respuesta a la prueba del usuario en su teléfono con 2.6.0.
+
+| Mejora | Dónde | Estado |
+| --- | --- | --- |
+| Mixes y radios de YouTube leídos desde la cola `next` (con sesión y en público) | Inicio → mix, enlaces `RD…` | Pruebas del parser. Falta abrir mixes reales en el teléfono. |
+| Carátulas HD por tamaño, sin franjas 4:3 y con reintentos | Toda la app y la notificación | Pruebas unitarias y vista previa. |
+| Cola FIFO para lo que añade el usuario y «Añadir todo a la cola» | Filas, hoja de acciones, colecciones | Prueba del orquestador. |
+| Paso sin corte: arranque 240 ms antes del final, silencio final y realce sólo en directos | `HybridMediaService` | Compila y pasa las pruebas del servicio. Falta escucharlo. |
+| Letras: LRCLIB flexible y YouTube Music como respaldo | Reproductor → Letras | Pruebas con respuestas simuladas. |
+| Perfil de artista y cabecera de álbum/playlist | Biblioteca, reproductor, Inicio | Vista previa con datos de demostración. |
+| Bienvenida, menús ⋮, ajustes plegados, flecha de volver contextual | Inicio, Biblioteca, Buscar, Conexiones | Vista previa a 375 px. |
+| Gestos: revelar «A la cola», portada deslizable, hoja arrastrable, onda de tinta | Toda la app | Vista previa; falta sentirlo en el teléfono. |
+| Pantalla musical nueva con análisis de espectro y pulsos | `MusicVisualActivity` | Pruebas del analizador. Falta medir fluidez en el teléfono. |
+
 ## Entregado en 2.6.0
 
 | Mejora | Dónde | Estado |
@@ -33,7 +49,7 @@ Propuesta para llevar MURMUR al nivel de una app de música premium sin perder s
 
 ## Orden recomendado
 
-1. Validar 2.6 en el teléfono con la matriz de [CONTINUAR-MURMUR.md](CONTINUAR-MURMUR.md) y usar el diagnóstico para obtener los primeros p50/p95 reales.
+1. Validar 2.7 en el teléfono con la matriz de [CONTINUAR-MURMUR.md](CONTINUAR-MURMUR.md) (mixes, paso entre canciones, letras y visualizador primero) y usar el diagnóstico para obtener los primeros p50/p95 reales.
 2. Radio sin fin y primera ejecución guiada, porque no dependen del hardware y mejoran la retención.
 3. Ecualizador, widget y descargas inteligentes, con pruebas en el teléfono del usuario.
 4. Build de lanzamiento con plan de firma, y después Android Auto.

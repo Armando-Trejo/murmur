@@ -20,6 +20,7 @@ import {
   Reorder,
   useReducedMotion,
   useDragControls,
+  type MotionStyle,
 } from "framer-motion";
 import {
   Home,
@@ -96,7 +97,11 @@ import {
   AppearanceSettings,
   useAppearance,
 } from "./components/AppearanceSettings";
-import { artworkFor, artworkOptions } from "./core/artwork";
+import { artworkFor } from "./core/artwork";
+import { Cover } from "./components/Cover";
+import { ArtistProfile } from "./components/ArtistProfile";
+import { OverflowMenu, type MenuEntry } from "./components/OverflowMenu";
+import { ListPlus, Sparkles, Link as LinkIcon, ArrowDownUp } from "lucide-react";
 import { orderMusic, listeningStats, type MusicOrder } from "./core/musicOrder";
 import { PlayerBackdrop, useArtworkTone } from "./components/PlayerBackdrop";
 import { SyncedLyrics } from "./components/SyncedLyrics";
@@ -155,50 +160,22 @@ const time = (n: number) =>
   !Number.isFinite(n) || n < 0
     ? "—:—"
     : `${Math.floor(n / 60)}:${String(Math.floor(n % 60)).padStart(2, "0")}`;
-function Cover({
-  track,
-  kind = 0,
-  className = "",
-  large = false,
-}: {
-  large?: boolean;
-  track?: QueueItem | Playlist;
-  kind?: number;
-  className?: string;
-}) {
-  const candidates = artworkOptions(track, large);
-  const key = candidates.join("\n");
-  const [fallback, setFallback] = useState({ key: "", index: 0 });
-  const index = fallback.key === key ? fallback.index : 0;
-  const artwork = candidates[index];
-  const nextArtwork = () => setFallback({ key, index: index + 1 });
-  return artwork ? (
-    <img
-      className={"cover " + className}
-      src={artwork}
-      alt=""
-      loading="lazy"
-      decoding="async"
-      onError={nextArtwork}
-      onLoad={event => {
-        if (large && index < 2 && artwork.includes("i.ytimg.com/vi/") &&
-            event.currentTarget.naturalWidth < 480) nextArtwork();
-      }}
-    />
-  ) : (
-    <div
-      className={`cover art art-${kind % 4} ${className}`}
-      aria-hidden="true"
-    >
-      <div className="vinyl">
-        <i />
-        <i />
-        <i />
-        <b />
-      </div>
-      <AudioLines size={22} className="art-mark" />
-    </div>
-  );
+/** Most frequent main artist of a collection, for album headers that lack one. */
+function mainArtist(items: QueueItem[]) {
+  const votes = new Map<string, number>();
+  for (const item of items) {
+    const name = item.artist.split(/\s*(?:,|&)\s*/)[0]?.trim();
+    if (name && !/^artista (?:por identificar|no identificad[oa])$/i.test(name))
+      votes.set(name, (votes.get(name) ?? 0) + 1);
+  }
+  return [...votes].sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+function totalLength(items: QueueItem[]) {
+  const seconds = items.reduce((sum, item) => sum + (item.duration > 0 ? item.duration : 0), 0);
+  if (seconds < 60) return "";
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.round((seconds % 3600) / 60);
+  return hours ? `${hours} h ${minutes} min` : `${minutes} min`;
 }
 function Badge({ source }: { source: string }) {
   return (
@@ -312,6 +289,8 @@ export default function App() {
   const [sleep, setSleep] = useState<SleepState>({ mode: "off" });
   const [haptics, setHaptics] = useState(hapticsEnabled);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [importOpen, setImportOpen] = useState(false);
+  const sheetDrag = useDragControls();
   const allTracks = useLiveQuery(() => db.tracks.toArray(), [], []);
   const weekSeconds = useLiveQuery(async () => {
     const since = new Date();
@@ -453,6 +432,25 @@ export default function App() {
     );
     return () => animation.cancel();
   }, [tab, nav.route.playlistId, nav.route.artist, nav.route.directory, reduced]);
+  useEffect(() => {
+    // Ink ripple from the touch point on list rows and menu items.
+    const ripple = (event: PointerEvent) => {
+      if (reduced || !event.isPrimary) return;
+      const target = (event.target as HTMLElement).closest<HTMLElement>(
+        ".song-main,.playlist-row,.sheet-action,.overflow-item,.quick-item,.recent-query,.library-links button,.directory-song,.queue-track,.setting-button",
+      );
+      if (!target) return;
+      const rect = target.getBoundingClientRect();
+      target.style.setProperty("--rx", event.clientX - rect.left + "px");
+      target.style.setProperty("--ry", event.clientY - rect.top + "px");
+      target.classList.remove("tap-ripple");
+      void target.offsetWidth;
+      target.classList.add("tap-ripple");
+      window.setTimeout(() => target.classList.remove("tap-ripple"), 600);
+    };
+    document.addEventListener("pointerdown", ripple, { passive: true });
+    return () => document.removeEventListener("pointerdown", ripple);
+  }, [reduced]);
   const notify = (message: string, kind: NoticeKind = "info") => {
     setToastKind(kind);
     setToast(message);
@@ -903,15 +901,17 @@ export default function App() {
     index: number,
     collection: QueueItem[],
     onChoose?: () => void,
+    numbered = false,
   ) => (
     <SwipeSurface
-      className="song-row"
+      className={"song-row" + (current?.id === track.id ? " is-current" : "")}
       key={track.queueId ?? JSON.stringify([track.id, index])}
       positive
+      reveal={<><ListPlus size={20} /><span>A la cola</span></>}
       onSwipe={() => {
-        player.enqueue(track, true);
+        player.enqueue(track);
         haptic("confirm");
-        notify("Añadida a continuación");
+        notify("Añadida a la cola");
       }}
     >
       <button
@@ -921,7 +921,11 @@ export default function App() {
           void player.playList(collection, index);
         }}
       >
-        <Cover track={track} kind={index} />
+        {numbered ? (
+          <span className="track-number" aria-hidden="true">{index + 1}</span>
+        ) : (
+          <Cover track={track} kind={index} />
+        )}
         <span className="song-copy">
           <strong className={current?.id === track.id ? "highlight" : ""}>
             <MarqueeTitle text={track.title} />
@@ -973,6 +977,70 @@ export default function App() {
         ? t.source === "spotify"
         : true,
   );
+  const detailView = !!(nav.route.playlistId || nav.route.artist || nav.route.directory);
+  const todayLabel = new Intl.DateTimeFormat("es", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
+  const welcomeTrack = current || recent[0] || tracks[0];
+  const welcomeTone = useArtworkTone(artworkFor(welcomeTrack));
+  const hasDownloads = tracks.some((t) => t.offlinePath);
+  const isAlbum = activePlaylist?.kind === "album" || !!feedId?.startsWith("MPREb");
+  const collectionArt = activePlaylist
+    ? artworkFor(activePlaylist) || artworkFor(displayedPlaylistItems[0])
+    : undefined;
+  const collectionTone = useArtworkTone(collectionArt);
+  const collectionArtist = activePlaylist?.artist || (isAlbum ? mainArtist(displayedPlaylistItems) : undefined);
+  const collectionLength = totalLength(displayedPlaylistItems);
+  const shufflePlay = async (items: QueueItem[]) => {
+    if (!items.length) return;
+    haptic();
+    const order = [...items];
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    await player.playList(order);
+    player.update({ shuffled: true });
+  };
+  const searchMenu: MenuEntry[] = [
+    { heading: "Ordenar" },
+    ...([["relevance", "Relevancia"], ["popular", "Populares"], ["listening", "Más escuchadas por mí"]] as const)
+      .map(([value, label]) => ({ label, checked: searchOrder === value, onSelect: () => setSearchOrder(value) })),
+    ...(isNative
+      ? (["divider", { heading: "Buscar con tu sesión" },
+          { label: "Abrir en mi YouTube", icon: <ArrowUpRight size={18} />,
+            onSelect: () => void guard(() => Audio.openProviderSearch({ provider: "youtube", query })) },
+          { label: "Abrir en Spotify", icon: <ArrowUpRight size={18} />,
+            onSelect: () => void guard(() => Audio.openProviderSearch({ provider: "spotify", query })) }] as MenuEntry[])
+      : []),
+  ];
+  const libraryMenu: MenuEntry[] = [
+    { label: "Crear playlist híbrida", icon: <Plus size={18} />, onSelect: () => setNewPlaylist(true) },
+    { label: "Importar desde un enlace", icon: <LinkIcon size={18} />, hint: "Playlists, mixes y álbumes", onSelect: () => setImportOpen(true) },
+    "divider",
+    { heading: "Ordenar canciones" },
+    { label: "Más escuchadas por mí", checked: libraryOrder === "listening", onSelect: () => setLibraryOrder("listening") },
+    { label: "Título · A–Z", checked: libraryOrder === "title", onSelect: () => setLibraryOrder("title") },
+  ];
+  const setCollectionKind = (kind: "playlist" | "album") => {
+    if (!activePlaylist) return;
+    void db.playlists.update(activePlaylist.id, { kind })
+      .then(() => notify("Etiqueta de colección actualizada", "success"))
+      .catch(() => notify("No se pudo cambiar la etiqueta", "error"));
+  };
+  const collectionMenu: MenuEntry[] = activePlaylist
+    ? [
+        { label: "Añadir todo a la cola", icon: <ListPlus size={18} />, disabled: !displayedPlaylistItems.length,
+          onSelect: () => {
+            player.enqueue(displayedPlaylistItems);
+            haptic("confirm");
+            notify(`${displayedPlaylistItems.length} canciones añadidas a la cola`);
+          } },
+        ...(!feedLink
+          ? (["divider", { heading: "Mostrar como" },
+              { label: "Playlist", checked: activePlaylist.kind !== "album", onSelect: () => setCollectionKind("playlist") },
+              { label: "Álbum", checked: activePlaylist.kind === "album", onSelect: () => setCollectionKind("album") }] as MenuEntry[])
+          : []),
+      ]
+    : [];
   const homeMixKinds: ("daily" | "bridge" | "radar")[] =
     filter === "Solo YouTube"
       ? ["bridge"]
@@ -1012,6 +1080,26 @@ export default function App() {
       </aside>
       <main className="main-content">
         <header className="topbar">
+          <AnimatePresence initial={false}>
+            {detailView && (
+              <motion.button
+                key="back"
+                className="icon-button topbar-back"
+                aria-label="Volver"
+                initial={{ opacity: 0, x: reduced ? 0 : -10, scale: reduced ? 1 : 0.8 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={{ opacity: 0, x: reduced ? 0 : -8, transition: { duration: 0.12 } }}
+                transition={{ duration: reduced ? 0.1 : 0.24, ease: settle }}
+                whileTap={{ scale: 0.88 }}
+                onClick={() => {
+                  haptic();
+                  if (!nav.back()) nav.push({ view: tab });
+                }}
+              >
+                <ChevronLeft size={24} />
+              </motion.button>
+            )}
+          </AnimatePresence>
           <button
             className="wordmark"
             aria-label="MURMUR · Ir a Inicio"
@@ -1045,46 +1133,64 @@ export default function App() {
             </button>
           </div>
         )}
-        {(nav.canBack || nav.canForward) && (
-          <nav className="history-controls" aria-label="Navegación de vistas">
-            <button disabled={!nav.canBack} onClick={() => nav.back()}>
-              <ChevronLeft size={19} />
-              <span>Atrás</span>
-            </button>
-            <button disabled={!nav.canForward} onClick={() => nav.forward()}>
-              <span>Adelante</span>
-              <ChevronRight size={19} />
-            </button>
-          </nav>
-        )}
         <div className="view-content" ref={viewRef}>
         {tab === "home" && (
           <div className="home-shortcuts">
-            <div className="home-greeting">
-              <h1>{greeting(new Date().getHours())}</h1>
-              {weekSeconds > 0 && (
-                <p>Esta semana llevas {formatListening(weekSeconds)} de música.</p>
+            <motion.section
+              className={"welcome-hero" + (welcomeTone ? " toned" : "")}
+              style={welcomeTone ? ({ "--tone": welcomeTone } as MotionStyle) : undefined}
+              aria-label="Bienvenida"
+              initial={{ opacity: 0, y: reduced ? 0 : 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: reduced ? 0.1 : 0.5, ease: settle }}
+            >
+              <div className="welcome-aurora" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </div>
+              <div className="welcome-grain" aria-hidden="true" />
+              <div className="welcome-copy">
+                <motion.span className="eyebrow" initial={{ opacity: 0, y: reduced ? 0 : 6 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, ease: settle, delay: reduced ? 0 : 0.05 }}>
+                  {todayLabel}
+                </motion.span>
+                <motion.h1 initial={{ opacity: 0, y: reduced ? 0 : 10 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, ease: settle, delay: reduced ? 0 : 0.1 }}>
+                  {greeting(new Date().getHours())}
+                </motion.h1>
+                <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                  transition={{ duration: 0.5, ease: settle, delay: reduced ? 0 : 0.18 }}>
+                  {weekSeconds > 0
+                    ? <>Esta semana llevas <b>{formatListening(weekSeconds)}</b> de música.</>
+                    : "Spotify y YouTube, en una sola frecuencia."}
+                </motion.p>
+              </div>
+              {welcomeTrack && (
+                <motion.button
+                  className="welcome-now"
+                  whileTap={{ scale: 0.97 }}
+                  initial={{ opacity: 0, y: reduced ? 0 : 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, ease: settle, delay: reduced ? 0 : 0.22 }}
+                  onClick={() => {
+                    haptic();
+                    if (current) setExpanded(true);
+                    else void player.playList(recent.length ? recent : tracks);
+                  }}
+                >
+                  <Cover track={welcomeTrack} />
+                  <span className="welcome-now-copy">
+                    <small>{current ? (state.playing ? "Sonando ahora" : "En pausa") : "Continúa donde lo dejaste"}</small>
+                    <strong><MarqueeTitle text={welcomeTrack.title} /></strong>
+                    <span>{welcomeTrack.artist}</span>
+                  </span>
+                  <span className="welcome-play" aria-hidden="true">
+                    {current && state.playing ? <Equalizer /> : <Play size={18} fill="currentColor" />}
+                  </span>
+                </motion.button>
               )}
-            </div>
-            {(current || recent[0] || tracks[0]) && (
-              <button
-                className="listening-hero"
-                onClick={() => {
-                  if (current) setExpanded(true);
-                  else void player.playList(recent.length ? recent : tracks);
-                }}
-              >
-                <Cover track={current || recent[0] || tracks[0]} />
-                <span>
-                  <small>
-                    {current ? "En el reproductor" : "Volver a escuchar"}
-                  </small>
-                  <strong><MarqueeTitle text={(current || recent[0] || tracks[0]).title} /></strong>
-                  <span>{(current || recent[0] || tracks[0]).artist}</span>
-                </span>
-                {current ? <ChevronRight size={22} /> : <Play size={20} fill="currentColor" />}
-              </button>
-            )}
+            </motion.section>
 
             <div className="quick-grid">
               {[
@@ -1097,27 +1203,30 @@ export default function App() {
                   },
                 },
                 {
-                  title: "Descargas",
-                  icon: Download,
-                  action: () => {
-                    setTab("library");
-                    setLibraryFilter("Descargas");
-                  },
-                },
-                {
-                  title: "Tus playlists",
+                  title: "Playlists",
                   icon: ListMusic,
                   action: () => {
                     setTab("library");
                     setLibraryFilter("Playlists");
                   },
                 },
-              ].map(q => (
+                {
+                  title: "Tu resumen",
+                  icon: BarChart3,
+                  action: () => nav.push({ view: "library", directory: "insights" }),
+                },
+              ].map((q, index) => (
                 <motion.button
-                  whileTap={{ scale: 0.97 }}
+                  whileTap={{ scale: 0.95 }}
                   className="quick-item"
                   key={q.title}
-                  onClick={q.action}
+                  initial={{ opacity: 0, y: reduced ? 0 : 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, ease: settle, delay: reduced ? 0 : 0.26 + index * 0.05 }}
+                  onClick={() => {
+                    haptic();
+                    q.action();
+                  }}
                 >
                   <span className="quick-art">
                     <q.icon size={21} />
@@ -1126,22 +1235,6 @@ export default function App() {
                 </motion.button>
               ))}
             </div>
-            {weekSeconds > 0 && (
-              <motion.button
-                whileTap={{ scale: 0.98 }}
-                className="insights-teaser"
-                onClick={() => nav.push({ view: "library", directory: "insights" })}
-              >
-                <span className="quick-art" aria-hidden="true">
-                  <BarChart3 size={21} />
-                </span>
-                <span>
-                  <strong>Tu resumen</strong>
-                  <small>Tus artistas y canciones de la semana</small>
-                </span>
-                <ChevronRight size={20} aria-hidden="true" />
-              </motion.button>
-            )}
           </div>
         )}
         <div hidden={tab !== "home"} className="home-provider-region">
@@ -1151,13 +1244,13 @@ export default function App() {
             onPlay={(items, index) => void player.playList(items, index)}
             onCollection={item => {
               if (item.artistId) {
-                void guard(() => Audio.openYouTubeArtist({ id: item.artistId! }));
+                nav.push({ view: "library", artist: item.title, artistId: item.artistId });
               } else if (item.link) {
                 nav.push({ view: "library", playlistId: "feed:" + item.id });
               }
             }}
             onConnect={() => setTab("connections")}
-            renderArt={item => <Cover track={item.track ?? { id: item.id, title: item.title, source: "youtube", artworkUrl: item.artworkUrl, trackIds: [] }} />}
+            renderArt={item => <Cover track={item.track ?? { artworkUrl: item.artworkUrl }} />}
           />
         </div>
         {tab === "home" && (
@@ -1452,35 +1545,6 @@ export default function App() {
                 </button>
               )}
             </div>
-            {query.trim() && isNative && (
-              <details className="provider-search-options">
-                <summary>Buscar con mi sesión</summary>
-                <div className="provider-search-links">
-                <button
-                  onClick={() =>
-                    void guard(() =>
-                      Audio.openProviderSearch({ provider: "youtube", query }),
-                    )
-                  }
-                >
-                  Buscar en mi YouTube
-                </button>
-                <button
-                  onClick={() =>
-                    void guard(() =>
-                      Audio.openProviderSearch({ provider: "spotify", query }),
-                    )
-                  }
-                >
-                  Buscar en Spotify
-                </button>
-                <small>
-                  La búsqueda oficial usa tu sesión. Aquí se conserva la
-                  relevancia disponible de cada fuente.
-                </small>
-                </div>
-              </details>
-            )}
             <div className="pills search-pills">
               {[
                 { id: "all", title: "Todo" },
@@ -1536,28 +1600,15 @@ export default function App() {
               </div>
             ) : results.length ? (
               <>
-                <div className="section-heading">
+                <div className="section-heading results-heading">
                   <h2>Resultados</h2>
-                  <span className="muted">{results.length} canciones</span>
+                  <span className="muted">{results.length}</span>
+                  <OverflowMenu
+                    label="Opciones de resultados"
+                    icon={<ArrowDownUp size={19} />}
+                    entries={searchMenu}
+                  />
                 </div>
-                <label className="music-sort">
-                  Ordenar resultados
-                  <select
-                    aria-label="Orden de búsqueda"
-                    value={searchOrder}
-                    onChange={(e) =>
-                      setSearchOrder(e.target.value as MusicOrder)
-                    }
-                  >
-                    <option value="popular">Populares</option>
-                    <option value="listening">Más escuchadas por mí</option>
-                    <option value="relevance">Relevancia</option>
-                  </select>
-                </label>
-                <p className="help-copy">
-                  Popularidad dentro de cada fuente cuando está disponible; en
-                  el resto se conserva la relevancia.
-                </p>
                 {orderedResults.map((t, i) =>
                   songRow(t, i, orderedResults, () => rememberSearch(query)),
                 )}
@@ -1571,6 +1622,11 @@ export default function App() {
                     ? "Prueba otro título o selecciona una fuente."
                     : "La búsqueda en línea funciona en la app Android. Aquí puedes buscar en tu biblioteca local."}
                 </p>
+                {isNative && (
+                  <button className="text-button" onClick={() => void guard(() => Audio.openProviderSearch({ provider: "youtube", query }))}>
+                    Buscar en mi YouTube <ArrowUpRight size={16} />
+                  </button>
+                )}
               </div>
             ) : (
               <>
@@ -1655,9 +1711,18 @@ export default function App() {
         )}
         {tab === "library" && (
           <div className="page">
-            {!nav.route.playlistId && nav.route.directory !== "insights" && <>
-              <CollectionLinkImport notify={notify} onImported={p=>nav.push({view:"library",playlistId:p.id})} />
-              <div className="provider-search-links"><button onClick={()=>nav.push({view:"library",directory:"artists"})}>Artistas</button><button onClick={()=>nav.push({view:"library",directory:"albums"})}>Álbumes</button><button className="insights-link" onClick={()=>nav.push({view:"library",directory:"insights"})}><BarChart3 size={16} aria-hidden="true" />Tu resumen</button></div>
+            {!nav.route.playlistId && !nav.route.artist && !nav.route.directory && <>
+              <AnimatePresence initial={false}>
+                {importOpen && (
+                  <motion.div key="import" className="import-panel"
+                    initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0, transition: { duration: 0.16 } }}
+                    transition={{ duration: reduced ? 0.1 : 0.26, ease: settle }}>
+                    <CollectionLinkImport notify={notify} onClose={() => setImportOpen(false)}
+                      onImported={p => { setImportOpen(false); nav.push({ view: "library", playlistId: p.id }); }} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </>}
             {nav.route.directory === "insights" && !nav.route.playlistId ? <ListeningInsights
               tracks={allTracks}
@@ -1665,7 +1730,19 @@ export default function App() {
               onPlay={(items, index) => void player.playList(items, index)}
               onArtist={artist => nav.push({ view: "library", artist })}
               renderCover={track => <Cover track={track} />}
-            /> : nav.route.artist || nav.route.directory ? <MusicDirectory artist={nav.route.artist} mode={nav.route.directory === "insights" ? undefined : nav.route.directory} tracks={allTracks} playlists={playlists} onArtist={artist=>nav.push({view:"library",artist})} onAlbum={p=>nav.push({view:"library",playlistId:p.id})} onPlay={(items,index)=>void player.playList(items,index)} onBack={()=>nav.push({view:"library"})} /> : nav.route.playlistId && !activePlaylist ? <section className="empty-state">
+            /> : nav.route.artist ? <ArtistProfile
+              key={nav.route.artistId || nav.route.artist}
+              name={nav.route.artist}
+              artistId={nav.route.artistId}
+              library={tracks}
+              stats={stats}
+              onPlay={(items, index) => void player.playList(items, index)}
+              onShuffle={items => void shufflePlay(items)}
+              onCollection={item => item.link && nav.push({ view: "library", playlistId: "feed:" + item.id })}
+              onArtist={(name, id) => nav.push({ view: "library", artist: name, ...(id ? { artistId: id } : {}) })}
+              onSearch={value => startSearch(value, "all")}
+              renderSong={(track, index, list) => songRow(track, index, list)}
+            /> : nav.route.directory ? <MusicDirectory artist={undefined} mode={nav.route.directory === "insights" ? undefined : nav.route.directory} tracks={allTracks} playlists={playlists} onArtist={artist=>nav.push({view:"library",artist})} onAlbum={p=>nav.push({view:"library",playlistId:p.id})} onPlay={(items,index)=>void player.playList(items,index)} onBack={()=>nav.push({view:"library"})} /> : nav.route.playlistId && !activePlaylist ? <section className="empty-state">
               {collection?.error ? <>
                 <p role="alert">{collection.error}</p>
                 <button className="button secondary" onClick={() => setCollectionRetry(value => value + 1)}>Reintentar</button>
@@ -1676,51 +1753,88 @@ export default function App() {
               </>}
             </section> : activePlaylist ? (
               <>
-                <button
-                  className="text-button"
-                  onClick={() => setActivePlaylist(undefined)}
+                <motion.header
+                  className={"collection-hero" + (isAlbum ? " is-album" : "")}
+                  style={collectionTone ? ({ "--tone": collectionTone } as MotionStyle) : undefined}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: reduced ? 0.1 : 0.35, ease: settle }}
                 >
-                  <ChevronLeft size={20} />
-                  {feedLink ? "Volver a Inicio" : "Tu Biblioteca"}
-                </button>
-                <div className="playlist-hero">
-                  <Cover
-                    track={{
-                      ...activePlaylist,
-                      artworkUrl:
-                        artworkFor(activePlaylist) ||
-                        artworkFor(displayedPlaylistItems[0]),
-                    }}
-                  />
-                  <h1>{activePlaylist.title}</h1>
-                  {!feedLink && <label className="music-sort">Mostrar como<select aria-label="Tipo de colección" value={activePlaylist.kind||"playlist"} onChange={e=>void db.playlists.update(activePlaylist.id,{kind:e.target.value as "playlist"|"album"}).then(()=>notify("Etiqueta de colección actualizada","success")).catch(()=>notify("No se pudo cambiar la etiqueta","error"))}><option value="playlist">Playlist</option><option value="album">Álbum</option></select></label>}
-                  <p>
-                    <Badge source={activePlaylist.source} />
-                    {displayedPlaylistItems.length} canciones
-                  </p>
-                  <button
-                    className="button primary"
-                    disabled={!displayedPlaylistItems.length}
-                    onClick={() => void player.playList(displayedPlaylistItems)}
+                  <div className="collection-backdrop" aria-hidden="true">
+                    <Cover track={{ artworkUrl: collectionArt }} />
+                  </div>
+                  <motion.div
+                    className="collection-cover"
+                    initial={{ opacity: 0, scale: reduced ? 1 : 0.92, y: reduced ? 0 : 10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    transition={{ duration: reduced ? 0.1 : 0.5, ease: settle }}
                   >
-                    <Play size={19} fill="currentColor" />
-                    Reproducir
-                  </button>
-                  {collection?.data && <button className="button secondary" onClick={() => {
-                    const data = collection.data;
-                    if (!data) return;
-                    void guard(async () => {
-                      const saved = await saveCollection(data);
-                      nav.push({ view: "library", playlistId: saved.id }, true);
-                      notify("Colección guardada", "success");
-                    });
-                  }}>
-                    <Plus size={19} /> Guardar colección
-                  </button>}
-                </div>
+                    <Cover track={{ artworkUrl: collectionArt, videoId: displayedPlaylistItems[0]?.videoId }} large />
+                  </motion.div>
+                  <div className="collection-copy">
+                    <span className="eyebrow">
+                      {isAlbum ? "Álbum" : feedId?.startsWith("RD") ? "Mix" : activePlaylist.source === "hybrid" ? "Playlist híbrida" : "Playlist"}
+                    </span>
+                    <h1>{activePlaylist.title}</h1>
+                    {collectionArtist && (
+                      <button className="text-button artist-link"
+                        onClick={() => nav.push({ view: "library", artist: collectionArtist.split(/\s*(?:,|&)\s*/)[0] })}>
+                        {collectionArtist}
+                      </button>
+                    )}
+                    <p className="collection-meta">
+                      <Badge source={activePlaylist.source} />
+                      {[activePlaylist.year, displayedPlaylistItems.length + " canciones", collectionLength]
+                        .filter(Boolean).join(" · ")}
+                    </p>
+                  </div>
+                  <div className="profile-actions">
+                    <motion.button
+                      whileTap={{ scale: 0.95 }}
+                      className="button primary"
+                      disabled={!displayedPlaylistItems.length}
+                      onClick={() => {
+                        haptic();
+                        void player.playList(displayedPlaylistItems);
+                      }}
+                    >
+                      <Play size={19} fill="currentColor" />
+                      Reproducir
+                    </motion.button>
+                    <motion.button
+                      whileTap={{ scale: 0.9 }}
+                      className="icon-button round-action"
+                      aria-label="Reproducir en aleatorio"
+                      disabled={displayedPlaylistItems.length < 2}
+                      onClick={() => void shufflePlay(displayedPlaylistItems)}
+                    >
+                      <Shuffle size={21} />
+                    </motion.button>
+                    {collection?.data && (
+                      <motion.button
+                        whileTap={{ scale: 0.9 }}
+                        className="icon-button round-action"
+                        aria-label="Guardar colección en tu biblioteca"
+                        onClick={() => {
+                          const data = collection.data;
+                          if (!data) return;
+                          void guard(async () => {
+                            const saved = await saveCollection(data);
+                            haptic("confirm");
+                            nav.push({ view: "library", playlistId: saved.id }, true);
+                            notify("Colección guardada", "success");
+                          });
+                        }}
+                      >
+                        <Plus size={21} />
+                      </motion.button>
+                    )}
+                    <OverflowMenu label="Más opciones de la colección" entries={collectionMenu} />
+                  </div>
+                </motion.header>
                 {displayedPlaylistItems
                   .slice(0, visibleSongs)
-                  .map((t, i) => songRow(t, i, displayedPlaylistItems))}
+                  .map((t, i) => songRow(t, i, displayedPlaylistItems, undefined, isAlbum))}
                 {displayedPlaylistItems.length > visibleSongs && (
                   <button
                     className="button secondary full"
@@ -1750,16 +1864,17 @@ export default function App() {
                     <h1>Tu Biblioteca</h1>
                     <p>Todo lo tuyo. En el mismo lugar.</p>
                   </div>
-                  <button
-                    className="icon-button"
-                    aria-label="Crear playlist híbrida"
-                    onClick={() => setNewPlaylist(true)}
-                  >
-                    <Plus size={25} />
-                  </button>
+                  <OverflowMenu label="Opciones de tu biblioteca" entries={libraryMenu} />
+                </div>
+                <div className="library-links">
+                  <motion.button whileTap={{ scale: 0.95 }} onClick={() => nav.push({ view: "library", directory: "artists" })}>Artistas</motion.button>
+                  <motion.button whileTap={{ scale: 0.95 }} onClick={() => nav.push({ view: "library", directory: "albums" })}>Álbumes</motion.button>
+                  <motion.button whileTap={{ scale: 0.95 }} onClick={() => nav.push({ view: "library", directory: "insights" })}>
+                    <BarChart3 size={15} aria-hidden="true" />Tu resumen
+                  </motion.button>
                 </div>
                 <div className="pills">
-                  {["Canciones", "Playlists", "Descargas"].map((f) => (
+                  {["Canciones", "Playlists", ...(hasDownloads || filter === "Descargas" ? ["Descargas"] : [])].map((f) => (
                     <button
                       key={f}
                       className={
@@ -1775,21 +1890,6 @@ export default function App() {
                     </button>
                   ))}
                 </div>
-                {filter !== "Playlists" && (
-                  <label className="music-sort">
-                    Ordenar tu música
-                    <select
-                      aria-label="Orden de biblioteca"
-                      value={libraryOrder}
-                      onChange={(e) =>
-                        setLibraryOrder(e.target.value as MusicOrder)
-                      }
-                    >
-                      <option value="listening">Más escuchadas por mí</option>
-                      <option value="title">Título · A–Z</option>
-                    </select>
-                  </label>
-                )}
                 {filter === "Playlists" ? (
                   <>
                     {playlists.map((p) => (
@@ -1954,6 +2054,12 @@ export default function App() {
                   }}
                 />
               </label>
+              <details className="settings-fold">
+              <summary>
+                <Mic size={21} />
+                <span><strong>Voz y permisos</strong><small>Control por voz, reconocimiento y micrófono</small></span>
+                <ChevronDown size={18} className="fold-chevron" />
+              </summary>
               <button
                 className="setting-label setting-button"
                 onClick={() => void listen()}
@@ -2017,7 +2123,14 @@ export default function App() {
                 </div>
                 <ArrowUpRight size={18} />
               </button>
+              </details>
             </div>
+            <details className="settings-fold advanced-fold">
+            <summary>
+              <ShieldCheck size={21} />
+              <span><strong>Avanzado</strong><small>Modelo sin conexión, diagnóstico y respaldo</small></span>
+              <ChevronDown size={18} className="fold-chevron" />
+            </summary>
             <div className="settings-section model-section">
               <button
                 className="setting-label setting-button"
@@ -2095,6 +2208,7 @@ export default function App() {
                 }}
               />
             </div>
+            </details>
             <p className="privacy-note">
               <ShieldCheck size={16} />
               Biblioteca y ajustes guardados en este dispositivo · MURMUR {APP_VERSION}
@@ -2121,7 +2235,7 @@ export default function App() {
               onClick={() => setExpanded(true)}
             >
               <Cover track={current} />
-              <span>
+              <span className="mini-copy" key={current.queueId || current.id}>
                 <strong><MarqueeTitle text={current.title} /></strong>
                 <small>
                   {current.artist}{" "}
@@ -2222,24 +2336,44 @@ export default function App() {
                       : "SPOTIFY CONNECT"}
                 </b>
               </SwipeSurface>
-              <button
-                className="icon-button"
-                aria-label="Opciones de canción"
-                onClick={() => setActionTrack(current)}
-              >
-                <MoreVertical />
-              </button>
+              <div className="player-top-actions">
+                {isNative && (
+                  <motion.button
+                    whileTap={{ scale: 0.88 }}
+                    className="icon-button"
+                    aria-label="Pantalla musical animada"
+                    onClick={() => void guard(() => Audio.openVisualizer())}
+                  >
+                    <Sparkles size={21} />
+                  </motion.button>
+                )}
+                <button
+                  className="icon-button"
+                  aria-label="Opciones de canción"
+                  onClick={() => setActionTrack(current)}
+                >
+                  <MoreVertical />
+                </button>
+              </div>
             </div>
             <div className="player-body">
-              <AmbientCover track={current} />
-              {isNative && (
-                <button
-                  className="button secondary visual-mode"
-                  onClick={() => void guard(() => Audio.openVisualizer())}
-                >
-                  Pantalla musical animada
-                </button>
-              )}
+              <motion.div
+                className="cover-swipe"
+                drag={reduced ? false : "x"}
+                dragDirectionLock
+                dragConstraints={{ left: 0, right: 0 }}
+                dragElastic={0.32}
+                dragSnapToOrigin
+                whileDrag={{ scale: 0.97 }}
+                onDragEnd={(_, info) => {
+                  const distance = info.offset.x + info.velocity.x * 0.18;
+                  if (Math.abs(distance) < 90) return;
+                  haptic();
+                  void guard(() => (distance < 0 ? player.next() : player.previous()));
+                }}
+              >
+                <AmbientCover track={current} />
+              </motion.div>
               <div className="now-title">
                 <div>
                   <h1><MarqueeTitle text={current.title} /></h1>
@@ -2374,20 +2508,6 @@ export default function App() {
                   <AudioLines size={18} />
                   Mezclar ahora
                 </button>
-                <button
-                  className={"mix-now sleep-button" + (sleep.mode !== "off" ? " active" : "")}
-                  aria-label={
-                    sleep.mode === "off"
-                      ? "Temporizador de sueño"
-                      : "Temporizador de sueño activo"
-                  }
-                  onClick={() => nav.sheet("sleep")}
-                >
-                  <Moon size={17} />
-                  <span className="sleep-countdown">
-                    <SleepCountdown sleep={sleep} onExpire={() => setSleep({ mode: "off" })} />
-                  </span>
-                </button>
               </div>
               <p className="mix-mode-note">
                 Auto-Mix · {modes.find((m) => m.value === state.mode)?.label}
@@ -2469,9 +2589,12 @@ export default function App() {
                       <span className="skeleton" />
                     </div>
                   ) : (
-                    <p>{lyricsState.result?.instrumental ? "Esta pista es instrumental." : "LRCLIB no encontró letra para esta versión."}</p>
+                    <p>{lyricsState.result?.instrumental ? "Esta pista es instrumental." : "No encontramos la letra de esta versión."}</p>
                   )}
-                  {(lyrics.length > 0 || lyricsState?.result?.plain) && <small>LRCLIB</small>}
+                  {(lyrics.length > 0 || lyricsState?.result?.plain) && (
+                    <small className="lyrics-credit">Letra · {lyricsState?.result?.source || "LRCLIB"}</small>
+                  )}
+                  {lyricsState && !lyrics.length && !lyricsState.result?.plain && !lyricsState.result?.instrumental &&
                   <a className="text-button lyrics-genius" href={geniusLyricsUrl(current)}
                     target="_blank" rel="noopener noreferrer" onClick={event => {
                       if (!isNative || status.preview) return;
@@ -2479,7 +2602,7 @@ export default function App() {
                       void guard(() => Audio.openGeniusLyrics({ url: geniusLyricsUrl(current) }));
                     }}>
                     Buscar letra en Genius <ArrowUpRight size={16} aria-hidden="true" />
-                  </a>
+                  </a>}
                 </motion.div>
               )}
               </AnimatePresence>
@@ -2594,13 +2717,34 @@ export default function App() {
                     : "Acciones de canción"
               }
               className="action-sheet"
+              drag={reduced ? false : "y"}
+              dragControls={sheetDrag}
+              dragListener={false}
+              dragConstraints={{ top: 0, bottom: 0 }}
+              dragElastic={{ top: 0.05, bottom: 0.75 }}
+              dragSnapToOrigin
+              onDragEnd={(_, info) => {
+                if (info.offset.y < 110 && info.velocity.y < 650) return;
+                haptic();
+                setActionTrack(undefined);
+                setPlaylistPicker(undefined);
+                setNewPlaylist(false);
+                setShared(undefined);
+                nav.close("sheet", "sleep");
+              }}
               initial={{ y: reduced ? 0 : 42, opacity: reduced ? 1 : 0.72 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: reduced ? 0 : 30, opacity: 0, transition: { duration: 0.16, ease: release } }}
               transition={{ duration: reduced ? 0.1 : 0.29, ease: settle }}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="sheet-handle" />
+              <div
+                className="sheet-handle"
+                aria-hidden="true"
+                onPointerDown={(event) => {
+                  if (!reduced) sheetDrag.start(event);
+                }}
+              />
               <button
                 className="sheet-close icon-button"
                 aria-label="Cerrar opciones"

@@ -7,6 +7,7 @@ import "./styles.css";
 import "./mobile-qa.css";
 import "./experience.css";
 import "./premium.css";
+import "./v27.css";
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <AppBoundary>

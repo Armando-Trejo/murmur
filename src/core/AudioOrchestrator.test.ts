@@ -120,6 +120,18 @@ describe("AudioOrchestrator", () => {
     expect(p.current?.id).toBe(b.id);
     expect(p.getSnapshot().error).toBe("");
   });
+  it("plays queued tracks in the order they were added, before the rest of the list", async () => {
+    const p = new AudioOrchestrator();
+    const c = { ...a, id: "yt:c", title: "C" };
+    const d = { ...a, id: "yt:d", title: "D" };
+    await p.playList([a, b]);
+    p.enqueue(c);
+    p.enqueue(d);
+    expect(p.getSnapshot().queue.map((t) => t.title)).toEqual([a.title, "C", "D", "B"]);
+    await p.next();
+    p.enqueue({ ...a, id: "yt:e", title: "E" });
+    expect(p.getSnapshot().queue.slice(p.getSnapshot().index).map((t) => t.title)).toEqual(["C", "D", "E", "B"]);
+  });
   it("starts extraction when the first track was added to an empty queue", async () => {
     const p = new AudioOrchestrator();
     p.enqueue(a);

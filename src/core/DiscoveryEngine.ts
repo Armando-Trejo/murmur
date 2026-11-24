@@ -1,6 +1,6 @@
 import { Audio, Auth, isNative } from "../native";
 import { db } from "./db";
-import { parseFanUpload, normalize } from "./FanUploadParser";
+import { parseFanUpload, normalize, stripTitleNoise } from "./FanUploadParser";
 import { similarity } from "./SourceResolver";
 import type { QueueItem } from "./types";
 export function hybridScore(
@@ -249,39 +249,140 @@ export interface LyricsResult {
   timed: Lyric[];
   plain: string;
   instrumental?: boolean;
+  /** Who provided the text, shown as a credit under the lyrics. */
+  source?: string;
 }
 
 export function geniusLyricsUrl(track: QueueItem): string {
-  const parsed = parseFanUpload(track.title);
-  const artist = track.artist === "Artista por identificar" ? parsed.candidateArtist : track.artist;
-  const query = [parsed.title, artist]
-    .filter(Boolean).join(" ");
-  return "https://genius.com/search?" + new URLSearchParams({ q: query });
+  const { title, artist } = lyricsQuery(track);
+  return "https://genius.com/search?" + new URLSearchParams({ q: [title, artist].filter(Boolean).join(" ") });
 }
 
+const unknownArtist = /^artista (?:por identificar|no identificad[oa])$/i;
+/** Title and main artist as lyric catalogues index them (no "Official Video", features or "- Topic"). */
+export function lyricsQuery(track: Pick<QueueItem, "title" | "artist">) {
+  const parsed = parseFanUpload(track.title);
+  const known = !!track.artist?.trim() && !unknownArtist.test(track.artist.trim());
+  const artist = (known ? track.artist : parsed.candidateArtist || "")
+    .replace(/\s*-\s*topic$/i, "").replace(/vevo$/i, "")
+    .split(/\s*(?:,|&|\bfeat\.?|\bft\.?|\by\b|\bx\b)\s+/i)[0].trim();
+  const cleaned = stripTitleNoise(track.title);
+  const pieces = cleaned.split(/\s+[-–—]\s+/);
+  let title = cleaned;
+  if (pieces.length > 1) {
+    const head = normalize(pieces[0]);
+    const main = normalize(artist);
+    if (!known || (main && (head.includes(main) || main.includes(head)))) title = pieces.slice(1).join(" - ");
+  }
+  title = title
+    .replace(/\s*[([](?:feat|ft|with|con|prod)\.?\s[^)\]]*[)\]]/gi, "")
+    .replace(/\s+(?:feat|ft)\.?\s.*$/i, "")
+    .replace(/\s*[([][^)\]]*(?:remaster|version|versión|edit|en vivo|live)[^)\]]*[)\]]/gi, "")
+    .replace(/\s+/g, " ").trim();
+  return { title: title || cleaned, artist };
+}
+
+type LrclibEntry = {
+  trackName?: string; artistName?: string; duration?: number;
+  syncedLyrics?: string | null; plainLyrics?: string | null; instrumental?: boolean;
+};
+
+/** Picks the catalogue entry that matches title, artist and length, preferring synced lyrics. */
+export function pickLrclib(entries: LrclibEntry[], title: string, artist: string, duration: number) {
+  const wantedTitle = normalize(title);
+  const wantedArtist = normalize(artist);
+  let best: LrclibEntry | undefined;
+  let bestScore = 0;
+  for (const entry of entries) {
+    const name = normalize(entry.trackName || "");
+    const by = normalize(entry.artistName || "");
+    if (!name) continue;
+    let score = name === wantedTitle ? 4 : name.includes(wantedTitle) || wantedTitle.includes(name) ? 2 : -10;
+    if (wantedArtist) score += by === wantedArtist ? 3 : by.includes(wantedArtist) || wantedArtist.includes(by) ? 2 : -2;
+    if (duration > 0 && entry.duration) {
+      const gap = Math.abs(entry.duration - duration);
+      score += gap <= 3 ? 2 : gap <= 12 ? 0.5 : -2;
+    }
+    if (entry.syncedLyrics) score += 1.5;
+    else if (entry.plainLyrics) score += 0.5;
+    else if (!entry.instrumental) continue;
+    if (score > bestScore) {
+      bestScore = score;
+      best = entry;
+    }
+  }
+  return bestScore >= 5 ? best : undefined;
+}
+
+export function parseSyncedLyrics(raw: string): Lyric[] {
+  return raw.split("\n").flatMap(line => {
+    const markers = [...line.matchAll(/\[(\d+):(\d+(?:\.\d+)?)\]/g)];
+    const text = line.slice((markers.at(-1)?.index ?? 0) + (markers.at(-1)?.[0].length ?? 0)).trim();
+    return markers.map(marker => ({ time: Number(marker[1]) * 60 + Number(marker[2]), text }));
+  }).sort((a, b) => a.time - b.time);
+}
+
+async function lrclib(path: string, params: Record<string, string>, signal?: AbortSignal) {
+  const response = await fetch(`https://lrclib.net/api/${path}?` + new URLSearchParams(params), { signal });
+  if (response.status === 404) return undefined;
+  if (!response.ok) throw new Error("LRCLIB respondió " + response.status);
+  return response.json();
+}
+
+/**
+ * Lyrics from LRCLIB (synced when available) with fuzzy matching, then the lyrics YouTube Music
+ * shows for the same song (licensed text, usually LyricFind). Genius has no public lyrics API.
+ */
 export async function getLyrics(track: QueueItem, signal?: AbortSignal): Promise<LyricsResult> {
-  const { title, candidateArtist } = parseFanUpload(track.title);
-  const artist = track.artist === "Artista por identificar" ? candidateArtist : track.artist;
-  if (!artist?.trim()) return { timed: [], plain: "" };
-  const key = "lyrics:v2:" + JSON.stringify([track.id, title, artist, Math.round(track.duration)]);
+  const { title, artist } = lyricsQuery(track);
+  const duration = Number.isFinite(track.duration) && track.duration > 0 ? Math.round(track.duration) : 0;
+  const key = "lyrics:v3:" + JSON.stringify([track.id, title, artist, duration]);
   const cached = await db.settings.get(key);
   if (cached) return cached.value as LyricsResult;
-  const params = new URLSearchParams({ track_name: title, artist_name: artist });
-  if (Number.isFinite(track.duration) && track.duration > 0) params.set("duration", String(Math.round(track.duration)));
-  const response = await fetch("https://lrclib.net/api/get?" + params, { signal });
-  if (response.status === 404) return { timed: [], plain: "" };
-  if (!response.ok) throw new Error("No se pudo conectar con LRCLIB.");
-  const data = await response.json();
-  const timed = String(data.syncedLyrics || "").split("\n").flatMap(line => {
-    const markers = [...line.matchAll(/\[(\d+):(\d+(?:\.\d+)?)\]/g)];
-    return markers.map(marker => ({
-      time: Number(marker[1]) * 60 + Number(marker[2]),
-      text: line.slice((markers.at(-1)?.index ?? 0) + (markers.at(-1)?.[0].length ?? 0)).trim(),
-    }));
-  }).sort((a, b) => a.time - b.time);
-  const result = { timed, plain: typeof data.plainLyrics === "string" ? data.plainLyrics.trim() : "", instrumental: data.instrumental === true };
-  if (!signal?.aborted && (timed.length || result.plain || result.instrumental)) {
-    await db.settings.put({ key, value: result }).catch(() => {});
+  let reached = false;
+  let entry: LrclibEntry | undefined;
+  try {
+    if (artist && duration) {
+      entry = await lrclib("get", { track_name: title, artist_name: artist, duration: String(duration) }, signal);
+      reached = true;
+    }
+    if (!entry?.syncedLyrics && !entry?.plainLyrics && !entry?.instrumental) {
+      const found = await lrclib("search", artist ? { track_name: title, artist_name: artist } : { q: title }, signal);
+      reached = true;
+      entry = pickLrclib(Array.isArray(found) ? found : [], title, artist, duration) ?? undefined;
+      if (!entry && artist) {
+        const loose = await lrclib("search", { q: `${title} ${artist}` }, signal);
+        entry = pickLrclib(Array.isArray(loose) ? loose : [], title, artist, duration);
+      }
+    }
+  } catch (error) {
+    if (signal?.aborted) throw error;
   }
+  let result: LyricsResult | undefined;
+  if (entry && (entry.syncedLyrics || entry.plainLyrics || entry.instrumental)) {
+    result = {
+      timed: parseSyncedLyrics(String(entry.syncedLyrics || "")),
+      plain: typeof entry.plainLyrics === "string" ? entry.plainLyrics.trim() : "",
+      instrumental: entry.instrumental === true,
+      source: "LRCLIB",
+    };
+  }
+  if (!result && isNative && !signal?.aborted) {
+    try {
+      const found = await Auth.youtubeLyrics(track.videoId
+        ? { videoId: track.videoId }
+        : { query: [title, artist].filter(Boolean).join(" ") });
+      reached = true;
+      if (found.found && found.text?.trim())
+        result = { timed: [], plain: found.text.trim(), source: found.source ? `YouTube Music · ${found.source}` : "YouTube Music" };
+    } catch {
+      /* The catalogue lookup above already decided whether the network was reachable. */
+    }
+  }
+  if (!result) {
+    if (!reached) throw new Error("No se pudo conectar con los servicios de letras.");
+    return { timed: [], plain: "" };
+  }
+  if (!signal?.aborted) await db.settings.put({ key, value: result }).catch(() => {});
   return result;
 }

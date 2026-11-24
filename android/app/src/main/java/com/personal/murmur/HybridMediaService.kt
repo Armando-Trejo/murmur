@@ -39,6 +39,10 @@ class HybridMediaService : MediaSessionService() {
         var instance: HybridMediaService? = null
             private set
         const val SLEEP_AT_TRACK_END = -2
+        /** Overlap used to hide AudioTrack start-up latency when tracks follow each other without Auto-Mix. */
+        const val TAIL_HANDOFF_MS = 240L
+        /** RMS below this (about -52 dBFS) counts as the silent tail many uploads end with. */
+        const val SILENT_TAIL = 0.0025f
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
@@ -115,6 +119,10 @@ class HybridMediaService : MediaSessionService() {
     private val meters = mutableMapOf<ExoPlayer, Meter>()
     val visualPlaying get() = if (spotifyActive) spotifyIntegrated.playing else primaryPlayer.isPlaying
     val visualAmplitude get()=if(spotifyActive)spotifyIntegrated.visualAmplitude else if(primaryPlayer.isPlaying)meters[primaryPlayer]?.amplitude ?: 0f else 0f
+    private val visualAnalyzer = SpectrumAnalyzer()
+    /** Spectrum + beat analysis of what is audible now. Main thread; idempotent per frame time. */
+    fun visualSpectrum(frameTimeNanos: Long = System.nanoTime()): VisualSpectrum = visualAnalyzer.update(
+        if (spotifyActive) spotifyIntegrated.visualTap else meters[primaryPlayer]?.tap, visualPlaying, frameTimeNanos)
     private var presses = 0
     private var sourceTrackId = ""
     private val alternatives = ArrayDeque<PlaybackSource>()
@@ -211,13 +219,15 @@ class HybridMediaService : MediaSessionService() {
     private inner class Meter : BaseAudioProcessor() {
         @Volatile var amplitude = 0f
             private set
+        /** Lock-free PCM tap for the visualizer (written here on the playback thread). */
+        val tap = VisualPcmTap()
 
-        override fun onFlush() { amplitude = 0f }
+        override fun onFlush() { amplitude = 0f; tap.discontinuity() }
         override fun onConfigure(input: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat = input
         override fun queueInput(input: ByteBuffer) {
             if(!input.hasRemaining())return
-            val size = input.remaining(); val copy = input.duplicate().order(ByteOrder.nativeOrder())
-            if (inputAudioFormat.encoding == C.ENCODING_PCM_16BIT && size >= 2) { var sum = 0.0; var n = 0; while (copy.remaining() >= 2) { val s = copy.short / 32768.0; sum += s*s; n++ }; amplitude = sqrt(sum / max(1, n)).toFloat() }
+            val size = input.remaining(); val format = inputAudioFormat
+            amplitude = tap.write(input, format.encoding, format.channelCount, format.sampleRate)
             replaceOutputBuffer(size).put(input).flip()
         }
     }
@@ -225,7 +235,7 @@ class HybridMediaService : MediaSessionService() {
     private fun createPlayer(handleAudioFocus: Boolean = true): ExoPlayer {
         val meter = Meter()
         val factory = object : DefaultRenderersFactory(this) {
-            override fun buildAudioSink(context: android.content.Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink = DefaultAudioSink.Builder(context).setAudioProcessors(arrayOf(meter)).build()
+            override fun buildAudioSink(context: android.content.Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink = VisualClockSink(DefaultAudioSink.Builder(context).setAudioProcessors(arrayOf(meter)).build(), meter.tap)
         }
         val http = OkHttpDataSource.Factory(NativeNetwork.client)
             .setDefaultRequestProperties(mapOf("User-Agent" to NativeNetwork.USER_AGENT,"Referer" to "https://www.youtube.com/"))
@@ -340,8 +350,13 @@ class HybridMediaService : MediaSessionService() {
     }
 
     private fun attach(player: ExoPlayer) { player.addListener(listener) }
-    private fun configureEnhancer(id: Int) { enhancer?.release(); enhancer = null; if (id == C.AUDIO_SESSION_ID_UNSET) return; try { enhancer = LoudnessEnhancer(id).apply { setTargetGain(if (track?.optJSONArray("tags")?.toString()?.contains(Regex("live|bootleg")) == true) 400 else 0); enabled = true } } catch (_: Exception) { } }
-    private fun item(url: String, data: JSONObject, mime: String? = null) = MediaItem.Builder().setUri(url).setMimeType(mime).setMediaId(data.optString("id")).setMediaMetadata(MediaMetadata.Builder().setTitle(data.optString("title")).setArtist(data.optString("artist")).setArtworkUri(data.optString("artworkUrl").takeIf { it.startsWith("https://") }?.let(android.net.Uri::parse)).build()).build()
+    private fun configureEnhancer(id: Int) {
+        val gain = if (track?.optJSONArray("tags")?.toString()?.contains(Regex("live|bootleg")) == true) 400 else 0
+        enhancer?.release(); enhancer = null
+        if (id == C.AUDIO_SESSION_ID_UNSET || gain == 0) return
+        try { enhancer = LoudnessEnhancer(id).apply { setTargetGain(gain); enabled = true } } catch (_: Exception) { }
+    }
+    private fun item(url: String, data: JSONObject, mime: String? = null) = MediaItem.Builder().setUri(url).setMimeType(mime).setMediaId(data.optString("id")).setMediaMetadata(MediaMetadata.Builder().setTitle(data.optString("title")).setArtist(data.optString("artist")).setArtworkUri(data.optString("artworkUrl").takeIf { it.startsWith("https://") }?.let { android.net.Uri.parse(YouTubeArtwork.hd(it, 1080)) }).build()).build()
     fun play(url: String, data: JSONObject) = playSources(listOf(PlaybackSource(url)), data)
     private fun sourcesFor(data:JSONObject):List<PlaybackSource> {
         val local=data.optString("offlinePath")
@@ -507,9 +522,9 @@ class HybridMediaService : MediaSessionService() {
         if (announce) emitNativeTrack(target)
     }
 
-    private fun startOverlap(duration: Long): Boolean {
+    private fun startOverlap(duration: Long, force: Boolean = false): Boolean {
         val target = nextTrack ?: return false
-        if (mode == "off" || fade != null || spotifyActive || !primaryPlayer.isPlaying ||
+        if ((mode == "off" && !force) || fade != null || spotifyActive || !primaryPlayer.isPlaying ||
             secondaryPlayer.playbackState != Player.STATE_READY || selectionPending != null ||
             entryIdentity(upcoming.firstOrNull()) != entryIdentity(target)) return false
         fade = scope.launch {
@@ -535,6 +550,41 @@ class HybridMediaService : MediaSessionService() {
             promotePrepared(target, announce = true)
         }
         return true
+    }
+    private var tailIdentity = ""
+    private var quietSince = 0L
+    private var signalIdentity = ""
+    private val tailHandoff = Runnable {
+        val scheduled = tailIdentity
+        tailIdentity = ""
+        if (spotifyActive || fade != null || selectionPending != null || sleepAtTrackEnd ||
+            volumeFade?.isActive == true || scheduled != entryIdentity(track)) return@Runnable
+        val duration = primaryPlayer.duration.takeIf { it > 0 } ?: return@Runnable
+        // A seek after scheduling moves the end away; the ticker schedules a new handoff later.
+        if (duration - primaryPlayer.currentPosition > TAIL_HANDOFF_MS * 3) return@Runnable
+        startOverlap(TAIL_HANDOFF_MS, force = true)
+    }
+    /** Hands over a few hundred milliseconds early so the next track starts with no audible gap. */
+    private fun watchTail(duration: Long, remaining: Long, now: Long) {
+        if (spotifyActive || !primaryPlayer.isPlaying || fade != null || duration <= 0 || nextTrack == null ||
+            sleepAtTrackEnd || volumeFade?.isActive == true) { quietSince = 0; return }
+        val identity = entryIdentity(track)
+        if (remaining in 1..1_600 && tailIdentity != identity) {
+            tailIdentity = identity
+            handler.removeCallbacks(tailHandoff)
+            handler.postDelayed(tailHandoff, (remaining - TAIL_HANDOFF_MS).coerceAtLeast(0))
+        }
+        val level = visualAmplitude
+        if (level > SILENT_TAIL * 8) signalIdentity = identity
+        if (signalIdentity != identity || duration < 30_000 || remaining !in 1..6_000 || level >= SILENT_TAIL) {
+            quietSince = 0
+            return
+        }
+        if (quietSince == 0L) quietSince = now
+        else if (now - quietSince >= 700) {
+            quietSince = 0
+            startOverlap(if (mode == "off") 450 else minOf(if (mode == "dj") 10_000L else 5_000L, remaining.coerceAtLeast(800)), force = true)
+        }
     }
     private val ticker = object : Runnable {
         override fun run() {
@@ -571,6 +621,7 @@ class HybridMediaService : MediaSessionService() {
                     NativeEvents.emit("onSleepTimerFinished", JSObject().put("reason", "track_end"))
                 }
                 if (!sleepAtTrackEnd && volumeFade?.isActive != true && !spotifyActive && mode != "off" && remaining in 1..fadeMs) startOverlap(fadeMs)
+                watchTail(duration, remaining, now)
                 if (sleepAt > 0 && System.currentTimeMillis() >= sleepAt - 15_000) { sleepAt = 0; fadeVolume(15_000); NativeEvents.emit("onSleepTimerFinished", JSObject().put("reason", "timer")) }
             }
             handler.postDelayed(this, 500)

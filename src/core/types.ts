@@ -24,6 +24,8 @@ export interface QueueItem {
   popularity?: number;
   viewCount?: number;
   queueId?: string;
+  /** Added by the user with "Añadir a la cola"; plays before the rest of the context, in order. */
+  userQueued?: boolean;
 }
 export interface Playlist {
   kind?: "playlist" | "album";
@@ -32,6 +34,9 @@ export interface Playlist {
   source: Source | "hybrid";
   trackIds: string[];
   artworkUrl?: string;
+  artist?: string;
+  year?: string;
+  subtitle?: string;
 }
 export interface Override {
   id?: number;

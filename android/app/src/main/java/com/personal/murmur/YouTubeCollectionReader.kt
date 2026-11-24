@@ -13,7 +13,7 @@ object YouTubeCollectionReader {
   fun add(items:List<org.schabi.newpipe.extractor.stream.StreamInfoItem>){for(item in items){
    val video=android.net.Uri.parse(item.url).getQueryParameter("v")?:continue
    if(!video.matches(Regex("[A-Za-z0-9_-]{11}"))||!ids.add(video))continue
-   tracks.put(JSONObject().put("id","yt:$video").put("source","youtube").put("videoId",video).put("title",item.name).put("artist",item.uploaderName?:"Artista no identificado").put("duration",item.duration).put("artworkUrl",item.thumbnails.maxByOrNull { it.width * it.height.coerceAtLeast(1) }?.url).put("tags",JSONArray()).put("saved",true))
+   tracks.put(JSONObject().put("id","yt:$video").put("source","youtube").put("videoId",video).put("title",item.name).put("artist",item.uploaderName?:"Artista no identificado").put("duration",item.duration).put("artworkUrl",item.thumbnails.maxByOrNull { it.width * it.height.coerceAtLeast(1) }?.url?.let{YouTubeArtwork.hd(it)}).put("tags",JSONArray()).put("saved",true))
   }}
   add(info.relatedItems);var page=info.nextPage;val seen=mutableSetOf<String>()
   if(!id.startsWith("RD"))repeat(100){
@@ -22,6 +22,6 @@ object YouTubeCollectionReader {
    val more=PlaylistInfo.getMoreItems(ServiceList.YouTube,url,page);add(more.items);page=more.nextPage
   }
   if(!id.startsWith("RD"))check(page==null||!org.schabi.newpipe.extractor.Page.isValid(page)){"La colección supera el límite de páginas."}
-  return JSONObject().put("title",info.name).put("artworkUrl",info.thumbnails.maxByOrNull { it.width * it.height.coerceAtLeast(1) }?.url).put("tracks",tracks)
+  return JSONObject().put("title",info.name).put("artworkUrl",info.thumbnails.maxByOrNull { it.width * it.height.coerceAtLeast(1) }?.url?.let{YouTubeArtwork.hd(it)}).put("tracks",tracks)
  }
 }

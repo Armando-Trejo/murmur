@@ -256,7 +256,7 @@ export class AudioOrchestrator {
   async playList(queue: QueueItem[], index = 0) {
     this.generation++;
     this.update({
-      queue: queue.map((track) => ({ ...track, queueId: crypto.randomUUID() })),
+      queue: queue.map((track) => ({ ...track, userQueued: undefined, queueId: crypto.randomUUID() })),
       index,
       position: 0,
       playing: false,
@@ -353,14 +353,22 @@ export class AudioOrchestrator {
         });
     }
   }
-  enqueue(track: QueueItem, next = false) {
-    track = { ...track, queueId: crypto.randomUUID() };
+  /**
+   * Queues a track right after the current one and after everything the user already queued,
+   * so several additions play in the order they were added (like "Añadir a la cola" elsewhere).
+   */
+  enqueue(tracks: QueueItem | QueueItem[]) {
+    const added = (Array.isArray(tracks) ? tracks : [tracks])
+      .map((track) => ({ ...track, queueId: crypto.randomUUID(), userQueued: true }));
+    if (!added.length) return;
     const queue = [...this.state.queue];
     if (!queue.length) {
-      this.update({ queue: [track], index: 0 });
+      this.update({ queue: added, index: 0 });
       return;
     }
-    queue.splice(next ? this.state.index + 1 : queue.length, 0, track);
+    let at = this.state.index + 1;
+    while (at < queue.length && queue[at].userQueued) at++;
+    queue.splice(at, 0, ...added);
     this.update({ queue });
     this.syncQueue();
   }

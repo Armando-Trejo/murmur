@@ -1,6 +1,6 @@
-# MURMUR 2.6.0
+# MURMUR 2.7.0
 
-App Android de música con biblioteca local, reproducción de Spotify y YouTube, feeds por proveedor, reproductor con luz de la carátula, letras sincronizadas, resumen de escucha local, visualizador de aura y letras de LRCLIB con búsqueda en Genius. Paquete `com.personal.murmur`, Android 8.0 o posterior. Interfaz React y Capacitor, servicio Kotlin/Media3 y motor Rust/librespot.
+App Android de música con biblioteca local, reproducción de Spotify y YouTube, feeds por proveedor, reproductor con luz de la carátula, letras sincronizadas, resumen de escucha local, visualizador musical reactivo, perfiles de artista y álbum de YouTube Music y letras de LRCLIB y YouTube Music. Paquete `com.personal.murmur`, Android 8.0 o posterior. Interfaz React y Capacitor, servicio Kotlin/Media3 y motor Rust/librespot.
 
 [Plan del siguiente agente](SIGUIENTE-AGENTE.md) · [Estado y pruebas para retomar](CONTINUAR-MURMUR.md) · [Hoja de ruta premium](PREMIUM-ROADMAP.md) · [Componentes externos](REPOSITORY-REVIEW.md)
 
@@ -11,9 +11,27 @@ App Android de música con biblioteca local, reproducción de Spotify y YouTube,
 3. Desde `android`, ejecuta `.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug` en Windows. En otros sistemas usa `./gradlew`. El APK de depuración se genera en `android/app/build/outputs/apk/debug/app-debug.apk`.
 4. Para escuchar Spotify, configura el Client ID de tu aplicación en Conexiones y registra el retorno documentado allí. El ajuste se guarda en el dispositivo. El APK de este repositorio requiere la misma firma local que tu versión instalada para actualizar sobre ella.
 
+Para un APK más ligero que se pueda enviar al teléfono, compila sólo para arm64 con `.\gradlew.bat :app:assembleDebug -Pabi=arm64-v8a` (unos 20 MB en lugar de 40; no sirve en teléfonos de 32 bits).
+
 Usa `npm test` para las pruebas web. Ejecuta `npm run dev` para la interfaz o `node scripts/build-motion-preview.mjs` para generar el HTML interactivo de prueba. La demo usa pistas, carátulas y pulso de ejemplo. Las bibliotecas nativas generadas, el APK y el HTML se construyen localmente.
 
 ## Historial
+
+## Novedades 2.7
+
+- **Mixes de YouTube que abren.** Los mixes y radios (`RD…`) se leen de la cola de reproducción de YouTube Music en lugar de pedirlos como playlist privada, que es lo que provocaba «YouTube no autorizó la biblioteca privada». Se intenta con tu sesión y, si falla, de forma pública. Un error de contenido público ya no marca tu sesión como caducada.
+- **Carátulas HD.** Las portadas de YouTube Music y de artistas se piden al CDN a 544 px en listas y 1 200 px en el reproductor, la cabecera y la notificación; Spotify usa su imagen de 640 px. Los fotogramas 4:3 de YouTube ya no muestran franjas negras. Si una carátula falla se prueba la siguiente opción y, si todas fallan, se reintenta dos veces y al recuperar la conexión. Las canciones de un álbum heredan su portada y su artista.
+- **Cola en orden.** «Añadir a la cola» y deslizar a la derecha ponen las canciones después de la actual y de lo que ya añadiste, en el orden en que las añadiste. «Añadir todo a la cola» en playlists y álbumes.
+- **Sin corte entre canciones.** El siguiente tema arranca 240 ms antes del final aunque Auto-Mix esté apagado, se detecta el silencio final de muchas subidas para pasar antes, y el realce de volumen solo se activa en directos, porque engancharlo en cada cambio podía producir un microcorte.
+- **Letras dentro de la app.** Búsqueda flexible en LRCLIB (título limpio, artista principal, duración aproximada, prefiere letra sincronizada) y, si no hay, la letra que muestra YouTube Music (normalmente de LyricFind). Genius no ofrece letras por API; su búsqueda solo aparece cuando ninguna fuente tiene la letra.
+- **Perfil de artista.** Foto HD teñida con su color, oyentes, tus reproducciones, Reproducir y Aleatorio, descripción plegable, Populares de YouTube Music, tus canciones, álbumes, sencillos, videos y artistas afines. Se abre desde el reproductor, la cola, la biblioteca y los artistas del Inicio (antes saltaban a la app de YouTube Music).
+- **Álbumes y playlists.** Cabecera con portada grande, fondo desenfocado, tipo, artista, año, número de canciones y duración total; pistas numeradas en álbumes; Reproducir, Aleatorio, Guardar y menú ⋮.
+- **Menos ruido.** Se quitaron la barra Atrás/Adelante (ahora hay una flecha en la barra superior solo en vistas de detalle, además del gesto de Android), el botón de temporizador del reproductor (sigue en Conexiones) y el acceso Descargas del Inicio (la pestaña de Biblioteca solo aparece si hay descargas). Ordenar, importar enlaces, buscar con tu sesión y las opciones de colección viven en menús ⋮; Conexiones pliega «Voz y permisos» y «Avanzado». La pantalla musical se abre con el icono ✦ del reproductor.
+- **Pantalla musical nueva.** Analiza el audio real (espectro de 36 bandas de 35 Hz a 16 kHz, graves, medios, agudos y detección de golpes) sincronizado con lo que sale del altavoz. Fondo líquido con los colores de la portada que gira con los graves y salpica en cada golpe, anillo de puntos LED con picos que caen, disco de portada con resorte, ráfagas de puntos y una vibración visual de hasta 3 dp en los golpes fuertes, franja de pulsos y reloj de matriz de puntos que late con el bajo. Títulos en Roboto Condensed y textos espaciados en mayúsculas. Sin animación si el sistema la desactiva.
+- **Bienvenida nueva.** Aurora animada con el color de lo que suena, fecha, saludo, tiempo de la semana y una tarjeta para seguir escuchando.
+- **Gestos y respuesta al tacto.** Deslizar una canción revela «A la cola», vibra al cruzar el umbral y rebota al soltar; deslizar la portada del reproductor cambia de canción; arrastrar la hoja de opciones hacia abajo la cierra; onda de tinta al tocar filas y menús, escala al pulsar, entrada escalonada de menús y transición del minirreproductor al cambiar de pista. Todo respeta «reducir movimiento».
+
+Verificación de 2.7: 169 pruebas web en 17 archivos, 86 pruebas Android (1 omitida: smoke de red), lint sin errores, APK v2 `2.7.0` código 20 con la misma firma que 2.6.0, assets idénticos al build web y sin credenciales. Vista previa revisada a 375 px y 768 px sin errores de consola ni desbordes. No hubo teléfono: falta escuchar el paso entre canciones, abrir mixes reales y medir la fluidez de la pantalla musical.
 
 ## Novedades 2.6
 

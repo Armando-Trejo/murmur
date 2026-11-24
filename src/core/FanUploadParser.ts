@@ -1,5 +1,7 @@
 import type { Chapter } from './types';
 const noise = /\b(?:official(?:\s+(?:music\s+)?(?:video|audio))?|music video|lyrics?|hq|hd|4k|1080p|720p|sub\s*(?:espa[nñ]ol|english)|audio oficial|video oficial)\b/gi;
+/** Title without upload noise such as "Official Video", "HD" or empty brackets. */
+export const stripTitleNoise = (raw: string) => raw.replace(noise, '').replace(/[\[(]\s*[\])]/g, '').replace(/\s+/g, ' ').trim();
 export const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 export function parseChapters(description: string, duration: number): Chapter[] {
   if (duration <= 900) return [];

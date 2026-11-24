@@ -1,6 +1,43 @@
-# Continuidad de MURMUR 2.6.0
+# Continuidad de MURMUR 2.7.0
 
 ## Estado para retomar
+
+Repositorio local en `D:/PROYECTOS IA/APP HYBRIDA`, remoto `https://github.com/Armando-Trejo/murmur.git`, rama `main`. El commit de esta entrega se titula «Publica MURMUR 2.7.0: mixes, letras, perfiles y pantalla musical». APK `com.personal.murmur` 2.7.0, código de versión 20, firmado con la misma clave local de depuración que 2.6.0, así que se instala encima conservando biblioteca y sesiones. Para enviarlo al teléfono por la app se compila además un APK sólo arm64 (`-Pabi=arm64-v8a`, ~20 MB) porque el universal supera el límite de 30 MB.
+
+La entrega responde a la prueba del usuario con 2.6.0. Qué cambió y dónde vive:
+
+- Mixes de YouTube: `YouTubeLibraryReader.mix()` pide la cola al endpoint `next` (`playlistId` RD…), parseada por `YouTubeMusicPages.watchPlaylist`. `AuthBridgePlugin.youtubeCollection` prueba con sesión, luego en público (`YouTubeLibraryReader("")` con `PUBLIC_CLIENT_VERSION`) y luego NewPipe, y conserva el primer fallo real. Las peticiones públicas usan la operación `public_music`: su 401/403 da `YOUTUBE_CONTENT_UNAVAILABLE` y ya no marca la sesión como no verificada. La causa del fallo anterior era pedir `browse VLRD…`, que YouTube responde sin contenido.
+- Álbum y artista: `YouTubeMusicPages.header` (título, artista, año, portada) completa portada y artista de las filas de álbum; `youtubeArtist({id|name})` resuelve el canal por búsqueda y devuelve foto, descripción, audiencia y estantes. UI en `src/components/ArtistProfile.tsx` (ruta `artist` + `artistId`) y la cabecera `collection-hero` de `App.tsx`.
+- Portadas: `src/core/artwork.ts` (`sizedArtwork`, `isLetterboxed`, candidatas ordenadas) y `src/components/Cover.tsx` (reintentos y `online`). En Kotlin, `YouTubeArtwork.hd` (544 px en listas, 1 080 en la notificación).
+- Cola: `AudioOrchestrator.enqueue` acepta una o varias pistas y las inserta tras la actual y tras las marcadas `userQueued` (FIFO). `playList` limpia la marca.
+- Paso entre canciones: `HybridMediaService.watchTail` programa `tailHandoff` 240 ms antes del final (también con Auto-Mix apagado, `startOverlap(force = true)`) y adelanta el cambio si detecta 700 ms de silencio en los últimos 6 s de una pista que tuvo señal. `configureEnhancer` sólo engancha `LoudnessEnhancer` en directos.
+- Letras: `getLyrics` en `DiscoveryEngine.ts` limpia título y artista (`lyricsQuery`), consulta `api/get` y `api/search` de LRCLIB con `pickLrclib` y, si no hay letra, `Auth.youtubeLyrics` (pestaña de letra de YouTube Music, normalmente LyricFind). Caché `lyrics:v3:` sólo con resultados.
+- Interfaz: `OverflowMenu.tsx` (portal, abre hacia arriba cerca del borde, teclado), bienvenida `welcome-hero`, flecha de volver en la barra superior (se quitó la barra Atrás/Adelante), ajustes plegados en Conexiones, gestos de `SwipeSurface` (prop `reveal`, umbral con háptico, rebote), portada del reproductor deslizable, hoja de opciones arrastrable desde el asa y onda de tinta global. Estilos en `src/v27.css`, importado al final.
+- Pantalla musical: `VisualSpectrumAnalyzer.kt` (`VisualPcmTap` sin bloqueos escrito desde el hilo de audio en `Meter` y en `SpotifyPcmOutput`; `SpectrumAnalyzer` con ventana Hann, FFT, 36 bandas logarítmicas, graves/medios/agudos y golpes con media adaptable y periodo refractario). `VisualClockSink.kt` (un `ForwardingAudioSink`) alinea el análisis con la posición audible, unos 250 ms por detrás de lo decodificado. API: `HybridMediaService.visualSpectrum(frameTimeNanos)` devuelve una instancia reutilizada; `visualAmplitude` sigue disponible y lo usa `watchTail`. Dibujo en `AuraStageView.kt` (fluido de `LiquidField.kt`, anillo, disco, ráfagas, franja y vibración) y `DotMatrix.kt` (reloj de 5×9 puntos). `VisualizerRenderTest` escribe fotogramas en `android/app/build/visualizer-preview/`; `MusicVisualActivityTest` reescribe `verification/visualizer-25.png`.
+
+## Primera tarea del siguiente modelo
+
+Instalar el APK 2.7.0 sobre 2.6.0 en el teléfono del usuario y recorrer esta matriz. No hubo teléfono conectado por ADB en esta sesión.
+
+| Caso | Resultado esperado |
+| --- | --- |
+| Abrir varios mixes del Inicio de YouTube Music (Supermix, Mix de artista, radio de una canción) | Se abren con 25–100 canciones, sin «YouTube no autorizó la biblioteca privada». Reproducir y Guardar colección funcionan. |
+| Pasar entre canciones con Auto-Mix apagado y en Suave | No se oye corte. En apagado el cambio es inmediato; en Suave hay fundido. |
+| Añadir A, B y C a la cola (menú y deslizando) | Suenan A, B, C justo después de la actual y antes del resto de la lista. |
+| Letras de canciones de YouTube Music, de videos y de Spotify | Aparece la letra dentro de la app (sincronizada si LRCLIB la tiene, si no la de YouTube Music) con su crédito. |
+| Portadas en listas, reproductor, álbum, artista y notificación | Nítidas, sin franjas negras; si una falla, aparece otra al poco o al volver la red. |
+| Tocar el artista en el reproductor y un artista del Inicio | Abre el perfil dentro de MURMUR con foto, Populares, álbumes y afines. |
+| Pantalla musical (icono ✦ del reproductor) | Fluida, reacciona a los golpes de bajo y cambia de color con la portada. |
+| Gestos | Deslizar filas revela «A la cola» y vibra al cruzar el umbral; deslizar la portada cambia de canción; arrastrar la hoja hacia abajo la cierra. |
+
+## Verificación de 2.7.0
+
+- `npx vitest run`: 169 pruebas web en 17 archivos. Nuevas: orden FIFO de la cola, carátulas por tamaño y franjas, `lyricsLookup.test.ts` (limpieza de títulos, elección en LRCLIB, LRC con varias marcas, respaldo de YouTube Music, error de red).
+- `.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug -Pkotlin.incremental=false`: 86 pruebas Android, 1 omitida (smoke de red), lint con 0 errores y 99 avisos. Nuevas: `YouTubeMusicPagesTest`, `SpectrumAnalyzerTest`, `VisualizerRenderTest`.
+- `apksigner verify`: esquema v2, misma huella SHA-256 `78d2b623…` que 2.6.0, `versionName 2.7.0`, `versionCode 20`, tanto en el universal (`MURMUR-2.7.0.apk`, 40,4 MiB) como en el arm64 (`MURMUR-2.7.0-arm64.apk`, 20,2 MiB). Los cinco archivos web coinciden con `dist`; `scripts/verify-artifact.ps1` no detecta credenciales.
+- Vista previa revisada en Chrome a 375 px y 768 px: bienvenida, perfil de artista, cabecera de álbum, menús ⋮, Conexiones plegado, portada deslizable y letras, sin errores de consola ni desbordes horizontales. La demo incluye un artista y un álbum de ejemplo.
+
+## Historial: estado de 2.6.0
 
 Repositorio local en `D:/PROYECTOS IA/APP HYBRIDA`, remoto `https://github.com/Armando-Trejo/murmur.git`, rama `main`. El commit de esta entrega se titula «Publica MURMUR 2.6.0: experiencia premium». APK `com.personal.murmur` 2.6.0, código de versión 19, firmado con la misma clave local de depuración que 2.5.1, así que se instala encima conservando biblioteca y sesiones.
 
@@ -14,22 +51,7 @@ Lo nuevo de 2.6 y dónde vive:
 - Hápticos: `src/core/haptics.ts` → `YouTubeAudio.haptic` → `HapticPatterns.kt` (`performHapticFeedback`, sin permiso de vibración). Preferencia `murmur.haptics` en localStorage.
 - Métricas toque→audio: `src/core/PlaybackMetrics.ts` (`SelectionTimer` dentro de `AudioOrchestrator.update`) y `src/components/PlaybackDiagnostics.tsx`. Guarda hasta 80 muestras en localStorage con códigos saneados, sin mensajes ni URLs.
 
-## Primera tarea del siguiente modelo
-
-Instalar el APK 2.6.0 sobre 2.5.1 en el teléfono del usuario y recorrer esta matriz. No hubo teléfono conectado por ADB en esta sesión.
-
-| Caso | Resultado esperado |
-| --- | --- |
-| Abrir el reproductor con YouTube y con Spotify | El fondo toma el color de la carátula y se funde a negro; al cambiar de pista hace un fundido. Con Luz ambiental desactivada queda negro. Desplazar el reproductor es fluido. |
-| Letras de una canción conocida | La línea activa queda centrada y avanza sola. Al deslizar la letra aparece «Seguir la letra» y a los 6 s vuelve a seguir. Tocar una línea salta a ese momento. |
-| Temporizador «Al terminar esta canción» en YouTube | La pista se apaga con fundido antes del final, queda en pausa y el botón vuelve a «Temporizador». Play reanuda. |
-| Lo mismo en Spotify integrado | Se detiene al terminar y no avanza a la siguiente. |
-| Temporizador de 15 min con pantalla bloqueada | Cierre gradual al llegar a cero. La cuenta atrás desaparece. |
-| Hápticos | Vibración breve en play, saltos, guardar y deslizar a la cola; ninguna si el sistema tiene la vibración táctil apagada o el ajuste de MURMUR desactivado. |
-| Conexiones → Diagnóstico tras 10 selecciones por proveedor | p50/p95 coherentes con lo percibido. Copiar informe no incluye cuentas, tokens ni URLs. |
-| Tu resumen | Totales coherentes con el historial real; tocar un artista abre su página y Reproducir arma la cola de favoritas. |
-
-## Verificación de 2.6.0
+## Historial: verificación de 2.6.0
 
 - `npm.cmd test`: 162 pruebas web en 15 archivos (incluye `premium.test.ts` y `AudioOrchestrator.metrics.test.ts`).
 - `.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug -Pkotlin.incremental=false`: 69 pruebas Android, 1 omitida (smoke de red), lint con 0 errores. Nuevas: `SleepAndHapticsTest` y `SpotifyIntegratedPlayerTest.naturalEndUsesTheEndCallbackInsteadOfSkipping`.

@@ -29,6 +29,7 @@ private object SpotifyEngineWorker {
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class SpotifyIntegratedPlayer(private val context: Context, private val onNext: () -> Unit, private val backend:SpotifyEngineBackend=JniSpotifyEngineBackend, private val manageFocus:Boolean=true,private val deviceLabel:String="MURMUR · Integrado", private val onEnded:(()->Unit)?=null, private val tokenSupplier:(()->String)?=null) : SimpleBasePlayer(Looper.getMainLooper()),SpotifyEngineEvents {
     val visualAmplitude get()=if(playing)output.amplitude else 0f
+    val visualTap get()=output.visualTap
     private val handler=Handler(Looper.getMainLooper())
     private val scope=CoroutineScope(SupervisorJob()+SpotifyEngineWorker.dispatcher)
     private val generation=AtomicLong(0)

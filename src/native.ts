@@ -15,6 +15,14 @@ export interface FeedItem {
   artistId?: string;
 }
 export interface FeedShelf { title: string; items: FeedItem[] }
+export interface ArtistPage {
+  id: string;
+  name: string;
+  artworkUrl?: string;
+  description?: string;
+  audience?: string;
+  shelves: FeedShelf[];
+}
 interface AudioBridge {
   openProviderHome(o: { provider: "youtube" | "spotify" }): Promise<void>;
   openVisualizer(): Promise<void>;
@@ -118,7 +126,13 @@ interface AuthBridge {
     method?: string;
     body?: string;
   }): Promise<{ data: any }>;
-  youtubeCollection(o: { id: string; personalized?: boolean }): Promise<{ title: string; artworkUrl?: string; tracks: QueueItem[] }>;
+  youtubeCollection(o: { id: string; personalized?: boolean }): Promise<{
+    title: string; artworkUrl?: string; artist?: string; year?: string; subtitle?: string; tracks: QueueItem[];
+  }>;
+  /** YouTube Music artist page; resolves the channel by name when no id is known. */
+  youtubeArtist(o: { id?: string; name?: string }): Promise<ArtistPage>;
+  /** Plain lyrics as YouTube Music shows them, by video or by a "title artist" query. */
+  youtubeLyrics(o: { videoId?: string; query?: string }): Promise<{ found: boolean; text?: string; source?: string }>;
   youtubeHome(): Promise<{ shelves: FeedShelf[] }>;
   youtubeLibrary(): Promise<{ playlists: any[] }>;
   youtubePlaylist(o: { id: string }): Promise<{ tracks: QueueItem[] }>;

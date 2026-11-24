@@ -84,11 +84,35 @@ const methods: Record<string, (...args: any[]) => unknown> = {
       items: [
         { id: "PLmurmurDemo", title: "Colección de ejemplo", artworkUrl: tracks[2]?.artworkUrl,
           link: "https://music.youtube.com/playlist?list=PLmurmurDemo", subtitle: "Playlist" },
+        { id: "MPREbmurmurDemo", title: "Álbum de ejemplo", artworkUrl: tracks[1]?.artworkUrl,
+          link: "https://music.youtube.com/browse/MPREbmurmurDemo", subtitle: "Álbum · 2024" },
+        { id: "UCmurmurDemoArtist01", artistId: "UCmurmurDemoArtist01", title: tracks[0]?.artist ?? "Artista",
+          artworkUrl: tracks[3]?.artworkUrl, subtitle: "Artista" },
         ...tracks.map(track => ({ id: track.id, title: track.title, subtitle: track.artist, track })),
       ],
     }],
   }),
-  youtubeCollection: () => ({ title: "Colección de ejemplo", artworkUrl: tracks[2]?.artworkUrl, tracks }),
+  youtubeCollection: ({ id }: { id: string }) => String(id).startsWith("MPREb")
+    ? { title: "Álbum de ejemplo", artist: tracks[0]?.artist, year: "2024", artworkUrl: tracks[1]?.artworkUrl,
+        tracks: tracks.slice(0, 9).map(track => ({ ...track, artworkUrl: tracks[1]?.artworkUrl })) }
+    : { title: "Colección de ejemplo", artworkUrl: tracks[2]?.artworkUrl, tracks },
+  youtubeArtist: ({ name }: { name?: string }) => ({
+    id: "UCmurmurDemoArtist01",
+    name: name || tracks[0]?.artist || "Artista",
+    artworkUrl: tracks[3]?.artworkUrl,
+    audience: "1,2 M de suscriptores",
+    description: "Perfil de demostración. En el teléfono esta descripción, la foto y las listas llegan de YouTube Music: canciones populares, álbumes, sencillos, videos y artistas afines.",
+    shelves: [
+      { title: "Canciones", items: tracks.slice(0, 6).map(track => ({ id: track.id, title: track.title, subtitle: track.artist, track })) },
+      { title: "Álbumes", items: tracks.slice(1, 6).map((track, index) => ({
+        id: "MPREbmurmurDemo" + index, title: "Álbum " + (index + 1), subtitle: String(2019 + index), artworkUrl: track.artworkUrl,
+        link: "https://music.youtube.com/browse/MPREbmurmurDemo" + index })) },
+      { title: "Fans también escuchan", items: tracks.slice(4, 9).map((track, index) => ({
+        id: "UCmurmurDemoRelated0" + index, artistId: "UCmurmurDemoRelated0" + index, title: track.artist, subtitle: "Artista",
+        artworkUrl: track.artworkUrl })) },
+    ],
+  }),
+  youtubeLyrics: () => ({ found: false }),
   searchYouTube: ({ query }) => ({
     tracks: tracks.filter(track => (track.title + " " + track.artist).toLowerCase().includes(String(query).toLowerCase())),
   }),

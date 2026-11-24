@@ -10,6 +10,8 @@ export interface InterfaceRoute {
   view: ViewId;
   playlistId?: string;
   artist?: string;
+  /** YouTube Music channel of the artist, when the profile was opened from a provider page. */
+  artistId?: string;
   directory?: "artists" | "albums" | "insights";
   player?: boolean;
   panel?: "queue" | "lyrics";
@@ -19,6 +21,7 @@ function href(route: InterfaceRoute) {
   const params = new URLSearchParams();
   if (route.playlistId) params.set("playlist", route.playlistId);
   if(route.artist)params.set("artist",route.artist);
+  if(route.artistId)params.set("artistId",route.artistId);
   if(route.directory)params.set("directory",route.directory);
   if (route.player) params.set("player", "1");
   return "#/" + route.view + (params.size ? "?" + params : "");
@@ -30,6 +33,7 @@ function fromUrl(): InterfaceRoute {
     view: resolveView(path).view,
     playlistId: params.get("playlist") || undefined,
     artist: params.get("artist") || undefined,
+    artistId: /^UC[\w-]{10,120}$/.test(params.get("artistId") || "") ? params.get("artistId")! : undefined,
     directory: ["artists","albums","insights"].includes(params.get("directory")||"") ? params.get("directory") as "artists"|"albums"|"insights" : undefined,
     player: params.get("player") === "1" || undefined,
   };
@@ -69,7 +73,7 @@ export function useInterfaceNavigation() {
       "",
       href(next),
     );
-    if (before.view !== next.view || before.playlistId !== next.playlistId || before.artist !== next.artist || before.directory !== next.directory)
+    if (before.view !== next.view || before.playlistId !== next.playlistId || before.artist !== next.artist || before.artistId !== next.artistId || before.directory !== next.directory)
       window.scrollTo({ top: 0 });
   };
   const commitRef = useRef(commit);
@@ -126,7 +130,7 @@ export function useInterfaceNavigation() {
       else if (next.panel) delete next.panel;
       else if (next.player) delete next.player;
       else if (next.playlistId) delete next.playlistId;
-      else if(next.artist)delete next.artist;
+      else if(next.artist){delete next.artist;delete next.artistId;}
       else if(next.directory)delete next.directory;
       else return false;
       commit(next, true);
