@@ -124,6 +124,95 @@ object YouTubeMusicPages {
         return result
     }
 
+    /**
+     * Names worth looking up for an artist line as tracks carry it: "A feat. B", "A, B & C",
+     * "Misfits - Topic", "MisfitsVEVO". The full cleaned line comes first, then each credited artist.
+     */
+    fun artistNames(raw: String): List<String> {
+        val clean = raw.replace(Regex("(?i)\\s*-\\s*topic\\s*$"), "")
+            .replace(Regex("(?i)\\s*\\((?:official|oficial)\\)"), "")
+            .replace(Regex("(?i)(?<=\\S)vevo\\s*$"), "").trim()
+        val parts = clean.split(Regex("(?i)\\s*(?:,|&|/|\\bfeat\\.?|\\bft\\.?|\\bfeaturing\\b|\\bwith\\b|\\s+x\\s+|\\s+y\\s+)\\s*"))
+            .map(String::trim).filter(String::isNotBlank)
+        return (listOf(clean) + parts).filter(String::isNotBlank).distinct()
+    }
+
+    private fun sameName(a: String, b: String): Boolean {
+        val x = normalize(a); val y = normalize(b)
+        return x.isNotBlank() && (x == y || x.removePrefix("the ") == y.removePrefix("the "))
+    }
+
+    /**
+     * Artist channel whose name matches one of [names] exactly (ignoring accents, case and "The").
+     * Never falls back to an unrelated channel: a wrong profile is worse than none.
+     */
+    fun matchingArtistChannel(data: JSONObject, names: List<String>): String? {
+        val found = mutableListOf<Pair<String, String>>()
+        fun walk(value: Any?) {
+            when (value) {
+                is JSONObject -> {
+                    val renderer = value.optJSONObject("musicResponsiveListItemRenderer")
+                        ?: value.optJSONObject("musicCardShelfRenderer")
+                    if (renderer != null) {
+                        val nav = renderer.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")
+                            ?: find(renderer.opt("title"), setOf("browseEndpoint"))
+                        val channel = nav?.optString("browseId").orEmpty()
+                        val page = nav?.optJSONObject("browseEndpointContextSupportedConfigs")
+                            ?.optJSONObject("browseEndpointContextMusicConfig")?.optString("pageType").orEmpty()
+                        val title = text(renderer.optJSONObject("title")).ifBlank {
+                            text(renderer.optJSONArray("flexColumns")?.optJSONObject(0)
+                                ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")?.optJSONObject("text"))
+                        }
+                        if (channel.matches(Regex("UC[A-Za-z0-9_-]{10,120}")) &&
+                            (page.isBlank() || page == "MUSIC_PAGE_TYPE_ARTIST")) found.add(channel to title)
+                    }
+                    value.keys().forEach { walk(value.opt(it)) }
+                }
+                is JSONArray -> for (i in 0 until value.length()) walk(value.opt(i))
+            }
+        }
+        walk(data)
+        for (name in names) found.firstOrNull { sameName(it.second, name) }?.let { return it.first }
+        return null
+    }
+
+    /**
+     * Albums from the Albums tab of YouTube Music search, as feed items the collection view opens:
+     * id MPREb…, title, "Álbum · Artista · Año" subtitle, artist, year and the square cover.
+     */
+    fun albumResults(data: JSONObject): JSONArray {
+        val result = JSONArray()
+        val seen = mutableSetOf<String>()
+        fun walk(value: Any?) {
+            when (value) {
+                is JSONObject -> {
+                    val row = value.optJSONObject("musicResponsiveListItemRenderer")
+                    if (row != null) {
+                        val browse = row.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")
+                        val id = browse?.optString("browseId").orEmpty()
+                        if (id.matches(Regex("MPREb[A-Za-z0-9_-]{2,120}")) && seen.add(id)) {
+                            val columns = row.optJSONArray("flexColumns")
+                            fun column(i: Int) = text(columns?.optJSONObject(i)?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")?.optJSONObject("text"))
+                            val title = column(0)
+                            val parts = column(1).split(" • ", " · ").map(String::trim).filter(String::isNotBlank)
+                            val yearPart = parts.lastOrNull { it.matches(year) }
+                            val artist = parts.drop(1).filterNot { it == yearPart }.joinToString(", ")
+                            val cover = largest(find(row, setOf("musicThumbnailRenderer"))?.optJSONObject("thumbnail")?.optJSONArray("thumbnails"))
+                            if (title.isNotBlank()) result.put(JSONObject().put("id", id).put("title", title)
+                                .put("subtitle", listOf(parts.firstOrNull() ?: "Álbum", artist, yearPart.orEmpty()).filter(String::isNotBlank).joinToString(" · "))
+                                .put("artist", artist).put("year", yearPart.orEmpty()).put("source", "youtube").put("kind", "album")
+                                .put("artworkUrl", cover).put("link", "https://music.youtube.com/browse/$id"))
+                        }
+                    }
+                    value.keys().forEach { walk(value.opt(it)) }
+                }
+                is JSONArray -> for (i in 0 until value.length()) walk(value.opt(i))
+            }
+        }
+        walk(data)
+        return result
+    }
+
     /** First artist channel found in a search response, preferring an exact name match. */
     fun artistChannel(data: JSONObject, name: String): String? {
         val wanted = normalize(name)

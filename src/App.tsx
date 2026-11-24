@@ -110,6 +110,9 @@ import { PlaybackDiagnostics } from "./components/PlaybackDiagnostics";
 import { formatListening, greeting, listenedSeconds } from "./core/insights";
 import { haptic, hapticsEnabled, setHapticsEnabled } from "./core/haptics";
 import { prefetchAudio } from "./core/prefetch";
+import { albumLink, SPOTIFY_ALBUM_PREFIX, type AlbumResult } from "./core/albumSearch";
+import { AlbumResults } from "./components/AlbumResults";
+import { BlendMixes } from "./components/BlendMixes";
 import {
   loadRecentSearches,
   pushRecent,
@@ -347,8 +350,11 @@ export default function App() {
   }>();
   const [collectionRetry, setCollectionRetry] = useState(0);
   const feedId = /^feed:([A-Za-z0-9_-]{2,120})$/.exec(nav.route.playlistId ?? "")?.[1];
-  const feedLink = feedId ? "https://music.youtube.com/" +
-    (feedId.startsWith("MPREb") ? "browse/" : "playlist?list=") + feedId : undefined;
+  const feedLink = feedId
+    ? feedId.startsWith(SPOTIFY_ALBUM_PREFIX) || feedId.startsWith("MPREb")
+      ? albumLink(feedId)
+      : "https://music.youtube.com/playlist?list=" + feedId
+    : undefined;
   const collection = feedCollection && feedCollection.link === feedLink &&
     feedCollection.revision === status.youtubeRevision ? feedCollection : undefined;
   const activePlaylist = collection?.data?.playlist ?? playlists.find((p) => p.id === nav.route.playlistId);
@@ -760,7 +766,8 @@ export default function App() {
   useEffect(() => {
     const generation = ++seq.current;
     const value = query.trim();
-    if (value.length < 2) {
+    // The Álbumes filter fetches on its own (AlbumResults); playlists are filtered locally.
+    if (value.length < 2 || provider === "albums") {
       setResults([]);
       setSearchError("");
       setSearching(false);
@@ -955,6 +962,12 @@ export default function App() {
   );
   const orderedResults = useMemo(() => orderMusic(results, searchOrder, stats), [results, searchOrder, stats]);
   useEffect(() => prefetchAudio(orderedResults.slice(0, 2), 2), [orderedResults]);
+  const savedPlaylistIds = useMemo(() => new Set(playlists.map((p) => p.id)), [playlists]);
+  const openAlbum = (album: AlbumResult) => {
+    haptic();
+    rememberSearch(query);
+    nav.push({ view: "library", playlistId: "feed:" + album.feedId });
+  };
   useEffect(() => prefetchAudio(displayedPlaylistItems.slice(0, 3)), [displayedPlaylistItems]);
   const musicArt = useMemo(
     () => orderMusic(tracks, "listening", stats).filter((t) => artworkFor(t)),
@@ -1243,6 +1256,11 @@ export default function App() {
           </div>
         )}
         <div hidden={tab !== "home"} className="home-provider-region">
+          <BlendMixes
+            enabled={tab === "home" && isNative && !status.preview && !!(status.spotify || status.oauth || status.youtube || status.youtubeSession)}
+            onPlay={(items, index) => void player.playList(items, index)}
+            notify={notify}
+          />
           <HomeFeed
             active={tab === "home"}
             status={status}
@@ -1553,6 +1571,7 @@ export default function App() {
             <div className="pills search-pills">
               {[
                 { id: "all", title: "Todo" },
+                { id: "albums", title: "Álbumes" },
                 { id: "spotify", title: "Canciones · Spotify" },
                 { id: "youtube", title: "Videos / Remixes" },
                 { id: "playlists", title: "Playlists locales" },
@@ -1566,7 +1585,15 @@ export default function App() {
                 </button>
               ))}
             </div>
-            {provider === "playlists" ? (
+            {provider === "albums" && query.trim().length >= 2 ? (
+              <AlbumResults
+                query={query}
+                variant="grid"
+                savedIds={savedPlaylistIds}
+                onOpen={openAlbum}
+                notify={notify}
+              />
+            ) : provider === "playlists" ? (
               playlists
                 .filter((p) =>
                   p.title.toLowerCase().includes(query.toLowerCase()),
@@ -1605,6 +1632,15 @@ export default function App() {
               </div>
             ) : results.length ? (
               <>
+                {provider === "all" && (
+                  <AlbumResults
+                    query={query}
+                    variant="strip"
+                    savedIds={savedPlaylistIds}
+                    onOpen={openAlbum}
+                    notify={notify}
+                  />
+                )}
                 <div className="section-heading results-heading">
                   <h2>Resultados</h2>
                   <span className="muted">{results.length}</span>

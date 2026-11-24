@@ -24,6 +24,8 @@ class SpotifySession(private val prefs: SharedPreferences) {
     private fun stored() = hasOAuth() || !prefs.getString("spotify_cookie", null).isNullOrBlank()
     private fun invalidate(error: ProviderFailure) { if (ProviderFailures.invalidatesLibraryAccess(error)) prefs.edit().putBoolean("spotify_verified", false).putString("spotify_error", error.message).putString("spotify_code", error.code).apply() }
     fun clearToken() { token = null; expires = 0 }
+    /** The library OAuth carries the scopes the official Web Playback SDK needs. */
+    fun webReady() = hasOAuth() && prefs.getString("oauth_scopes","")!!.split(' ').containsAll(listOf("streaming","user-read-email"))
     fun status(): JSObject {
         val verified = stored() && prefs.getBoolean("spotify_verified", false) && prefs.getInt("verification_version", 0) == 2
         return JSObject().put("spotify", verified).put("spotifySession", stored()).put("oauth", hasOAuth()).put("spotifyWebAuthorized",hasOAuth() && prefs.getString("oauth_scopes","")!!.split(' ').containsAll(listOf("streaming","user-read-email")))

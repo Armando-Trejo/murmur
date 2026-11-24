@@ -51,6 +51,9 @@ interface AudioBridge {
   preloadNextStream(o: QueueItem): Promise<void>;
   /** Resolves (never downloads) the audio links of likely next taps into the native cache. */
   prefetchAudio(o: { videoIds: string[] }): Promise<void>;
+  /** Music screen over the lock screen when the display turns off during playback. */
+  setLockVisualizer(o: { enabled: boolean }): Promise<void>;
+  getLockVisualizer(): Promise<{ enabled: boolean }>;
   pause(): Promise<void>;
   resume(): Promise<void>;
   seekTo(o: { positionMs: number }): Promise<void>;
@@ -133,6 +136,8 @@ interface AuthBridge {
   }>;
   /** YouTube Music artist page; resolves the channel by name when no id is known. */
   youtubeArtist(o: { id?: string; name?: string }): Promise<ArtistPage>;
+  /** Albums tab of YouTube Music search. */
+  youtubeAlbums(o: { query: string }): Promise<{ albums: { id: string; title: string; artist?: string; year?: string; artworkUrl?: string }[] }>;
   /** Plain lyrics as YouTube Music shows them, by video or by a "title artist" query. */
   youtubeLyrics(o: { videoId?: string; query?: string }): Promise<{ found: boolean; text?: string; source?: string }>;
   youtubeHome(): Promise<{ shelves: FeedShelf[] }>;

@@ -1,4 +1,22 @@
-# Continuidad de MURMUR 2.8.0
+# Continuidad de MURMUR 2.9.0
+
+## Estado de 2.9.0 (24 nov 2026, código 23)
+
+Instalado en el HONOR del usuario encima de 2.8.0 (misma firma de esta PC, datos conservados). Responde a su prueba de 2.8.0.
+
+- **Sin corte entre canciones (gapless).** Los registros mostraban un `AudioTrack` nuevo en cada cambio: la siguiente canción sonaba en el segundo reproductor. Ahora, con Auto-Mix apagado y siempre dentro de un mismo álbum (`albumId`, o mismo álbum y artista), la siguiente se agrega a la lista del **mismo** ExoPlayer (`HybridMediaService.chainNext`/`adoptChained`, `wantsGapless`) y suena sobre la misma salida de audio. Con Auto-Mix entre canciones de distinto álbum se conserva el fundido con el segundo reproductor. Prueba: `GaplessChainTest` (la transición natural sólo se puede comprobar en el teléfono: Robolectric no llega a READY).
+- **Pantalla musical al bloquear.** `MainActivity.onPause`/`ACTION_SCREEN_OFF`: si la pantalla se apaga con MURMUR al frente y suena música, abre `MusicVisualActivity` (ya tenía `showWhenLocked`; ahora `setTurnScreenOn(false)`), que hace de carátula de bloqueo con reloj. Cerrarla pide desbloquear (`requestDismissKeyguard`). Interruptor «Pantalla musical al bloquear» en Conexiones › Tu acento (`LockVisualizer`, `playback.lock_visualizer`, activado por defecto).
+- **Perfiles de artista.** Antes, si no había coincidencia exacta se tomaba el primer canal de artista de la búsqueda (a menudo otro artista). Ahora `YouTubeMusicPages.artistNames` separa créditos («feat.», «,», «&», «x», «- Topic», «VEVO») y `matchingArtistChannel` sólo acepta un nombre exacto (sin acentos, mayúsculas ni «The»), buscando en la pestaña Artistas. Sin coincidencia se muestra el aviso y la biblioteca local. Prueba: `ArtistMatchTest`.
+- **Búsqueda de álbumes.** Filtro «Álbumes» en Buscar y carrusel de álbumes arriba de los resultados en «Todo». YouTube Music (`youtubeAlbums`, pestaña Álbumes) y Spotify (`/search?type=album`), intercalados. El + guarda el álbum completo en la biblioteca (`saveCollection`); tocarlo abre el álbum (`feed:MPREb…` o `feed:spalbum-<id>`). Código: `src/core/albumSearch.ts`, `src/components/AlbumResults.tsx`.
+- **Mezclas MURMUR** en Inicio (`src/core/blendMixes.ts`, `src/components/BlendMixes.tsx`): top tracks y top artists (con géneros) de Spotify, Inicio de YouTube Music, radio de YouTube (`RDAMVM<videoId>`) a partir de tus canciones y tu historial en MURMUR. Los géneros se agrupan en familias por palabras clave y, si el modelo local de 6 MB está descargado, con `Voice.rankTags`. Genera «Tu mezcla MURMUR», hasta 3 «Mezcla · <familia>», «Descubrimiento cruzado» (sólo canciones nuevas) y «Radio de <canción>». Caché de 12 h en `db.settings` `blend:v1`; el + las guarda como playlist híbrida.
+- **Spotify integrado.** Tras la reinstalación, Spotify autentica el motor librespot pero rechaza las llaves de audio (`audio key refused`, error 0 1), un bloqueo del lado de Spotify. Ahora, al recibir `key_refused`, si la autorización de la biblioteca tiene los permisos del reproductor Web, la misma canción sigue en **Integrado · Web** y ese modo queda guardado (`HybridMediaService.fallBackToWeb`). Si no, se muestra el aviso para cambiarlo en Conexiones.
+- La precarga de enlaces de 2.7.1 (`prefetchAudio`) y `SecurePrefs` siguen igual que en 2.8.0.
+
+Verificación: 180 pruebas web, 95 Android, lint 0 errores. Pendiente en teléfono: fin natural de canción en álbum y con Auto-Mix apagado, bloqueo con música, búsqueda de álbumes, mezclas y Spotify Web.
+
+---
+
+# Historial: continuidad de MURMUR 2.8.0
 
 ## Estado de 2.8.0 (24 nov 2026)
 

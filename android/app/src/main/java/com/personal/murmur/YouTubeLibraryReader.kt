@@ -12,6 +12,9 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
     companion object {
         /** Used only for anonymous public requests when the page does not expose its client version. */
         const val PUBLIC_CLIENT_VERSION = "1.20241118.01.00"
+        /** YouTube Music search tabs ("params" of the Artists and Albums chips). */
+        const val ARTISTS_FILTER = "EgWKAQIgAWoMEA4QChADEAQQCRAF"
+        const val ALBUMS_FILTER = "EgWKAQIYAWoMEA4QChADEAQQCRAF"
     }
     private var version: String? = config.optString("clientVersion").takeIf(YouTubeSessionConfiguration::validVersion)
     private val signedIn get() = cookie.split(';').any {
@@ -30,7 +33,7 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
     }
     private fun request(browseId: String? = null, continuation: String? = null,
                         home: Boolean = false, accountMenu: Boolean = false,
-                        watch: JSONObject? = null, search: String? = null): JSONObject {
+                        watch: JSONObject? = null, search: String? = null, searchParams: String? = null): JSONObject {
         val pairs=cookie.split(';').map { it.trim() }
         val sapisid=(pairs.firstOrNull { it.startsWith("SAPISID=") } ?: pairs.firstOrNull { it.startsWith("__Secure-3PAPISID=") })?.substringAfter('=')
         val now=System.currentTimeMillis()/1000
@@ -40,7 +43,7 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
         config.optString("visitorData").takeIf{it.isNotBlank()}?.let{body.getJSONObject("context").getJSONObject("client").put("visitorData",it)}
         config.optString("pageId").takeIf{it.isNotBlank()}?.let{body.getJSONObject("context").put("user",JSONObject().put("onBehalfOfUser",it))}
         if (watch != null) watch.keys().forEach { body.put(it, watch.get(it)) }
-        else if (search != null) body.put("query", search)
+        else if (search != null) { body.put("query", search); searchParams?.let { body.put("params", it) } }
         else if (home && !accountMenu) body.put("browseId", "FEmusic_home")
         else if (continuation != null) body.put("continuation", continuation)
         else if (browseId != null) body.put("browseId", browseId)
@@ -154,10 +157,22 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
 
     fun artist(id:String?, name:String?):JSONObject {
         val channel=id?.takeIf{it.matches(Regex("UC[A-Za-z0-9_-]{10,120}"))}
-            ?: name?.trim()?.takeIf{it.isNotBlank()}?.let{YouTubeMusicPages.artistChannel(request(search=it.take(120)),it)}
-            ?: throw IllegalStateException("YouTube Music no encontró a este artista.")
+            ?: name?.trim()?.takeIf{it.isNotBlank()}?.let(::artistChannelFor)
+            ?: throw IllegalStateException("YouTube Music no encontró un perfil con el nombre exacto de este artista.")
         return YouTubeMusicPages.artist(request(channel),channel)
     }
+
+    /** Looks up each credited name in the Artists tab of search and accepts only an exact name match. */
+    private fun artistChannelFor(line:String):String? {
+        val names=YouTubeMusicPages.artistNames(line)
+        for(name in names.take(3)){
+            YouTubeMusicPages.matchingArtistChannel(request(search=name.take(120),searchParams=ARTISTS_FILTER),names)?.let{return it}
+        }
+        return YouTubeMusicPages.matchingArtistChannel(request(search=names.first().take(120)),names)
+    }
+
+    /** Album results of YouTube Music search, newest provider order. */
+    fun searchAlbums(query:String):JSONArray = YouTubeMusicPages.albumResults(request(search=query.take(200),searchParams=ALBUMS_FILTER))
     fun tracks(id: String): JSONArray {
         val browse=id.removePrefix("ytpl:")
         require(browse.matches(Regex("(?:VL|MPREb)[A-Za-z0-9_-]{2,120}"))) { "Playlist YouTube inválida" }

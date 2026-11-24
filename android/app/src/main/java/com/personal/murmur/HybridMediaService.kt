@@ -133,7 +133,32 @@ class HybridMediaService : MediaSessionService() {
     private val alternatives = ArrayDeque<PlaybackSource>()
     private var sourceAttempts = 0
     private var refreshedSource=false
-    private val integratedDelegate=lazy { com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={ advanceNative() },onEnded={ spotifyTrackEnded() }) }
+    private val integratedDelegate=lazy { com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={ advanceNative() },onEnded={ spotifyTrackEnded() },onKeysRefused={ fallBackToWeb() }) }
+    private var webFallbackFor = ""
+    /**
+     * Spotify sometimes refuses audio keys to the librespot engine while the account still logs in.
+     * When the library authorization carries the Web Playback scopes, the same song continues on the
+     * official Web player and that mode is kept, instead of stopping with an error.
+     */
+    private fun fallBackToWeb(): Boolean {
+        val data = track ?: return false
+        if (!spotifyActive || selectedWeb || !webSession.webReady()) return false
+        val id = entryIdentity(data)
+        if (webFallbackFor == id) return false
+        webFallbackFor = id
+        runCatching { com.personal.murmur.spotify.SpotifyEngineAuthorization(this).mode("web") }
+        NativeEvents.emit("onPlaybackNotice", JSObject().put("message",
+            "Spotify rechazó el motor integrado. MURMUR siguió con Integrado · Web; puedes cambiarlo en Conexiones."))
+        scope.launch {
+            try { playIntegrated(data, web = true, rememberTrack = false); emitNativeTrack(data) }
+            catch (failure: Exception) {
+                if (failure is CancellationException) return@launch
+                NativeEvents.emit("onSpotifyEngineError", JSObject().put("trackId", data.optString("id")).put("queueId", data.optString("queueId"))
+                    .put("message", failure.message ?: "Spotify Web no pudo continuar esta canción. Renueva Autorizar Spotify en Conexiones."))
+            }
+        }
+        return true
+    }
     private val nativeIntegrated by integratedDelegate
     private val webSession by lazy{SpotifySession.stored(this)}
     private val webDelegate=lazy{com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={advanceNative()},backend=com.personal.murmur.spotify.SpotifyWebBackend(this,tokenProvider={force->webSession.webToken(force)}),manageFocus=false,deviceLabel="MURMUR · Web",tokenSupplier={webSession.webToken()},onEnded={spotifyTrackEnded()})}
@@ -356,6 +381,10 @@ class HybridMediaService : MediaSessionService() {
             }, message)
         }
         override fun onAudioSessionIdChanged(audioSessionId: Int) { configureEnhancer(audioSessionId) }
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            if (spotifyActive || primaryPlayer.currentMediaItemIndex == 0) return
+            chainedTrack?.let { adoptChained(it) }
+        }
     }
     private fun emitYouTubeError(data: JSONObject, code: String, message: String) {
         val position = youtubePositionMs.coerceAtLeast(0)
@@ -393,7 +422,7 @@ class HybridMediaService : MediaSessionService() {
         if(spotifyActive){spotifyIntegrated.deactivate();spotifyActive=false;sessionPlayer(primaryPlayer)}
         val first = sources.firstOrNull() ?: error("No hay un formato de audio reproducible")
         recoveryPositionMs = null
-        fade?.cancel(); fade = null; preparing?.cancel(); secondaryPlayer.stop(); secondaryPlayer.clearMediaItems(); nextTrack = null; pendingTrack = null
+        fade?.cancel(); fade = null; preparing?.cancel(); secondaryPlayer.stop(); secondaryPlayer.clearMediaItems(); nextTrack = null; pendingTrack = null; chainedTrack = null
         sourceTrackId = data.optString("id"); sourceAttempts = 1; alternatives.clear(); alternatives.addAll(sources.drop(1))
         track = data; primaryPlayer.volume = if (ducking) .15f else 1f
         primaryPlayer.setMediaItem(item(first.uri, data, first.mime), startPosition); primaryPlayer.prepare(); primaryPlayer.play(); configureEnhancer(primaryPlayer.audioSessionId)
@@ -401,7 +430,7 @@ class HybridMediaService : MediaSessionService() {
     }
     private fun entryIdentity(data:JSONObject?) = data?.optString("queueId")?.takeIf{it.isNotBlank()} ?: data?.optString("id").orEmpty()
     fun snapshotQueue(): org.json.JSONArray { val result = org.json.JSONArray();played.forEach{result.put(it)}; track?.let { result.put(it) }; upcoming.forEach { result.put(it) }; return result }
-    fun setUpcoming(tracks: List<JSONObject>,previous:List<JSONObject>?=null) {if(previous!=null){played.clear();played.addAll(previous.takeLast(100))}; if (entryIdentity(tracks.firstOrNull()) != entryIdentity(nextTrack ?: pendingTrack)) { cancelOverlap(); preparing?.cancel(); pendingTrack = null; nextTrack = null; secondaryPlayer.stop(); secondaryPlayer.clearMediaItems() }; upcoming = tracks.toMutableList();updateMediaButtons() }
+    fun setUpcoming(tracks: List<JSONObject>,previous:List<JSONObject>?=null) {if(previous!=null){played.clear();played.addAll(previous.takeLast(100))}; if (entryIdentity(tracks.firstOrNull()) != entryIdentity(nextTrack ?: pendingTrack ?: chainedTrack)) { cancelOverlap(); preparing?.cancel(); pendingTrack = null; nextTrack = null; clearChain(); secondaryPlayer.stop(); secondaryPlayer.clearMediaItems() }; upcoming = tracks.toMutableList();updateMediaButtons() }
     fun beginSelection(ticket: Long) {
         selectionPending = ticket
         sourceEpoch++
@@ -423,7 +452,67 @@ class HybridMediaService : MediaSessionService() {
         primaryPlayer.volume = if (ducking) .15f else 1f
     }
 
+    /**
+     * The next entry appended to the primary player's own playlist. ExoPlayer then moves into it on
+     * the same AudioTrack, so the last sample of one song meets the first of the next with no gap:
+     * the 2.8.0 two-player handoff opened a new AudioTrack per song, which was audible on albums.
+     */
+    private var chainedTrack: JSONObject? = null
+
+    /** Gapless when Auto-Mix is off, and always inside an album, where songs are meant to run together. */
+    fun wantsGapless(current: JSONObject?, next: JSONObject): Boolean {
+        if (sleepAtTrackEnd) return false
+        if (mode == "off") return true
+        val albumId = current?.optString("albumId").orEmpty()
+        if (albumId.isNotBlank() && albumId == next.optString("albumId")) return true
+        val album = current?.optString("album")?.trim()?.lowercase().orEmpty()
+        return album.isNotBlank() && album == next.optString("album").trim().lowercase() &&
+            current?.optString("artist").orEmpty().equals(next.optString("artist"), ignoreCase = true)
+    }
+
+    private fun chainNext(source: PlaybackSource, data: JSONObject) {
+        clearChain()
+        if (spotifyActive || primaryPlayer.mediaItemCount != 1) return
+        primaryPlayer.addMediaItem(item(source.uri, data, source.mime))
+        chainedTrack = data
+        pendingTrack = null
+    }
+
+    private fun clearChain() {
+        chainedTrack = null
+        if (!::primaryPlayer.isInitialized) return
+        while (primaryPlayer.mediaItemCount > primaryPlayer.currentMediaItemIndex + 1)
+            primaryPlayer.removeMediaItem(primaryPlayer.mediaItemCount - 1)
+    }
+
+    /** The player entered the chained entry (naturally or by Siguiente): make it the current track. */
+    private fun adoptChained(target: JSONObject) {
+        chainedTrack = null
+        while (primaryPlayer.currentMediaItemIndex > 0) primaryPlayer.removeMediaItem(0)
+        remember(target)
+        track = target
+        if (entryIdentity(upcoming.firstOrNull()) == entryIdentity(target)) upcoming.removeAt(0)
+        sourceEpoch++
+        recoveryPositionMs = null
+        sourceTrackId = target.optString("id")
+        refreshedSource = false
+        sourceAttempts = 1
+        alternatives.clear()
+        nextTrack = null
+        pendingTrack = null
+        tailIdentity = ""
+        configureEnhancer(primaryPlayer.audioSessionId)
+        updateMediaButtons()
+        emitNativeTrack(target)
+    }
+
     fun playPrepared(data: JSONObject, announce: Boolean = false): Boolean {
+        if (chainedTrack != null && entryIdentity(data) == entryIdentity(chainedTrack) && primaryPlayer.mediaItemCount > 1) {
+            cancelOverlap()
+            primaryPlayer.seekTo(primaryPlayer.currentMediaItemIndex + 1, 0)
+            primaryPlayer.play()
+            return true
+        }
         if (entryIdentity(data) != entryIdentity(nextTrack)) return false
         cancelOverlap()
         val state = secondaryPlayer.playbackState
@@ -485,7 +574,7 @@ class HybridMediaService : MediaSessionService() {
         primaryPlayer.volume = (primaryPlayer.volume * ratio).coerceIn(0f, 1f)
         secondaryPlayer.volume = (secondaryPlayer.volume * ratio).coerceIn(0f, 1f)
     }
-    fun sleep(minutes: Int) { if (minutes == -1) { fadeVolume(5000); return }; if (minutes == SLEEP_AT_TRACK_END) { sleepAt = 0; sleepAtTrackEnd = true; return }; sleepAtTrackEnd = false; if(minutes<=0){volumeFade?.cancel();if(spotifyActive)spotifyIntegrated.fadeGain(1f);if(fade==null)primaryPlayer.volume=if(ducking).15f else 1f}; sleepAt = if (minutes <= 0) 0 else System.currentTimeMillis() + minutes * 60_000L }
+    fun sleep(minutes: Int) { if (minutes == -1) { fadeVolume(5000); return }; if (minutes == SLEEP_AT_TRACK_END) { sleepAt = 0; sleepAtTrackEnd = true; clearChain(); return }; sleepAtTrackEnd = false; if(minutes<=0){volumeFade?.cancel();if(spotifyActive)spotifyIntegrated.fadeGain(1f);if(fade==null)primaryPlayer.volume=if(ducking).15f else 1f}; sleepAt = if (minutes <= 0) 0 else System.currentTimeMillis() + minutes * 60_000L }
     private fun fadeVolume(duration: Long) {
         volumeFade?.cancel();val native=spotifyActive;val id=track?.optString("id")
         volumeFade=scope.launch {val initial=primaryPlayer.volume;val start=android.os.SystemClock.elapsedRealtime()
@@ -520,6 +609,7 @@ class HybridMediaService : MediaSessionService() {
             spotifyActive = false
         }
         outgoing.removeListener(listener)
+        chainedTrack = null
         // stop() keeps playWhenReady; clear it so the next preload on this player stays silent and parked.
         outgoing.playWhenReady = false
         outgoing.stop()
@@ -644,13 +734,15 @@ class HybridMediaService : MediaSessionService() {
                 val now = android.os.SystemClock.elapsedRealtime()
                 if ((primaryPlayer.isPlaying && !spotifyActive || spotifyActive && spotifyIntegrated.playing) &&
                     selectionPending == null && next?.optString("source") == "youtube" &&
-                    nextTrack == null && pendingTrack == null && fade == null && now >= preloadRetryAt &&
+                    nextTrack == null && pendingTrack == null && chainedTrack == null && fade == null && now >= preloadRetryAt &&
                     (!meteredNetwork() || position >= METERED_PRELOAD_AFTER_MS || remaining in 1..90_000)) {
                     pendingTrack = next
                     preparing = scope.launch {
                         try {
                             val source = withContext(Dispatchers.IO) { sourcesFor(next).first() }
-                            if (pendingTrack === next && entryIdentity(upcoming.firstOrNull()) == entryIdentity(next)) preloadSource(source, next)
+                            if (pendingTrack === next && entryIdentity(upcoming.firstOrNull()) == entryIdentity(next)) {
+                                if (!spotifyActive && wantsGapless(track, next)) chainNext(source, next) else preloadSource(source, next)
+                            }
                         } catch (failure: Exception) {
                             if (failure !is CancellationException) preloadRetryAt = android.os.SystemClock.elapsedRealtime() + 8_000
                         } finally {

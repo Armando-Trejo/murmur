@@ -227,6 +227,19 @@ class AuthBridgePlugin : Plugin() {
         }
     }
 
+    /** Whole albums from YouTube Music search (public; the session only helps regional results). */
+    @PluginMethod fun youtubeAlbums(call:PluginCall)=async(call){
+        val query=call.getString("query")?.trim()?.take(200)?.takeIf{it.isNotBlank()}?:error("Escribe un álbum o artista")
+        withContext(Dispatchers.IO){
+            val (cookie, config) = storedYouTube()
+            val albums = firstReadable(buildList<() -> JSONObject> {
+                if (cookie.isNotBlank()) add { JSONObject().put("albums", YouTubeLibraryReader(cookie, config).searchAlbums(query)) }
+                add { JSONObject().put("albums", YouTubeLibraryReader("").searchAlbums(query)) }
+            })
+            JSObject(albums.toString())
+        }
+    }
+
     @PluginMethod fun youtubeLyrics(call:PluginCall)=async(call){
         val video=call.getString("videoId")?.takeIf{it.matches(Regex("[A-Za-z0-9_-]{11}"))}
         val query=call.getString("query")?.trim()?.take(200).orEmpty()

@@ -21,6 +21,8 @@ class YouTubeAudioPlugin : Plugin() {
         catch (e: Exception) { call.reject(e.message ?: "No se pudo completar la operación", e) } } }
     private suspend fun service(): HybridMediaService { HybridMediaService.instance?.let { return it }; ContextCompat.startForegroundService(context, Intent(context, HybridMediaService::class.java)); repeat(60) { HybridMediaService.instance?.let { return it }; delay(50) }; error("El servicio de audio no inició") }
     private fun data(call: PluginCall) = JSONObject(call.data.toString())
+    @PluginMethod fun setLockVisualizer(call: PluginCall) { LockVisualizer.set(context, call.getBoolean("enabled") ?: true); call.resolve() }
+    @PluginMethod fun getLockVisualizer(call: PluginCall) { call.resolve(JSObject().put("enabled", LockVisualizer.enabled(context))) }
     @PluginMethod fun openVisualizer(call: PluginCall) { activity.startActivity(Intent(context, MusicVisualActivity::class.java)); call.resolve() }
     @PluginMethod fun openGeniusLyrics(call: PluginCall) {
         val uri = android.net.Uri.parse(call.getString("url").orEmpty())

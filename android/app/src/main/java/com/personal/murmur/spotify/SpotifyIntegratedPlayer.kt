@@ -27,7 +27,7 @@ private object SpotifyEngineWorker {
 /** Native engine adapter, following Square's SimpleBasePlayer/PCM separation. */
 @Keep
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-class SpotifyIntegratedPlayer(private val context: Context, private val onNext: () -> Unit, private val backend:SpotifyEngineBackend=JniSpotifyEngineBackend, private val manageFocus:Boolean=true,private val deviceLabel:String="MURMUR · Integrado", private val onEnded:(()->Unit)?=null, private val tokenSupplier:(()->String)?=null) : SimpleBasePlayer(Looper.getMainLooper()),SpotifyEngineEvents {
+class SpotifyIntegratedPlayer(private val context: Context, private val onNext: () -> Unit, private val backend:SpotifyEngineBackend=JniSpotifyEngineBackend, private val manageFocus:Boolean=true,private val deviceLabel:String="MURMUR · Integrado", private val onEnded:(()->Unit)?=null, private val onKeysRefused:(()->Boolean)?=null, private val tokenSupplier:(()->String)?=null) : SimpleBasePlayer(Looper.getMainLooper()),SpotifyEngineEvents {
     val visualAmplitude get()=if(playing)output.amplitude else 0f
     val visualTap get()=output.visualTap
     private val handler=Handler(Looper.getMainLooper())
@@ -129,7 +129,7 @@ class SpotifyIntegratedPlayer(private val context: Context, private val onNext: 
             "position"->positionMs=eventPosition
             "paused","stopped"->{loading=false;playing=false;output.enable(false);output.stop();if(!resumeAfterFocus)abandonFocus()}
             "end_of_track"->{loading=false;playing=false;output.enable(false);output.stop();invalidate();(onEnded?:onNext).invoke();return@post}
-            "key_refused","unavailable"->{loading=false;playing=false;output.enable(false);output.stop();abandonFocus();error=PlaybackException("Spotify no permitió reproducir esta pista con el motor integrado.",null,PlaybackException.ERROR_CODE_REMOTE_ERROR);NativeEvents.emit("onSpotifyEngineError",JSObject().put("trackId",track?.optString("id")).put("queueId",track?.optString("queueId")).put("message",if(type=="key_refused")"Spotify rechazó las claves del motor librespot. En Conexiones elige Integrado · Web y renueva Autorizar Spotify para usar la alternativa." else "Spotify no pudo abrir esta canción. Prueba otra pista o renueva la autorización del motor."))}
+            "key_refused","unavailable"->{if(type=="key_refused" && onKeysRefused?.invoke()==true){loading=true;playing=false;invalidate();return@post};loading=false;playing=false;output.enable(false);output.stop();abandonFocus();error=PlaybackException("Spotify no permitió reproducir esta pista con el motor integrado.",null,PlaybackException.ERROR_CODE_REMOTE_ERROR);NativeEvents.emit("onSpotifyEngineError",JSObject().put("trackId",track?.optString("id")).put("queueId",track?.optString("queueId")).put("message",if(type=="key_refused")"Spotify rechazó las claves del motor librespot. En Conexiones elige Integrado · Web y renueva Autorizar Spotify para usar la alternativa." else "Spotify no pudo abrir esta canción. Prueba otra pista o renueva la autorización del motor."))}
         };invalidate()
     } }
     fun pauseIntegrated(releaseFocus:Boolean=true) {wantPlay=false;generation.incrementAndGet();loading=false;playing=false;output.enable(false);output.stop();if(releaseFocus){resumeAfterFocus=false;abandonFocus()};if(started)scope.launch{runCatching{backend.pause()}};invalidate()}

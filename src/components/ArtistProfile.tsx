@@ -14,9 +14,20 @@ import { OverflowMenu } from "./OverflowMenu";
 
 const songShelf = /^(?:canciones|songs|top songs|populares|lo más popular)/i;
 
-function sameArtist(track: QueueItem, name: string) {
-  const wanted = normalize(name);
-  return track.artist.split(/\s*(?:,|&)\s*/).some((artist) => normalize(artist) === wanted);
+/** Credited names on a track line: "A, B & C", "A feat. B", "A x B", "A - Topic", "AVEVO". */
+export function creditedArtists(line: string) {
+  return line
+    .replace(/\s*-\s*topic\s*$/i, "")
+    .replace(/(?<=\S)vevo\s*$/i, "")
+    .split(/\s*(?:,|&|\/|\bfeat\.?|\bft\.?|\bfeaturing\b|\bwith\b|\s+x\s+|\s+y\s+)\s*/i)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+export function sameArtist(track: Pick<QueueItem, "artist">, name: string) {
+  const strip = (value: string) => normalize(value).replace(/^the\s+/, "");
+  const wanted = strip(name);
+  return !!wanted && creditedArtists(track.artist ?? "").some((artist) => strip(artist) === wanted);
 }
 
 /**

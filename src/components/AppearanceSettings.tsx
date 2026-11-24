@@ -6,7 +6,30 @@ import {
   DEFAULT_ACCENT,
   accentInk,
 } from "../core/appearance";
-import { Palette, Sparkles, Check } from "lucide-react";
+import { Palette, Sparkles, Check, Lock } from "lucide-react";
+import { Audio, isNative } from "../native";
+
+/** On by default (native side); the switch only reflects and changes the stored native preference. */
+function useLockVisualizer() {
+  const [enabled, setEnabled] = useState(true);
+  useEffect(() => {
+    if (!isNative) return;
+    let live = true;
+    try {
+      void Audio.getLockVisualizer().then((state) => live && setEnabled(state.enabled)).catch(() => {});
+    } catch {
+      /* older native build */
+    }
+    return () => {
+      live = false;
+    };
+  }, []);
+  const change = async (value: boolean) => {
+    setEnabled(value);
+    if (isNative) await Audio.setLockVisualizer({ enabled: value });
+  };
+  return { enabled, change };
+}
 export function useAppearance() {
   const [accent, setAccent] = useState(() =>
     validAccent(localStorage.getItem("murmur.accent")),
@@ -52,6 +75,7 @@ export function AppearanceSettings({
   notify: (message: string, kind?: "info" | "success" | "error") => void;
 }) {
   const [draft, setDraft] = useState(appearance.accent);
+  const lock = useLockVisualizer();
   useEffect(() => setDraft(appearance.accent), [appearance.accent]);
   const save = async (color: string) => {
     try {
@@ -131,6 +155,22 @@ export function AppearanceSettings({
               .catch(() =>
                 notify("No se pudo guardar la luz ambiental.", "error"),
               )
+          }
+        />
+      </label>
+      <label className="glow-option">
+        <Lock size={20} />
+        <span>
+          Pantalla musical al bloquear
+          <small>Si bloqueas el teléfono mientras suena música, la carátula y el visualizador quedan en la pantalla de bloqueo</small>
+        </span>
+        <input
+          type="checkbox"
+          checked={lock.enabled}
+          onChange={(event) =>
+            void lock
+              .change(event.target.checked)
+              .catch(() => notify("No se pudo guardar el ajuste de bloqueo.", "error"))
           }
         />
       </label>

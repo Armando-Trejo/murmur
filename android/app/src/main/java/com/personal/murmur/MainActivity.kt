@@ -32,11 +32,31 @@ class MainActivity : BridgeActivity() {
         }
         ViewCompat.requestApplyInsets(content)
         ContextCompat.registerReceiver(this, bluetooth, IntentFilter().apply { addAction(BluetoothDevice.ACTION_ACL_CONNECTED); addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED) }, ContextCompat.RECEIVER_EXPORTED)
+        ContextCompat.registerReceiver(this, screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_NOT_EXPORTED)
         handleIntent(intent)
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handleIntent(intent) }
-    override fun onStart() { super.onStart(); HybridMediaService.uiVisible = true }
-    override fun onStop() { HybridMediaService.uiVisible = false; super.onStop() }
+    /** Screen-off while MURMUR is in front and music plays: show the music screen over the lock screen. */
+    private val screenOff = object : BroadcastReceiver() { override fun onReceive(context: Context?, intent: Intent?) { if (visible) showLockVisualizer() } }
+    private var visible = false
+    private var lockShownAt = 0L
+    override fun onPause() { super.onPause(); showLockVisualizer() }
+    private fun showLockVisualizer() {
+        val power = getSystemService(android.os.PowerManager::class.java)
+        if (power?.isInteractive != false || !LockVisualizer.enabled(this)) return
+        val service = HybridMediaService.instance ?: return
+        if (!service.visualPlaying && !service.youtubeLoading) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lockShownAt < 2_000) return
+        lockShownAt = now
+        // Started while this activity is still the top one (pausing), so Android allows the launch.
+        try {
+            startActivity(Intent(this, MusicVisualActivity::class.java).putExtra(MusicVisualActivity.EXTRA_LOCKSCREEN, true)
+                .addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION))
+        } catch (_: Exception) { }
+    }
+    override fun onStart() { super.onStart(); visible = true; HybridMediaService.uiVisible = true }
+    override fun onStop() { visible = false; HybridMediaService.uiVisible = false; super.onStop() }
     override fun onResume() {
         super.onResume()
         if(intent?.getBooleanExtra("open_player",false)==true){intent.removeExtra("open_player");NativeEvents.emit("onOpenPlayer")}
@@ -50,5 +70,5 @@ class MainActivity : BridgeActivity() {
         }
     }
     private fun handleIntent(intent: Intent?) { val uri = intent?.data; if (uri?.scheme == "com.personal.murmur" && uri.host == "oauth-return") return; if (uri?.scheme == "com.personal.murmur" && uri.host == "oauth") { (bridge.getPlugin("AuthBridge")?.instance as? AuthBridgePlugin)?.oauthCallback(uri); return }; val text = if (intent?.action == Intent.ACTION_SEND) intent.getStringExtra(Intent.EXTRA_TEXT) else if (intent?.action == Intent.ACTION_VIEW) uri?.toString() else null; text?.let { NativeEvents.emit("onSharedUrlReceived", JSObject().put("url", it.take(3000))) }; intent?.getStringExtra("shortcut")?.let { NativeEvents.emit("onShortcutReceived", JSObject().put("target", it)) } }
-    override fun onDestroy() { unregisterReceiver(bluetooth); super.onDestroy() }
+    override fun onDestroy() { unregisterReceiver(bluetooth); unregisterReceiver(screenOff); super.onDestroy() }
 }

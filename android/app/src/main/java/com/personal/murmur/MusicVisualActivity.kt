@@ -26,7 +26,20 @@ import kotlin.math.roundToInt
 
 /** User-opened visual player. Android continues to own the secure lock screen. */
 class MusicVisualActivity : Activity() {
+    companion object {
+        /** Opened by MainActivity when the screen turns off during playback: acts as the lock-screen cover. */
+        const val EXTRA_LOCKSCREEN = "lockscreen"
+    }
     private enum class Control { Close, Back, Play, Next }
+    /** Close on the lock screen asks for the unlock first, then returns to MURMUR. */
+    private fun leave() {
+        val keyguard = getSystemService(android.app.KeyguardManager::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= 26 && keyguard?.isKeyguardLocked == true) {
+            keyguard.requestDismissKeyguard(this, object : android.app.KeyguardManager.KeyguardDismissCallback() {
+                override fun onDismissSucceeded() { finish() }
+            })
+        } else finish()
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
     private val settle = PathInterpolator(.16f, 1f, .3f, 1f)
@@ -100,7 +113,8 @@ class MusicVisualActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
-        if (android.os.Build.VERSION.SDK_INT >= 27) setShowWhenLocked(true)
+        // Shown over the lock screen, but never wakes the display by itself (battery).
+        if (android.os.Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(false) }
         else window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
         window.statusBarColor = Color.BLACK
         window.navigationBarColor = Color.BLACK
@@ -137,7 +151,7 @@ class MusicVisualActivity : Activity() {
             setMargins(dp(22), dp(29), 0, 0)
         })
 
-        val close = TransportButton(Control.Close, "Volver a MURMUR") { finish() }
+        val close = TransportButton(Control.Close, "Volver a MURMUR") { leave() }
         val closeParams = FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.END).apply {
             setMargins(0, dp(12), dp(12), 0)
         }
