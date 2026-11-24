@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
 
 class SpotifySession(private val prefs: SharedPreferences) {
     companion object {
-        fun stored(context:android.content.Context)=SpotifySession(androidx.security.crypto.EncryptedSharedPreferences.create(context,"hybrid_sessions",androidx.security.crypto.MasterKey.Builder(context).setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM).build(),androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM))
+        fun stored(context:android.content.Context)=SpotifySession(SecurePrefs.open(context,"hybrid_sessions"))
     }
     fun webToken(force:Boolean=false):String {
         check(hasOAuth() && prefs.getString("oauth_scopes","")!!.split(' ').containsAll(listOf("streaming","user-read-email"))){"Renueva Autorizar Spotify desde Conexiones para conceder los permisos del reproductor Web. Habilita Web Playback SDK en tu aplicación de Spotify for Developers."}

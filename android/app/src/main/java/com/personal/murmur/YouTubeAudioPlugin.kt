@@ -112,6 +112,15 @@ class YouTubeAudioPlugin : Plugin() {
         }
     }
     @PluginMethod fun preloadNextStream(call: PluginCall) = async(call) { val ticket=PlaybackRequests.snapshot(); val d = data(call); val source = withContext(Dispatchers.IO) { val local = call.getString("offlinePath"); if (local != null && File(local).canonicalPath.startsWith(File(context.filesDir, "offline_tracks").canonicalPath + File.separator) && File(local).isFile) PlaybackSource(local) else NativeNetwork.resolveAudio(call.getString("videoId") ?: error("Falta el ID")).sources.first() }; if(PlaybackRequests.isCurrent(ticket)) service().preloadSource(source, d); null }
+    /** Warms the link cache for likely next taps. Links only, at most 3, never audio bytes; failures are silent. */
+    @PluginMethod fun prefetchAudio(call: PluginCall) {
+        val array = call.getArray("videoIds") ?: JSArray()
+        val ids = (0 until array.length()).mapNotNull { array.optString(it).takeIf { id -> id.matches(Regex("[A-Za-z0-9_-]{11}")) } }
+            .distinct().take(3)
+        call.resolve()
+        if (ids.isEmpty()) return
+        scope.launch(Dispatchers.IO) { ids.forEach { id -> runCatching { NativeNetwork.resolveAudio(id) } } }
+    }
     @PluginMethod fun setQueue(call: PluginCall) = async(call) { val array = call.getArray("tracks") ?: JSArray(); val tracks = (0 until array.length()).map { array.getJSONObject(it) }; val previous=call.getArray("previous");val s=service();val expected=call.getString("currentQueueId");if(expected!=null && expected!=s.track?.optString("queueId"))return@async null;s.setUpcoming(tracks,previous?.let{(0 until it.length()).map{index->it.getJSONObject(index)}}); null }
     @PluginMethod fun pause(call: PluginCall) = async(call) { PlaybackRequests.next(); HybridMediaService.instance?.pausePlayback(); null }
     @PluginMethod fun resume(call: PluginCall) = async(call) { val s = HybridMediaService.instance ?: error("Elige una canción"); s.primaryPlayer.play(); null }

@@ -4,8 +4,6 @@ import android.app.Dialog
 import android.graphics.Color
 import android.webkit.*
 import android.widget.*
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.getcapacitor.*
 import com.getcapacitor.annotation.CapacitorPlugin
 import kotlinx.coroutines.*
@@ -21,7 +19,7 @@ import android.util.Base64
 @CapacitorPlugin(name = "AuthBridge")
 class AuthBridgePlugin : Plugin() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val prefs by lazy { EncryptedSharedPreferences.create(context, "hybrid_sessions", MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(), EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM) }
+    private val prefs by lazy { SecurePrefs.open(context, "hybrid_sessions") }
     private val spotify by lazy { SpotifySession(prefs) }
     private val remote by lazy { SpotifyRemotePlayer(activity) }
     private val engineAuth by lazy { com.personal.murmur.spotify.SpotifyEngineAuthorization(context) }

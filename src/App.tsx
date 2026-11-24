@@ -109,6 +109,7 @@ import { ListeningInsights } from "./components/ListeningInsights";
 import { PlaybackDiagnostics } from "./components/PlaybackDiagnostics";
 import { formatListening, greeting, listenedSeconds } from "./core/insights";
 import { haptic, hapticsEnabled, setHapticsEnabled } from "./core/haptics";
+import { prefetchAudio } from "./core/prefetch";
 import {
   loadRecentSearches,
   pushRecent,
@@ -916,6 +917,7 @@ export default function App() {
     >
       <button
         className="song-main"
+        onPointerDown={() => prefetchAudio([track], 1)}
         onClick={() => {
           onChoose?.();
           void player.playList(collection, index);
@@ -952,6 +954,8 @@ export default function App() {
     </SwipeSurface>
   );
   const orderedResults = useMemo(() => orderMusic(results, searchOrder, stats), [results, searchOrder, stats]);
+  useEffect(() => prefetchAudio(orderedResults.slice(0, 2), 2), [orderedResults]);
+  useEffect(() => prefetchAudio(displayedPlaylistItems.slice(0, 3)), [displayedPlaylistItems]);
   const musicArt = useMemo(
     () => orderMusic(tracks, "listening", stats).filter((t) => artworkFor(t)),
     [tracks, stats],
@@ -981,6 +985,7 @@ export default function App() {
   const todayLabel = new Intl.DateTimeFormat("es", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
   const welcomeTrack = current || recent[0] || tracks[0];
   const welcomeTone = useArtworkTone(artworkFor(welcomeTrack));
+  useEffect(() => prefetchAudio([welcomeTrack], 1), [welcomeTrack?.id]);
   const hasDownloads = tracks.some((t) => t.offlinePath);
   const isAlbum = activePlaylist?.kind === "album" || !!feedId?.startsWith("MPREb");
   const collectionArt = activePlaylist

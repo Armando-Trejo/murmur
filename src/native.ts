@@ -49,6 +49,8 @@ interface AudioBridge {
     loading?: boolean;
   }>;
   preloadNextStream(o: QueueItem): Promise<void>;
+  /** Resolves (never downloads) the audio links of likely next taps into the native cache. */
+  prefetchAudio(o: { videoIds: string[] }): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
   seekTo(o: { positionMs: number }): Promise<void>;

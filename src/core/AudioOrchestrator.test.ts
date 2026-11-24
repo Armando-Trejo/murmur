@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
     pause: vi.fn(async () => {}),
     resume: vi.fn(async () => {}),
     preloadNextStream: vi.fn(async () => {}),
+    prefetchAudio: vi.fn(async () => {}),
     triggerManualMix: vi.fn(async () => {}),
     seekTo: vi.fn(async () => {}),
   },

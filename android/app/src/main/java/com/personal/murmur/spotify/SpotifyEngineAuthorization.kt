@@ -3,8 +3,6 @@ package com.personal.murmur.spotify
 import android.content.Context
 import android.net.Uri
 import android.util.Base64
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.getcapacitor.JSObject
 import com.personal.murmur.NativeNetwork
 import com.personal.murmur.OAuthCallbackRequest
@@ -20,7 +18,7 @@ class SpotifyEngineAuthorization(context: Context, private val prefs:android.con
     companion object {
         const val CLIENT_ID = "65b708073fc0480ea92a077233ca87bd"
         const val REDIRECT = "http://127.0.0.1:5588/login"
-        private fun securePrefs(context:Context)=EncryptedSharedPreferences.create(context,"murmur_spotify_engine",MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+        private fun securePrefs(context:Context)=com.personal.murmur.SecurePrefs.open(context,"murmur_spotify_engine")
         fun clearRuntimeFiles(context:Context){val root=context.cacheDir.canonicalFile;val directory=java.io.File(root,"spotify_engine").canonicalFile;check(directory.parentFile==root);if(directory.exists())check(directory.deleteRecursively()){"No se pudo borrar la caché privada del motor"}}
     }
     private fun secret() = ByteArray(48).also { SecureRandom().nextBytes(it) }.let { Base64.encodeToString(it,Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING) }
