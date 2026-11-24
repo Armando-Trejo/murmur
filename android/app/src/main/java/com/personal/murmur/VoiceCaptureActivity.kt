@@ -59,11 +59,7 @@ class VoiceCaptureActivity : Activity(), RecognitionListener {
             VoiceTriggerManager.beginListening()
             recognizer = if (onDevice && Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(this) else SpeechRecognizer.createSpeechRecognizer(this)
             recognizer!!.setRecognitionListener(listener(++attempt))
-            val request = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-MX")
-                .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, onDevice)
-                .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            val request = VoiceHints.request(this, onDevice)
             recognizer!!.startListening(request)
             handler.postDelayed({ finishResult(null, "La escucha terminó sin un comando. Vuelve a intentarlo.") }, 15000)
         } catch (_: Exception) {
@@ -90,7 +86,7 @@ class VoiceCaptureActivity : Activity(), RecognitionListener {
         finish()
     }
     override fun onResults(results: Bundle?) {
-        val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull { it.isNotBlank() }
+        val text = VoiceHints.join(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION))
         finishResult(text, if (text == null) VoiceRecognitionPolicy.message(7) else null)
     }
     override fun onError(error: Int) {

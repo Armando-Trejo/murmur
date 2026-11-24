@@ -44,6 +44,12 @@ class LocalIntentPlugin : Plugin() {
         if (result.resultCode == Activity.RESULT_OK && !text.isNullOrEmpty()) call?.resolve(JSObject().put("text", text))
         else call?.reject(result.data?.getStringExtra("voice_error") ?: "Escucha cancelada.", "VOICE_CAPTURE_FAILED")
     }
+    /** Artist and playlist names the speech recognizer should expect (Android 13+ biasing). */
+    @PluginMethod fun setVoiceHints(call: PluginCall) {
+        val array = call.getArray("hints") ?: JSArray()
+        VoiceHints.save(context, (0 until minOf(array.length(), 200)).mapNotNull { runCatching { array.getString(it).take(60) }.getOrNull() })
+        call.resolve()
+    }
     /** "Ok MURMUR": state, and turning it on (needs the microphone; must start while MURMUR is in front). */
     @PluginMethod fun wakeWordStatus(call: PluginCall) {
         call.resolve(JSObject().put("enabled", WakeWordService.enabled(context)).put("running", WakeWordService.running)

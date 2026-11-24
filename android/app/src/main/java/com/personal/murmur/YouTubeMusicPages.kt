@@ -180,7 +180,10 @@ object YouTubeMusicPages {
      * Albums from the Albums tab of YouTube Music search, as feed items the collection view opens:
      * id MPREb…, title, "Álbum · Artista · Año" subtitle, artist, year and the square cover.
      */
-    fun albumResults(data: JSONObject): JSONArray {
+    /** Playlists from YouTube Music search (browse ids "VL…"): same rows as albums. */
+    fun playlistResults(data: JSONObject): JSONArray = albumResults(data, Regex("VL[A-Za-z0-9_-]{2,120}"), "playlist")
+
+    fun albumResults(data: JSONObject, album: Regex = Regex("MPREb[A-Za-z0-9_-]{2,120}"), kind: String = "album"): JSONArray {
         val result = JSONArray()
         val seen = mutableSetOf<String>()
         fun walk(value: Any?) {
@@ -190,7 +193,6 @@ object YouTubeMusicPages {
                     val card = value.optJSONObject("musicCardShelfRenderer")
                     val row = value.optJSONObject("musicResponsiveListItemRenderer") ?: card
                     if (row != null) {
-                        val album = Regex("MPREb[A-Za-z0-9_-]{2,120}")
                         // The album link sits on the row, or only on its title run.
                         val id = row.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")?.optString("browseId")
                             ?.takeIf { it.matches(album) }
@@ -208,7 +210,7 @@ object YouTubeMusicPages {
                             val cover = largest(find(row, setOf("musicThumbnailRenderer"))?.optJSONObject("thumbnail")?.optJSONArray("thumbnails"))
                             if (title.isNotBlank()) result.put(JSONObject().put("id", id).put("title", title)
                                 .put("subtitle", listOf(parts.firstOrNull() ?: "Álbum", artist, yearPart.orEmpty()).filter(String::isNotBlank).joinToString(" · "))
-                                .put("artist", artist).put("year", yearPart.orEmpty()).put("source", "youtube").put("kind", "album")
+                                .put("artist", artist).put("year", yearPart.orEmpty()).put("source", "youtube").put("kind", kind)
                                 .put("artworkUrl", cover).put("link", "https://music.youtube.com/browse/$id"))
                         }
                     }

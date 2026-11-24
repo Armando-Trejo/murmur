@@ -23,6 +23,7 @@ export interface PlayerState {
   shuffleMode: "off" | "on" | "magic";
 }
 /** Native errors that mean "this upload will never play here" (not a network hiccup). */
+const SESSION_KEY = "murmur.session";
 const UNPLAYABLE = new Set(["AUDIO_UNAVAILABLE", "YOUTUBE_CONTENT_UNAVAILABLE", "YOUTUBE_PRIVATE_ACCESS_DENIED"]);
 export class AudioOrchestrator {
   private state: PlayerState = {
@@ -173,7 +174,47 @@ export class AudioOrchestrator {
       errorCode: this.state.errorCode,
     });
     this.listeners.forEach((l) => l());
+    this.scheduleSessionSave();
   }
+  private sessionTimer?: ReturnType<typeof setTimeout>;
+  /** Saved at most every 4 s (and right away when MURMUR goes to the background). */
+  private scheduleSessionSave() {
+    if (this.sessionTimer || !this.current) return;
+    this.sessionTimer = setTimeout(() => { this.sessionTimer = undefined; this.saveSession(); }, 4000);
+  }
+  /**
+   * "Where I left off": the queue around the current song, the song and the second, kept on the
+   * phone so reopening MURMUR (even after Android closed it) shows the same song ready to continue.
+   */
+  saveSession() {
+    if (typeof localStorage === "undefined" || !this.current) return;
+    const start = Math.max(0, this.state.index - 30);
+    const queue = this.state.queue.slice(start, this.state.index + 120)
+      .map(({ description: _d, chapters: _c, ...rest }) => rest);
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify({
+        queue, index: this.state.index - start, position: Math.floor(this.state.position), mode: this.state.shuffleMode, at: Date.now(),
+      }));
+    } catch { /* Storage full: the next save will try again with less. */ }
+  }
+  private restoreSession() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SESSION_KEY) || "null") as
+        { queue: QueueItem[]; index: number; position: number } | null;
+      if (!saved?.queue?.length || !saved.queue[saved.index]) return;
+      const current = saved.queue[saved.index];
+      // Near the end of the song: start the next one instead of its last seconds.
+      const nearEnd = current.duration > 0 && saved.position > current.duration - 8;
+      const index = nearEnd && saved.queue[saved.index + 1] ? saved.index + 1 : saved.index;
+      const position = index === saved.index && !nearEnd ? saved.position : 0;
+      this.resumeAt = { queueId: saved.queue[index].queueId, ms: position * 1000 };
+      this.loadedId = "";
+      this.update({ queue: saved.queue, index, position, playing: false, loading: false });
+      this.syncQueue();
+    } catch { /* A damaged save is ignored. */ }
+  }
+  /** Second to start from on the next play of the restored song. */
+  private resumeAt?: { queueId?: string; ms: number };
   get current() {
     return this.state.queue[this.state.index];
   }
@@ -308,7 +349,9 @@ export class AudioOrchestrator {
         playing: native.playing,
         loading: native.loading || false,
       });
-    }
+    } else if (restoreGeneration === this.generation && !this.current) this.restoreSession();
+    if (typeof document !== "undefined")
+      document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") this.saveSession(); });
     this.poll = setInterval(() => {
       // A paused Spotify track in a hidden app has nothing to sync: skip the request (data and battery).
       const idle = !this.state.playing && !this.state.loading &&
@@ -410,7 +453,9 @@ export class AudioOrchestrator {
             method: "PUT",
           }).catch(() => {});
         }
-        const info = await Audio.extractAndPlay(retry ? { ...track, ...retry } : track);
+        const resume = this.resumeAt && this.resumeAt.queueId === track.queueId && this.resumeAt.ms > 3000 ? this.resumeAt.ms : 0;
+        this.resumeAt = undefined;
+        const info = await Audio.extractAndPlay(retry ? { ...track, ...retry } : resume ? { ...track, startAtMs: resume } : track);
         if (generation !== this.generation || this.state.error) return;
         this.update({ deviceName: "" });
         const updated = {

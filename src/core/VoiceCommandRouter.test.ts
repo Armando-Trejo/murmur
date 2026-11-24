@@ -49,6 +49,7 @@ vi.mock("./DiscoveryEngine", () => ({
   generateArtistMix: mock.artist,
   buildAffinity: vi.fn(),
   hybridScore: vi.fn(),
+  spotifyTrack: vi.fn(),
 }));
 import { routeVoiceCommand } from "./VoiceCommandRouter";
 const track: QueueItem = {
@@ -112,7 +113,7 @@ describe("voice commands execute real player actions", () => {
     mock.playList.mockImplementation(async () => {
       mock.state.error = "Spotify necesita autorización";
     });
-    await expect(routeVoiceCommand("reproduce Caifanes")).rejects.toThrow(
+    await expect(routeVoiceCommand("ponme algo de Caifanes")).rejects.toThrow(
       "Spotify necesita autorización",
     );
   });
@@ -121,7 +122,7 @@ describe("voice commands execute real player actions", () => {
     mock.playList.mockImplementation(async () => {
       mock.state.loading = true;
     });
-    expect(await routeVoiceCommand("reproduce Caifanes")).toBe(
+    expect(await routeVoiceCommand("ponme algo de Caifanes")).toBe(
       "Preparando audio…",
     );
   });

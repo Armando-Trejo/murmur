@@ -79,13 +79,15 @@ class YouTubeAudioPlugin : Plugin() {
         currentService?.beginSelection(generation)
         try {
             val refresh = call.getBoolean("refreshSource") == true
-            val position = if (refresh) (call.getDouble("positionMs") ?: 0.0).toLong().coerceAtLeast(0) else 0L
-            val data = data(call).apply { remove("refreshSource"); remove("positionMs") }
+            // startAtMs: resuming the song MURMUR was playing when it was closed, at the same second.
+            val startAt = (call.getDouble("startAtMs") ?: 0.0).toLong().coerceAtLeast(0)
+            val position = if (refresh) (call.getDouble("positionMs") ?: 0.0).toLong().coerceAtLeast(0) else startAt
+            val data = data(call).apply { remove("refreshSource"); remove("positionMs"); remove("startAtMs") }
             val local = call.getString("offlinePath")?.let(::File)
             val root = File(context.filesDir, "offline_tracks").canonicalPath + File.separator
             var duration = data.optDouble("duration", 0.0)
             var description = data.optString("description")
-            val playerService = if (!refresh && currentService?.playPrepared(data) == true) currentService else {
+            val playerService = if (!refresh && startAt == 0L && currentService?.playPrepared(data) == true) currentService else {
                 val sources = if (local != null && local.canonicalPath.startsWith(root) && local.isFile) {
                     listOf(PlaybackSource(local.absolutePath))
                 } else {

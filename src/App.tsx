@@ -84,7 +84,7 @@ import {
   type LyricsResult,
 } from "./core/DiscoveryEngine";
 import { parseFanUpload } from "./core/FanUploadParser";
-import { routeVoiceCommand } from "./core/VoiceCommandRouter";
+import { routeVoiceCommand, updateVoiceHints } from "./core/VoiceCommandRouter";
 import { MurmurMark } from "./components/MurmurMark";
 import { Audio, Auth, Voice, isNative, type ConnectionStatus } from "./native";
 import {
@@ -657,12 +657,15 @@ export default function App() {
       await refreshStatus();
     });
     void loadRecentSearches().then(setRecentSearches).catch(() => {});
+    // A few seconds after start, so it never competes with the first screen.
+    const hints = setTimeout(() => void updateVoiceHints().catch(() => {}), 8000);
     const on = () => setOnline(navigator.onLine);
     window.addEventListener("online", on);
     window.addEventListener("offline", on);
     return () => {
       window.removeEventListener("online", on);
       window.removeEventListener("offline", on);
+      clearTimeout(hints);
     };
   }, []);
   useEffect(() => {

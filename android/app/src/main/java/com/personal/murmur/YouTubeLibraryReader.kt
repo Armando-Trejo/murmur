@@ -16,6 +16,8 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
         const val ARTISTS_FILTER = "EgWKAQIgAWoMEA4QChADEAQQCRAF"
         const val ALBUMS_FILTER = "EgWKAQIYAWoMEA4QChADEAQQCRAF"
         const val SONGS_FILTER = "EgWKAQIIAWoMEA4QChADEAQQCRAF"
+        const val FEATURED_PLAYLISTS_FILTER = "EgeKAQQoADgBagwQDhAKEAMQBBAJEAU"
+        const val COMMUNITY_PLAYLISTS_FILTER = "EgeKAQQoAEABagwQDhAKEAMQBBAJEAU"
     }
     private var version: String? = config.optString("clientVersion").takeIf(YouTubeSessionConfiguration::validVersion)
     private val signedIn get() = cookie.split(';').any {
@@ -178,6 +180,15 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
 
     /** Album results of YouTube Music search, newest provider order. */
     fun searchAlbums(query:String):JSONArray = YouTubeMusicPages.albumResults(request(search=query.take(200),searchParams=ALBUMS_FILTER))
+    /** YouTube Music's own playlists for a mood or activity first, then community ones. */
+    fun searchPlaylists(query:String):JSONArray {
+        val featured = YouTubeMusicPages.playlistResults(request(search=query.take(200),searchParams=FEATURED_PLAYLISTS_FILTER))
+        return if (featured.length() >= 3) featured else JSONArray().also { all ->
+            for (i in 0 until featured.length()) all.put(featured.get(i))
+            val community = YouTubeMusicPages.playlistResults(request(search=query.take(200),searchParams=COMMUNITY_PLAYLISTS_FILTER))
+            for (i in 0 until community.length()) all.put(community.get(i))
+        }
+    }
     fun tracks(id: String): JSONArray {
         val browse=id.removePrefix("ytpl:")
         require(browse.matches(Regex("(?:VL|MPREb)[A-Za-z0-9_-]{2,120}"))) { "Playlist YouTube inválida" }

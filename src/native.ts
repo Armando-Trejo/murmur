@@ -42,7 +42,7 @@ interface AudioBridge {
     currentQueueId?: string;
   }): Promise<void>;
   searchYouTube(o: { query: string }): Promise<{ tracks: QueueItem[] }>;
-  extractAndPlay(o: QueueItem & { refreshSource?: boolean; positionMs?: number }): Promise<{
+  extractAndPlay(o: QueueItem & { refreshSource?: boolean; positionMs?: number; startAtMs?: number }): Promise<{
     duration: number;
     description: string;
     playing?: boolean;
@@ -142,6 +142,8 @@ interface AuthBridge {
   youtubeSongs(o: { query: string }): Promise<{ songs: { videoId: string; title: string; artist: string; album?: string; duration: number; artworkUrl?: string }[] }>;
   /** Albums tab of YouTube Music search. */
   youtubeAlbums(o: { query: string }): Promise<{ albums: { id: string; title: string; artist?: string; year?: string; artworkUrl?: string }[] }>;
+  /** Playlists tab of YouTube Music search (YouTube's own first, then community). */
+  youtubePlaylists(o: { query: string }): Promise<{ playlists: { id: string; title: string; artist?: string; artworkUrl?: string }[] }>;
   /** Plain lyrics as YouTube Music shows them, by video or by a "title artist" query. */
   youtubeLyrics(o: { videoId?: string; query?: string }): Promise<{ found: boolean; text?: string; source?: string }>;
   youtubeHome(): Promise<{ shelves: FeedShelf[] }>;
@@ -161,6 +163,8 @@ interface VoiceBridge {
   downloadModel(): Promise<{ available: boolean; message: string }>;
   /** "Ok MURMUR" wake phrase (offline listener in a microphone foreground service). */
   wakeWordStatus(): Promise<{ enabled: boolean; running: boolean; model: boolean }>;
+  /** Names the speech recognizer should expect (artists, playlists). */
+  setVoiceHints(o: { hints: string[] }): Promise<void>;
   setWakeWord(o: { enabled: boolean }): Promise<{ enabled: boolean; model?: boolean }>;
   rankTags(o: {
     query: string;

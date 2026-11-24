@@ -22,7 +22,7 @@ describe("MURMUR VoiceIntentParser", () => {
     "OK, MÚRMUR:",
   ])("recognizes invocation %s", (prefix) =>
     expect(parseVoiceIntent(prefix + " pon misfits")).toEqual({
-      type: "artist",
+      type: "request",
       query: "misfits",
     }),
   );
@@ -40,7 +40,7 @@ describe("MURMUR VoiceIntentParser", () => {
       "youtube",
     ));
   it("resolves a named song and artist", () =>
-    expect(parseVoiceIntent("Murmur reproduce Afuera de Caifanes")).toEqual({
+    expect(parseVoiceIntent("Murmur reproduce Afuera de Caifanes")).toMatchObject({
       type: "track",
       query: "afuera caifanes",
       title: "afuera",
@@ -91,10 +91,33 @@ describe("MURMUR VoiceIntentParser", () => {
   it("takes the platform the user asks for", () => {
     expect(parseVoiceIntent("ok murmur pon bailarina de miranda en spotify")).toMatchObject({
       type: "track", title: "bailarina", artist: "miranda", platform: "spotify" });
-    expect(parseVoiceIntent("pon enjambre desde youtube music")).toMatchObject({ type: "artist", query: "enjambre", platform: "youtube" });
+    expect(parseVoiceIntent("pon enjambre desde youtube music")).toMatchObject({ type: "request", query: "enjambre", platform: "youtube" });
     expect(parseVoiceIntent("pon bailarina de miranda")).not.toHaveProperty("platform", "spotify");
   });
   it("understands whole albums", () =>
     expect(parseVoiceIntent("pon el disco el segundo es mas de enjambre en youtube")).toMatchObject({
       type: "album", title: "el segundo es mas", artist: "enjambre", platform: "youtube" }));
+  it.each([
+    ["oye murmur ya pasale a la que sigue", "next"],
+    ["regresate a la anterior porfa", "previous"],
+    ["parale tantito", "pause"],
+    ["como se llama esta rola", "nowPlaying"],
+    ["ponme algo parecido a esta", "moreLikeThis"],
+    ["guardala en mis favoritas", "save"],
+    ["revuelvelas", "shuffle"],
+  ])("understands colloquial control: %s", (text, type) => expect(parseVoiceIntent(text).type).toBe(type));
+  it.each([
+    ["oye ponme una rola de miranda que se llama bailarina", "track"],
+    ["quiero escuchar bailarina de miranda en spotify", "track"],
+    ["me pones en youtube algo de enjambre", "artist"],
+    ["ponme algo de los caifanes", "artist"],
+    ["quisiera oir el disco completo de sin restricciones", "album"],
+    ["reproduceme la cancion que se llama vamonos de viaje", "track"],
+    ["ponme bailarina", "request"],
+  ])("understands colloquial requests: %s", (text, type) => expect(parseVoiceIntent(text).type).toBe(type));
+  it("keeps the platform wherever it is said", () => {
+    expect(parseVoiceIntent("pon en spotify bailarina de miranda")).toMatchObject({ type: "track", platform: "spotify", title: "bailarina" });
+    expect(parseVoiceIntent("desde youtube ponme enjambre")).toMatchObject({ platform: "youtube", query: "enjambre" });
+    expect(parseVoiceIntent("pon bailarina en espotifai")).toMatchObject({ platform: "spotify", query: "bailarina" });
+  });
 });

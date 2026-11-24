@@ -290,7 +290,7 @@ class WakeWordService : Service() {
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onResults(results: Bundle?) {
                 if (token != attempt) return
-                finishCommand(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull { it.isNotBlank() }, null)
+                finishCommand(VoiceHints.join(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)), null)
             }
             override fun onError(error: Int) {
                 if (token != attempt) return
@@ -310,11 +310,7 @@ class WakeWordService : Service() {
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
-        recognizer.startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-MX")
-            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, local)
-            .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3))
+        recognizer.startListening(VoiceHints.request(this, local))
     }
 
     /** Last resort, fully offline: free-form Spanish from the wake-word model, up to 7 s. */
