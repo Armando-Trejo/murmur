@@ -1,0 +1,33 @@
+node_modules/
+dist/
+android/.gradle/
+android/local.properties
+android/**/build/
+*.log
+*.tsbuildinfo
+.verification/
+.env
+.env.*
+contraseñas de cuentas spotify -  youtube.txt
+credentials/
+.android-sdk/
+.build-sdk/
+.research/
+.native-tools/
+native/spotify/target/
+
+# Local signing, bundled builds and QA output
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+*.key
+google-services.json
+.impeccable/
+preview/*.html
+preview/*.png
+android/app/src/main/jniLibs/
+verification/*
+!verification/music-art-fixtures.json
+!verification/fixtures/

@@ -1,0 +1,5 @@
+/build/*
+!/build/.npmkeep
+
+# The Android build consumes this licensed upstream SDK.
+!/libs/spotify-app-remote-release-0.8.0.aar

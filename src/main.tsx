@@ -1,0 +1,17 @@
+import React from "react";
+import { MotionConfig } from "framer-motion";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+import { AppBoundary } from "./components/AppBoundary";
+import "./styles.css";
+import "./mobile-qa.css";
+import "./experience.css";
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <AppBoundary>
+      <MotionConfig reducedMotion="user">
+        <App />
+      </MotionConfig>
+    </AppBoundary>
+  </React.StrictMode>,
+);

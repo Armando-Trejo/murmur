@@ -1,0 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
+const root=path.resolve('android/app/src/main/res'); const removed=[];
+function walk(dir) { for (const entry of fs.readdirSync(dir,{withFileTypes:true})) { const full=path.join(dir,entry.name); if(entry.isSymbolicLink()) continue; if(entry.isDirectory()) { walk(full); continue; } if(!entry.isFile() || !/^(?:splash|ic_launcher(?:_round|_foreground)?)\.png$/.test(entry.name)) continue; const resolved=path.resolve(full); if(!resolved.startsWith(root+path.sep))throw Error('Asset escaped resource directory'); const bytes=fs.statSync(full).size; fs.unlinkSync(full); removed.push({path:path.relative(root,full),bytes}); } }
+walk(root); const result={removed,bytesRemoved:removed.reduce((n,r)=>n+r.bytes,0),reason:'Unused Capacitor template PNGs; all supported API26+ devices use the MURMUR vector adaptive icons and native splash.'};fs.mkdirSync('verification',{recursive:true});fs.writeFileSync('verification/asset-optimization.json',JSON.stringify(result,null,2)); console.log(JSON.stringify({filesRemoved:removed.length,bytesRemoved:result.bytesRemoved}));

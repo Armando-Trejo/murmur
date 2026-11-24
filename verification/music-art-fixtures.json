@@ -1,0 +1,30 @@
+[
+  {
+    "title": "Luz inversa",
+    "artist": "Órbita Nula",
+    "duration": 345,
+    "image": "verification/fixtures/cover-1.jpg",
+    "scope": "Synthetic preview and QA fixture"
+  },
+  {
+    "title": "Campo nocturno",
+    "artist": "Norte de Vidrio",
+    "duration": 290,
+    "image": "verification/fixtures/cover-2.jpg",
+    "scope": "Synthetic preview and QA fixture"
+  },
+  {
+    "title": "Umbral (Sesión en vivo)",
+    "artist": "Capas de Sal",
+    "duration": 222,
+    "image": "verification/fixtures/cover-3.jpg",
+    "scope": "Synthetic preview and QA fixture"
+  },
+  {
+    "title": "Atraviesa el ruido",
+    "artist": "Isla Polar",
+    "duration": 325,
+    "image": "verification/fixtures/cover-4.jpg",
+    "scope": "Synthetic preview and QA fixture"
+  }
+]
