@@ -147,7 +147,13 @@ object YouTubePlaylistParser {
             if(title.isBlank())continue
             val artist=text(columns?.optJSONObject(1)?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")?.optJSONObject("text")).ifBlank { "Artista no identificado" }
             val durationText=text(row.optJSONArray("fixedColumns")?.optJSONObject(0)?.optJSONObject("musicResponsiveListItemFixedColumnRenderer")?.optJSONObject("text"))
-            val duration=if(durationText.matches(Regex("\\d{1,3}:\\d{2}(?::\\d{2})?"))) durationText.split(':').fold(0L) { n,s -> n*60+s.toInt() } else -1L
+            val clock=Regex("\\d{1,3}:\\d{2}(?::\\d{2})?")
+            // Album pages put the length in another column than playlists do: look through all of them.
+            val lengthText=durationText.takeIf{it.matches(clock)} ?: listOfNotNull(row.optJSONArray("fixedColumns"),columns)
+                .flatMap{list->(0 until list.length()).map{index->list.optJSONObject(index)}}
+                .map{column->text((column?.optJSONObject("musicResponsiveListItemFixedColumnRenderer")?:column?.optJSONObject("musicResponsiveListItemFlexColumnRenderer"))?.optJSONObject("text")).trim()}
+                .lastOrNull{it.matches(clock)}.orEmpty()
+            val duration=if(lengthText.matches(clock)) lengthText.split(':').fold(0L) { n,s -> n*60+s.toInt() } else -1L
             tracks.put(JSONObject().put("id","yt:$id").put("videoId",id).put("source","youtube").put("title",title).put("artist",artist).put("duration",duration).put("artworkUrl",thumbnail(row)).put("tags",JSONArray()).put("saved",true))
         }
         return YouTubePlaylistPage(tracks,continuation(shelf))

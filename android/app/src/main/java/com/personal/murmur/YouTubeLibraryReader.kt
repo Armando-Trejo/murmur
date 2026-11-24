@@ -165,8 +165,9 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
     /** Looks up each credited name in the Artists tab of search and accepts only an exact name match. */
     private fun artistChannelFor(line:String):String? {
         val names=YouTubeMusicPages.artistNames(line)
+        // Main credited artist first: each search only accepts the name it searched for.
         for(name in names.take(3)){
-            YouTubeMusicPages.matchingArtistChannel(request(search=name.take(120),searchParams=ARTISTS_FILTER),names)?.let{return it}
+            YouTubeMusicPages.matchingArtistChannel(request(search=name.take(120),searchParams=ARTISTS_FILTER),listOf(name))?.let{return it}
         }
         return YouTubeMusicPages.matchingArtistChannel(request(search=names.first().take(120)),names)
     }
