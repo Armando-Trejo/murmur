@@ -281,6 +281,8 @@ class WakeWordService : Service() {
             val rate = 16000
             val frame = rate / 10
             val text = try {
+                if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                    throw SecurityException("Sin permiso de micrófono")
                 val record = android.media.AudioRecord(android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION, rate,
                     android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT, frame * 4)
                 val recognizer = Recognizer(current, rate.toFloat())
