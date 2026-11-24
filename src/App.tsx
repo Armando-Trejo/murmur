@@ -113,6 +113,8 @@ import { prefetchAudio } from "./core/prefetch";
 import { albumLink, SPOTIFY_ALBUM_PREFIX, type AlbumResult } from "./core/albumSearch";
 import { AlbumResults } from "./components/AlbumResults";
 import { BlendMixes } from "./components/BlendMixes";
+import { useHeaderScroll } from "./core/useHeaderScroll";
+import { WakeWordSetting } from "./components/WakeWordSetting";
 import {
   loadRecentSearches,
   pushRecent,
@@ -417,6 +419,7 @@ export default function App() {
     return () => observer.disconnect();
   }, []);
   const seq = useRef(0);
+  useHeaderScroll();
   const reduced = useReducedMotion();
   const modalRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<HTMLDivElement>(null);
@@ -2113,6 +2116,7 @@ export default function App() {
                 </div>
                 <ArrowUpRight size={18} />
               </button>
+              <WakeWordSetting notify={notify} />
               <button
                 className="setting-label setting-button"
                 onClick={() =>

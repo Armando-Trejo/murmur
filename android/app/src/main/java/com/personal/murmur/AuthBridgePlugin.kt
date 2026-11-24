@@ -243,6 +243,19 @@ class AuthBridgePlugin : Plugin() {
         }
     }
 
+    /** Songs from YouTube Music search, to find the YouTube twin of a Spotify track. */
+    @PluginMethod fun youtubeSongs(call:PluginCall)=async(call){
+        val query=call.getString("query")?.trim()?.take(200)?.takeIf{it.isNotBlank()}?:error("Falta la canción")
+        withContext(Dispatchers.IO){
+            val (cookie, config) = storedYouTube()
+            val songs = firstReadable(buildList<() -> JSONObject> {
+                if (cookie.isNotBlank()) add { JSONObject().put("songs", YouTubeLibraryReader(cookie, config).searchSongs(query)) }
+                add { JSONObject().put("songs", YouTubeLibraryReader("").searchSongs(query)) }
+            })
+            JSObject(songs.toString())
+        }
+    }
+
     /** Whole albums from YouTube Music search (public; the session only helps regional results). */
     @PluginMethod fun youtubeAlbums(call:PluginCall)=async(call){
         val query=call.getString("query")?.trim()?.take(200)?.takeIf{it.isNotBlank()}?:error("Escribe un álbum o artista")

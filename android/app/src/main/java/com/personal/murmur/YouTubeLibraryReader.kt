@@ -15,6 +15,7 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
         /** YouTube Music search tabs ("params" of the Artists and Albums chips). */
         const val ARTISTS_FILTER = "EgWKAQIgAWoMEA4QChADEAQQCRAF"
         const val ALBUMS_FILTER = "EgWKAQIYAWoMEA4QChADEAQQCRAF"
+        const val SONGS_FILTER = "EgWKAQIIAWoMEA4QChADEAQQCRAF"
     }
     private var version: String? = config.optString("clientVersion").takeIf(YouTubeSessionConfiguration::validVersion)
     private val signedIn get() = cookie.split(';').any {
@@ -171,6 +172,9 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
         }
         return YouTubeMusicPages.matchingArtistChannel(request(search=names.first().take(120)),names)
     }
+
+    /** Song results of YouTube Music search (Songs tab: official audio, album metadata, length). */
+    fun searchSongs(query:String):JSONArray = YouTubeMusicPages.songResults(request(search=query.take(200),searchParams=SONGS_FILTER))
 
     /** Album results of YouTube Music search, newest provider order. */
     fun searchAlbums(query:String):JSONArray = YouTubeMusicPages.albumResults(request(search=query.take(200),searchParams=ALBUMS_FILTER))

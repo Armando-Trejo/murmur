@@ -135,7 +135,6 @@ class HybridMediaService : MediaSessionService() {
     private var refreshedSource=false
     private val integratedDelegate=lazy { com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={ advanceNative() },onEnded={ spotifyTrackEnded() },onKeysRefused={ fallBackFromEngine() }) }
     private var engineFallbackFor = ""
-    private fun spotifyAppInstalled() = runCatching { com.spotify.android.appremote.api.SpotifyAppRemote.isSpotifyInstalled(this) }.getOrDefault(false)
     /**
      * Spotify may refuse audio keys to the librespot engine (it still logs in), and its official Web
      * player fails on WebViews without the DRM it wants. Instead of stopping:
@@ -150,27 +149,12 @@ class HybridMediaService : MediaSessionService() {
         val id = entryIdentity(data)
         if (engineFallbackFor == id) return false
         engineFallbackFor = id
-        val authorization = com.personal.murmur.spotify.SpotifyEngineAuthorization(this)
-        if (spotifyAppInstalled()) {
-            runCatching { authorization.mode("connect") }
-            spotifyIntegrated.deactivate()
-            NativeEvents.emit("onSpotifyEngineError", JSObject().put("trackId", data.optString("id")).put("queueId", data.optString("queueId"))
-                .put("code", "SPOTIFY_RETRY_CONNECT")
-                .put("message", "Spotify no permitió el reproductor integrado en este teléfono. MURMUR cambió a Connect: suena por la app de Spotify y la controlas desde aquí."))
-            return true
-        }
-        if (selectedWeb || !webSession.webReady()) return false
-        runCatching { authorization.mode("web") }
-        NativeEvents.emit("onPlaybackNotice", JSObject().put("message",
-            "Spotify rechazó el motor integrado. MURMUR siguió con Integrado · Web; puedes cambiarlo en Conexiones."))
-        scope.launch {
-            try { playIntegrated(data, web = true, rememberTrack = false); emitNativeTrack(data) }
-            catch (failure: Exception) {
-                if (failure is CancellationException) return@launch
-                NativeEvents.emit("onSpotifyEngineError", JSObject().put("trackId", data.optString("id")).put("queueId", data.optString("queueId"))
-                    .put("message", failure.message ?: "Spotify Web no pudo continuar esta canción. Renueva Autorizar Spotify en Conexiones."))
-            }
-        }
+        // Never depend on the Spotify app: the web layer plays the same song from YouTube Music
+        // through MURMUR's own engine (gapless, cache, visualizer, lock screen all keep working).
+        spotifyIntegrated.deactivate()
+        NativeEvents.emit("onSpotifyEngineError", JSObject().put("trackId", data.optString("id")).put("queueId", data.optString("queueId"))
+            .put("code", "SPOTIFY_RETRY_YOUTUBE")
+            .put("message", "Spotify no permite su reproductor en este teléfono. MURMUR toca la misma canción desde YouTube Music."))
         return true
     }
     private val nativeIntegrated by integratedDelegate

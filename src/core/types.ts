@@ -26,6 +26,8 @@ export interface QueueItem {
   queueId?: string;
   /** Added by the user with "Añadir a la cola"; plays before the rest of the context, in order. */
   userQueued?: boolean;
+  /** A Spotify track playing its YouTube Music twin through MURMUR's own engine. */
+  bridgedFrom?: "spotify";
 }
 export interface Playlist {
   kind?: "playlist" | "album";

@@ -31,6 +31,7 @@
         <activity android:name=".VideoActivity" android:exported="false" android:supportsPictureInPicture="true" android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"/>
         <activity android:name=".BackupWriter" android:exported="false" android:theme="@android:style/Theme.Material.NoActionBar"/>
         <service android:name=".HybridMediaService" android:exported="true" android:foregroundServiceType="mediaPlayback"><intent-filter><action android:name="androidx.media3.session.MediaSessionService"/></intent-filter></service>
+        <service android:name=".WakeWordService" android:exported="false" android:foregroundServiceType="microphone"/>
         <service android:name=".LoginKeepAlive" android:exported="false" android:foregroundServiceType="dataSync"/>
         <service android:name=".VoiceTileService" android:label="Voz MURMUR" android:icon="@drawable/ic_stat_sound" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE" android:exported="true"><intent-filter><action android:name="android.service.quicksettings.action.QS_TILE"/></intent-filter></service>
 
@@ -54,6 +55,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-feature android:name="android.hardware.microphone" android:required="false"/>

@@ -136,6 +136,8 @@ interface AuthBridge {
   }>;
   /** YouTube Music artist page; resolves the channel by name when no id is known. */
   youtubeArtist(o: { id?: string; name?: string }): Promise<ArtistPage>;
+  /** Songs tab of YouTube Music search. */
+  youtubeSongs(o: { query: string }): Promise<{ songs: { videoId: string; title: string; artist: string; album?: string; duration: number; artworkUrl?: string }[] }>;
   /** Albums tab of YouTube Music search. */
   youtubeAlbums(o: { query: string }): Promise<{ albums: { id: string; title: string; artist?: string; year?: string; artworkUrl?: string }[] }>;
   /** Plain lyrics as YouTube Music shows them, by video or by a "title artist" query. */
@@ -155,6 +157,9 @@ interface VoiceBridge {
   }>;
   openSettings(): Promise<void>;
   downloadModel(): Promise<{ available: boolean; message: string }>;
+  /** "Ok MURMUR" wake phrase (offline listener in a microphone foreground service). */
+  wakeWordStatus(): Promise<{ enabled: boolean; running: boolean; model: boolean }>;
+  setWakeWord(o: { enabled: boolean }): Promise<{ enabled: boolean; model?: boolean }>;
   rankTags(o: {
     query: string;
     tags: string[];

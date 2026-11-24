@@ -228,3 +228,60 @@ input, textarea { caret-color: currentColor; }
 .search-field input::selection { background: rgba(var(--brand-rgb), 0.32); color: #121212; }
 ::selection { background: rgba(var(--brand-rgb), 0.38); color: #fff; }
 .search-field:focus-within { box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.45); }
+
+/* While typing, the tabs and mini player would ride on top of the keyboard and cover the results. */
+body:has(input:not([type="checkbox"]):not([type="range"]):not([type="color"]):focus, textarea:focus) .bottom-shell {
+  transform: translateY(110%);
+  opacity: 0;
+  pointer-events: none;
+}
+.bottom-shell { transition: transform 220ms cubic-bezier(0.2, 0.9, 0.3, 1), opacity 160ms ease; }
+@media (prefers-reduced-motion: reduce) { .bottom-shell { transition: none; } }
+
+/* ---------- Top bar that gets out of the way ---------- */
+/* At the top of a page there is no bar at all, only the logo and mic over the content; scrolling
+   down slides it away, a short scroll up brings it back as glass. Replaces the permanent dark band. */
+.topbar {
+  transition: transform 260ms cubic-bezier(0.2, 0.9, 0.3, 1), background-color 200ms ease, box-shadow 200ms ease;
+  will-change: transform;
+}
+:root[data-header="top"] .topbar {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+:root[data-header="hidden"] .topbar { transform: translateY(-105%); }
+:root[data-header="shown"] .topbar {
+  background: rgba(var(--glass-tint), 0.58);
+  box-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.9);
+}
+/* The search field sticks under the bar; when the bar hides it moves up with it. */
+.search-page .search-field { transition: top 260ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+:root[data-header="hidden"] .search-page .search-field { top: calc(10px + env(safe-area-inset-top, 0px)); }
+@media (prefers-reduced-motion: reduce) {
+  .topbar, .search-page .search-field { transition: none; }
+}
+
+/* The bar spans edge to edge (it used to stop 22 px short of each side and read as a dark box),
+   and its glass fades out downwards instead of ending on a hard line. */
+.topbar {
+  margin-inline: calc(-1 * var(--page-x));
+  padding-inline: var(--page-x);
+}
+:root[data-header="shown"] .topbar {
+  background: linear-gradient(180deg, rgba(var(--glass-tint), 0.78) 0%, rgba(var(--glass-tint), 0.62) 70%, rgba(var(--glass-tint), 0) 100%);
+  box-shadow: none;
+  -webkit-mask-image: linear-gradient(180deg, #000 78%, transparent);
+  mask-image: linear-gradient(180deg, #000 78%, transparent);
+}
+
+/* ---------- Battery: the welcome aurora ---------- */
+/* Its blur(40px) container was re-rasterised every frame forever: ~60 % of a core in the render
+   thread and ~45 % in the compositor with MURMUR idle on Home (measured on the phone). Soft
+   gradients give the same glow without a filter, and the drift plays a couple of cycles, then rests. */
+.welcome-aurora { filter: none; }
+.welcome-aurora i:nth-child(1) { background: radial-gradient(circle, rgba(var(--tone), 0.55), rgba(var(--tone), 0.18) 45%, transparent 70%); }
+.welcome-aurora i:nth-child(2) { background: radial-gradient(circle, rgba(var(--brand-rgb), 0.42), rgba(var(--brand-rgb), 0.12) 45%, transparent 70%); }
+.welcome-aurora i:nth-child(3) { background: radial-gradient(circle, rgba(var(--tone), 0.36), rgba(var(--tone), 0.1) 45%, transparent 72%); }
+.welcome-aurora i:nth-child(n) { animation-iteration-count: 2; animation-fill-mode: forwards; }

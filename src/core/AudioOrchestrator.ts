@@ -4,6 +4,7 @@ import { recordListening } from "./DiscoveryEngine";
 import { parseChapters } from "./FanUploadParser";
 import { db } from "./db";
 import { SelectionTimer } from "./PlaybackMetrics";
+import { bridged, setSpotifyViaYouTube, spotifyViaYouTube, youtubeTwin } from "./spotifyBridge";
 export interface PlayerState {
   queue: QueueItem[];
   index: number;
@@ -172,9 +173,10 @@ export class AudioOrchestrator {
       )
         return;
       this.loadedId = "";
-      // The service switched Spotify to Connect (official app): replay the same song that way.
-      if (event.code === "SPOTIFY_RETRY_CONNECT") {
-        this.spotifyTransport = "connect";
+      // Spotify refused its own playback here: play the YouTube Music twin with MURMUR's engine
+      // from now on (no Spotify app needed), starting with this same song.
+      if (event.code === "SPOTIFY_RETRY_YOUTUBE") {
+        setSpotifyViaYouTube(true);
         this.update({ error: "", errorCode: "", loading: true, playing: false });
         void this.playCurrent();
         return;
@@ -276,8 +278,26 @@ export class AudioOrchestrator {
     });
     await this.playCurrent();
   }
+  /** Resolves the YouTube twins of the next Spotify entries so the native queue can preload them. */
+  private async bridgeUpcoming(count = 3) {
+    const generation = this.generation;
+    const pending = this.state.queue.slice(this.state.index + 1, this.state.index + 1 + count)
+      .filter((t) => t.source === "spotify");
+    let changed = false;
+    for (const entry of pending) {
+      const twin = await youtubeTwin(entry).catch(() => undefined);
+      if (generation !== this.generation || !twin) continue;
+      const queue = [...this.state.queue];
+      const at = queue.findIndex((t) => t.queueId === entry.queueId);
+      if (at < 0 || queue[at].source !== "spotify") continue;
+      queue[at] = bridged(queue[at], twin);
+      this.update({ queue });
+      changed = true;
+    }
+    if (changed) this.syncQueue();
+  }
   async playCurrent() {
-    const track = this.current;
+    let track = this.current;
     if (!track) {
       this.update({ playing: false, loading: false });
       return;
@@ -296,6 +316,16 @@ export class AudioOrchestrator {
         throw new Error(
           "La reproducción requiere la app Android. Puedes explorar y gestionar tu biblioteca aquí.",
         );
+      if (track.source === "spotify" && spotifyViaYouTube()) {
+        const twin = await youtubeTwin(track);
+        if (generation !== this.generation) return;
+        if (!twin)
+          throw Object.assign(new Error("No encontré esta canción de Spotify en YouTube Music. Búscala en Buscar para elegir otra versión."), { code: "SPOTIFY_NO_TWIN" });
+        track = bridged(track, twin);
+        const queue = [...this.state.queue];
+        queue[this.state.index] = track;
+        this.update({ queue });
+      }
       if (track.source === "spotify") {
         // The native Spotify load switches and pauses the previous source atomically.
         if (generation !== this.generation) return;
@@ -352,6 +382,7 @@ export class AudioOrchestrator {
             : {}),
         });
         this.syncQueue(true);
+        if (spotifyViaYouTube()) void this.bridgeUpcoming();
       }
     } catch (error) {
       if (generation === this.generation && !this.state.error)

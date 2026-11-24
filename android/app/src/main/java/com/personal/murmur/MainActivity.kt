@@ -55,7 +55,11 @@ class MainActivity : BridgeActivity() {
                 .addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION))
         } catch (_: Exception) { }
     }
-    override fun onStart() { super.onStart(); visible = true; HybridMediaService.uiVisible = true }
+    override fun onStart() {
+        super.onStart(); visible = true; HybridMediaService.uiVisible = true
+        // "Ok MURMUR" was on but Android stopped it (reboot, memory): resume it while MURMUR is in front.
+        if (WakeWordService.enabled(this) && !WakeWordService.running) runCatching { WakeWordService.start(this) }
+    }
     override fun onStop() { visible = false; HybridMediaService.uiVisible = false; super.onStop() }
     override fun onResume() {
         super.onResume()

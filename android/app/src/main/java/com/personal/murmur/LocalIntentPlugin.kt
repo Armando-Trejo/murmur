@@ -44,6 +44,30 @@ class LocalIntentPlugin : Plugin() {
         if (result.resultCode == Activity.RESULT_OK && !text.isNullOrEmpty()) call?.resolve(JSObject().put("text", text))
         else call?.reject(result.data?.getStringExtra("voice_error") ?: "Escucha cancelada.", "VOICE_CAPTURE_FAILED")
     }
+    /** "Ok MURMUR": state, and turning it on (needs the microphone; must start while MURMUR is in front). */
+    @PluginMethod fun wakeWordStatus(call: PluginCall) {
+        call.resolve(JSObject().put("enabled", WakeWordService.enabled(context)).put("running", WakeWordService.running)
+            .put("model", WakeWordModel.available(context)))
+    }
+    @PluginMethod fun setWakeWord(call: PluginCall) { activity.runOnUiThread {
+        val enabled = call.getBoolean("enabled") ?: false
+        if (!enabled) { WakeWordService.setEnabled(context, false); WakeWordService.stop(context); call.resolve(JSObject().put("enabled", false)); return@runOnUiThread }
+        if (getPermissionState("microphone") != PermissionState.GRANTED) { requestPermissionForAlias("microphone", call, "wakeMicrophoneResult"); return@runOnUiThread }
+        enableWake(call)
+    } }
+    @PermissionCallback private fun wakeMicrophoneResult(call: PluginCall) {
+        if (getPermissionState("microphone") == PermissionState.GRANTED) enableWake(call)
+        else call.reject(VoiceRecognitionPolicy.message(9), "MICROPHONE_DENIED")
+    }
+    private fun enableWake(call: PluginCall) {
+        try {
+            WakeWordService.setEnabled(context, true); WakeWordService.start(context)
+            call.resolve(JSObject().put("enabled", true).put("model", WakeWordModel.available(context)))
+        } catch (e: Exception) {
+            WakeWordService.setEnabled(context, false)
+            call.reject("Android no permitió iniciar la escucha. Vuelve a intentarlo con MURMUR abierto.")
+        }
+    }
     @PluginMethod fun downloadModel(call: PluginCall) { scope.launch { try { withContext(Dispatchers.IO) { SemanticModel.download(context) }; call.resolve(JSObject().put("available", true).put("message", "Modelo local listo · 6 MB · integridad verificada")) } catch (e: Exception) { call.reject(e.message ?: "No se pudo descargar el modelo", e) } } }
     @PluginMethod fun rankTags(call: PluginCall) { scope.launch { try { val query = call.getString("query")?.take(500) ?: error("Falta consulta"); val array = call.getArray("tags") ?: JSArray(); val tags = (0 until minOf(array.length(), 256)).map { array.getString(it).take(100) }; val ranked = withContext(Dispatchers.IO) { SemanticModel.rank(context, query, tags) }; val result = JSArray(); ranked.forEach { (text, score) -> result.put(JSObject().put("text", text).put("score", score)) }; call.resolve(JSObject().put("ranked", result)) } catch (e: LinkageError) { call.reject("El modelo no es compatible con esta arquitectura. Se usará el parser local de etiquetas.") } catch (e: Exception) { call.reject(e.message ?: "No se pudo calcular afinidad", e) } } }
     override fun handleOnDestroy() { scope.cancel(); super.handleOnDestroy() }

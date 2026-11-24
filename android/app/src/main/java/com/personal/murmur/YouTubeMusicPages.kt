@@ -221,6 +221,43 @@ object YouTubeMusicPages {
         return result
     }
 
+    /**
+     * Songs tab of YouTube Music search: videoId, title, artist, album, length (s) and cover.
+     * Used to play a Spotify track through MURMUR's own engine when Spotify refuses playback.
+     */
+    fun songResults(data: JSONObject): JSONArray {
+        val result = JSONArray()
+        val seen = mutableSetOf<String>()
+        val clock = Regex("\\d{1,3}:\\d{2}(?::\\d{2})?")
+        val kinds = setOf("canción", "song", "video", "vídeo", "episodio", "episode")
+        fun walk(value: Any?) {
+            when (value) {
+                is JSONObject -> {
+                    val row = value.optJSONObject("musicResponsiveListItemRenderer")
+                    val videoId = row?.let { find(it, setOf("playlistItemData", "watchEndpoint"))?.optString("videoId") }.orEmpty()
+                    if (row != null && videoId.matches(Regex("[A-Za-z0-9_-]{11}")) && seen.add(videoId)) {
+                        val columns = row.optJSONArray("flexColumns")
+                        fun column(i: Int) = text(columns?.optJSONObject(i)?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")?.optJSONObject("text"))
+                        val title = column(0)
+                        val parts = column(1).split(" • ", " · ").map(String::trim).filter(String::isNotBlank)
+                            .filterNot { it.lowercase() in kinds }
+                        val length = parts.lastOrNull { it.matches(clock) }
+                        val info = parts.filterNot { it == length }
+                        val seconds = length?.split(':')?.fold(0L) { n, s -> n * 60 + s.toInt() } ?: -1L
+                        val cover = largest(find(row, setOf("musicThumbnailRenderer"))?.optJSONObject("thumbnail")?.optJSONArray("thumbnails"))
+                        if (title.isNotBlank()) result.put(JSONObject().put("videoId", videoId).put("title", title)
+                            .put("artist", info.firstOrNull().orEmpty()).put("album", info.getOrNull(1).orEmpty())
+                            .put("duration", seconds).put("artworkUrl", cover))
+                    }
+                    value.keys().forEach { walk(value.opt(it)) }
+                }
+                is JSONArray -> for (i in 0 until value.length()) walk(value.opt(i))
+            }
+        }
+        walk(data)
+        return result
+    }
+
     /** First artist channel found in a search response, preferring an exact name match. */
     fun artistChannel(data: JSONObject, name: String): String? {
         val wanted = normalize(name)

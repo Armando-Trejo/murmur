@@ -1,4 +1,21 @@
-# Continuidad de MURMUR 2.9.0
+# Continuidad de MURMUR 2.10.0
+
+## Estado de 2.10.0 (24 nov 2026, código 24)
+
+Instalado y probado en el HONOR Magic8 Lite del usuario (Android 16) por ADB.
+
+- **Spotify sin la app de Spotify.** Spotify niega las llaves de audio a librespot en esta cuenta (`audio key error 0 1`, bloqueo de cuenta reportado en librespot#1649, sin solución) y su Web Playback SDK no tiene DRM en Android WebView. Requisito del usuario: no depender de la app de Spotify. Ahora, al rechazo, `HybridMediaService.fallBackFromEngine` emite `SPOTIFY_RETRY_YOUTUBE`; la capa web guarda `localStorage murmur.spotifyVia=youtube` y reproduce el **gemelo de YouTube Music** (`src/core/spotifyBridge.ts`: búsqueda en la pestaña Canciones con `Auth.youtubeSongs`, puntuación por título, artista y duración, rechaza en vivo/covers; caché `twin:v1:` en `db.settings`). La entrada conserva `queueId`, metadatos de Spotify y `bridgedFrom: "spotify"`; las 3 siguientes se resuelven por adelantado para que el motor nativo las precargue y encadene sin corte. Medido en el teléfono: primera canción ~7 s (espera el rechazo), siguientes 0,5 s; la app de Spotify no se abre. Connect sigue existiendo pero ya no es la salida automática.
+- **Encabezado.** `useHeaderScroll` pone `data-header` en `<html>`: transparente arriba de todo, se oculta al bajar y reaparece al subir, de borde a borde y con desvanecido (antes era un bloque oscuro con orillas).
+- **«Ok MURMUR».** `WakeWordService` (servicio en primer plano tipo micrófono) con Vosk sin conexión (`com.alphacephei:vosk-android:0.3.47`, modelo `vosk-model-small-es-0.42` de ~39 MB descargado al activar, en `files/models/vosk-es`). Gramática corta (el modelo no tiene «murmur»; detecta «ok/okey murmura/murmuro/mur…», `WakeWordService.heard`) y un detector de voz por RMS (>800) que no decodifica el silencio. Al oír la frase: baja la música, pulso, `SpeechRecognizer` de Android captura la petición y llega como `onVoiceCommandCaptured` (retenido si la app está cerrada). Interruptor en Conexiones (`WakeWordSetting`), apagado por defecto; notificación fija y punto verde del micrófono mientras está activo. CPU: 68 % de un núcleo sin gramática → ~7 % con gramática → ~0 % en silencio con el umbral. **Pendiente: que el usuario lo pruebe hablando.**
+- **Batería, interfaz.** La aurora de la bienvenida (3 animaciones infinitas bajo `filter: blur(40px)`) costaba ~60 % de un núcleo en RenderThread y ~45 % en el compositor con la app quieta. Ahora degradados sin filtro y 2 ciclos de animación: 0 % en reposo.
+- **Escritura.** Cursor visible (`caret-color`), resaltado de selección, contorno al enfocar la búsqueda, y las pestañas se ocultan mientras el teclado está abierto.
+- Perfiles: con varios artistas gana el primero acreditado. Álbumes: duraciones en canciones de álbum y búsqueda con resultado principal de YouTube y Spotify (límite 10).
+
+Verificación: 184 pruebas web, 97 Android, lint 0 errores. En el teléfono: Spotify vía YouTube, gapless en álbum (sin `AudioTrack` nuevo en el cambio), pantalla musical sobre el bloqueo, búsqueda de álbumes, mezclas por círculos de artistas, encabezado, cursor y consumo. «Permanecer activo» (`svc power stayon usb`) quedó encendido en el teléfono por pedido del usuario para las pruebas.
+
+---
+
+# Historial: continuidad de MURMUR 2.9.0
 
 ## Estado de 2.9.0 (24 nov 2026, código 23)
 
