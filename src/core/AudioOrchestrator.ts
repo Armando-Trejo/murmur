@@ -4,8 +4,9 @@ import { recordListening } from "./DiscoveryEngine";
 import { parseChapters } from "./FanUploadParser";
 import { db } from "./db";
 import { SelectionTimer } from "./PlaybackMetrics";
-import { bridged, setSpotifyViaYouTube, spotifyViaYouTube, youtubeTwin } from "./spotifyBridge";
+import { anotherVersion, bridged, setSpotifyViaYouTube, spotifyViaYouTube, youtubeTwin } from "./spotifyBridge";
 import { interleaveMagic } from "./magicShuffle";
+import { CONTINUE_WHEN_LEFT, continuationPicks } from "./continuation";
 export interface PlayerState {
   queue: QueueItem[];
   index: number;
@@ -21,6 +22,8 @@ export interface PlayerState {
   /** off → on (shuffle) → magic (shuffle + related songs) → off, like the shuffle button cycles. */
   shuffleMode: "off" | "on" | "magic";
 }
+/** Native errors that mean "this upload will never play here" (not a network hiccup). */
+const UNPLAYABLE = new Set(["AUDIO_UNAVAILABLE", "YOUTUBE_CONTENT_UNAVAILABLE", "YOUTUBE_PRIVATE_ACCESS_DENIED"]);
 export class AudioOrchestrator {
   private state: PlayerState = {
     queue: [],
@@ -68,7 +71,7 @@ export class AudioOrchestrator {
     }
     // Back to normal: drop the added songs and restore the original order of what remains.
     const head = this.state.queue.slice(0, this.state.index + 1);
-    const rest = this.state.queue.slice(this.state.index + 1).filter((t) => !t.smart);
+    const rest = this.state.queue.slice(this.state.index + 1).filter((t) => !t.smart || t.continuation);
     const position = new Map(this.originalOrder.map((id, i) => [id, i]));
     const known = rest.filter((t) => position.has(t.queueId!)).sort((a, b) => position.get(a.queueId!)! - position.get(b.queueId!)!);
     const added = rest.filter((t) => !position.has(t.queueId!));
@@ -256,12 +259,18 @@ export class AudioOrchestrator {
           loading: e.loading ?? false,
           deviceName: e.transport === "integrated" ? "MURMUR · Integrado" : "",
         });
+        this.scheduleContinuation();
       }
     });
     await Audio.addListener("onTrackError", (event) => {
       if (this.current?.source !== "youtube" || !this.accepts(event)) return;
       if (event.trackId && event.trackId !== this.current.id) return;
       this.loadedId = "";
+      // Blocked or removed upload: play another version of the same song, else the next song.
+      if (UNPLAYABLE.has(event.code)) {
+        void this.replaceUnplayable(this.current);
+        return;
+      }
       this.update({
         error:
           event.message || "No se pudo abrir el audio. Prueba otra versión.",
@@ -311,6 +320,7 @@ export class AudioOrchestrator {
   }
   async playList(queue: QueueItem[], index = 0) {
     this.generation++;
+    this.context++;
     this.update({
       queue: queue.map((track) => ({ ...track, userQueued: undefined, queueId: crypto.randomUUID() })),
       index,
@@ -348,6 +358,7 @@ export class AudioOrchestrator {
       this.update({ playing: false, loading: false });
       return;
     }
+    this.scheduleContinuation();
     const retry = this.state.errorCode === "AUDIO_NOT_FOUND"
       ? { refreshSource: true, positionMs: Math.round(this.state.position * 1000), offlinePath: undefined }
       : this.state.error ? { refreshSource: true, positionMs: Math.round(this.state.position * 1000) } : undefined;
@@ -363,10 +374,11 @@ export class AudioOrchestrator {
           "La reproducción requiere la app Android. Puedes explorar y gestionar tu biblioteca aquí.",
         );
       if (track.source === "spotify" && spotifyViaYouTube()) {
-        const twin = await youtubeTwin(track);
+        // YouTube Music's twin first, then any other upload of the same song.
+        const twin = (await youtubeTwin(track).catch(() => undefined)) ?? (await anotherVersion(track));
         if (generation !== this.generation) return;
         if (!twin)
-          throw Object.assign(new Error("No encontré esta canción de Spotify en YouTube Music. Búscala en Buscar para elegir otra versión."), { code: "SPOTIFY_NO_TWIN" });
+          throw Object.assign(new Error("No encontré esta canción de Spotify en YouTube. Sigo con la siguiente."), { code: "SPOTIFY_NO_TWIN" });
         track = bridged(track, twin);
         const queue = [...this.state.queue];
         queue[this.state.index] = track;
@@ -419,6 +431,7 @@ export class AudioOrchestrator {
         });
       }
       if (generation === this.generation) {
+        this.unplayableRun = 0;
         this.loadedId = track.id;
         this.loadedSource = track.source;
         this.update({
@@ -431,6 +444,9 @@ export class AudioOrchestrator {
         if (spotifyViaYouTube()) void this.bridgeUpcoming();
       }
     } catch (error) {
+      const code = (error as { code?: string }).code;
+      // A song with no playable version anywhere is skipped, so the music doesn't stop.
+      if (generation === this.generation && code === "SPOTIFY_NO_TWIN" && this.skipUnplayable()) return;
       if (generation === this.generation && !this.state.error)
         this.update({
           loading: false,
@@ -439,6 +455,54 @@ export class AudioOrchestrator {
           errorCode: (error as { code?: string }).code || "PLAYBACK_FAILED",
         });
     }
+  }
+  /** Songs skipped in a row because no version could play: stops after a few to avoid a loop. */
+  private unplayableRun = 0;
+  private skipUnplayable() {
+    if (++this.unplayableRun > 4) { this.unplayableRun = 0; return false; }
+    this.update({ loading: true, error: "", errorCode: "" });
+    void this.next(false);
+    return true;
+  }
+  /** Another upload of the same song when this one is blocked or removed; otherwise the next song. */
+  private async replaceUnplayable(track: QueueItem) {
+    const generation = this.generation;
+    this.update({ loading: true, playing: false, error: "", errorCode: "" });
+    const other = await anotherVersion(track, track.videoId).catch(() => undefined);
+    if (generation !== this.generation || this.current?.queueId !== track.queueId) return;
+    if (!other) { if (!this.skipUnplayable()) this.update({ loading: false, error: "No encontré otra versión que se pueda reproducir.", errorCode: "AUDIO_UNAVAILABLE" }); return; }
+    const queue = [...this.state.queue];
+    queue[this.state.index] = { ...track, videoId: other.videoId, duration: track.duration || other.duration, offlinePath: undefined };
+    this.update({ queue });
+    await this.playCurrent();
+  }
+  /** Changes only when a new list starts, so a late continuation never lands in another context. */
+  private context = 0;
+  private extending?: Promise<void>;
+  /** Turned off by tests and by "pause at the end of this song". */
+  continueAutomatically = true;
+  /**
+   * "La música no se detiene": with two songs or fewer left, appends related songs (and recently
+   * played ones) so the queue never runs out, never repeating a song that is already in it.
+   */
+  private continuationTimer?: ReturnType<typeof setTimeout>;
+  /** A few seconds after a song starts, so finding more music never competes with starting this one. */
+  private scheduleContinuation() {
+    clearTimeout(this.continuationTimer);
+    this.continuationTimer = setTimeout(() => void this.ensureContinuation(), 4000);
+  }
+  ensureContinuation(): Promise<void> | undefined {
+    if (!isNative || !this.continueAutomatically || this.extending || !this.current) return this.extending;
+    if (this.state.queue.length - 1 - this.state.index > CONTINUE_WHEN_LEFT) return;
+    const context = this.context;
+    this.extending = (async () => {
+      const picks = await continuationPicks(this.state.queue, this.current);
+      if (context !== this.context || !picks.length) return;
+      this.update({ queue: [...this.state.queue, ...picks.map((t) => ({ ...t, queueId: crypto.randomUUID() }))] });
+      this.syncQueue();
+      void this.bridgeUpcoming();
+    })().catch(() => {}).finally(() => { this.extending = undefined; });
+    return this.extending;
   }
   /**
    * Queues a track right after the current one and after everything the user already queued,
@@ -506,6 +570,8 @@ export class AudioOrchestrator {
     const position = this.state.position;
     if (previous)
       void recordListening(previous, position, skipped).catch(() => {});
+    // End of the queue: wait for the continuation instead of stopping.
+    if (!this.nextTrack) await this.ensureContinuation();
     if (!this.nextTrack) return this.pause();
     this.update({ index: this.state.index + 1, position: 0, error: "", errorCode: "" });
     await this.playCurrent();

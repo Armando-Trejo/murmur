@@ -88,4 +88,13 @@ describe("MURMUR VoiceIntentParser", () => {
     "rejects unsupported commands: %s",
     (text) => expect(parseVoiceIntent(text).type).toBe("unknown"),
   );
+  it("takes the platform the user asks for", () => {
+    expect(parseVoiceIntent("ok murmur pon bailarina de miranda en spotify")).toMatchObject({
+      type: "track", title: "bailarina", artist: "miranda", platform: "spotify" });
+    expect(parseVoiceIntent("pon enjambre desde youtube music")).toMatchObject({ type: "artist", query: "enjambre", platform: "youtube" });
+    expect(parseVoiceIntent("pon bailarina de miranda")).not.toHaveProperty("platform", "spotify");
+  });
+  it("understands whole albums", () =>
+    expect(parseVoiceIntent("pon el disco el segundo es mas de enjambre en youtube")).toMatchObject({
+      type: "album", title: "el segundo es mas", artist: "enjambre", platform: "youtube" }));
 });

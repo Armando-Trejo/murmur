@@ -79,6 +79,7 @@ object WakeWordModel {
 class WakeWordService : Service() {
     companion object {
         private const val CHANNEL = "wake_word"
+        private const val LOG_TAG = "MURMUR"
         private const val NOTIFICATION = 1003
         private const val ACTION_STOP = "com.personal.murmur.wake.STOP"
         @Volatile var running = false; private set
@@ -161,18 +162,50 @@ class WakeWordService : Service() {
         worker.start()
     }
 
+    /**
+     * Music from the phone's own speaker reaches the microphone. While it plays, the capture uses the
+     * voice-communication path with the platform's echo canceller (it subtracts what the phone itself
+     * is playing) and noise suppressor, so "Ok MURMUR" is heard over the song. With headphones, or in
+     * silence, the plain voice-recognition path is cheaper and more faithful.
+     */
+    private fun wantsEchoCancel(): Boolean {
+        val audio = getSystemService(android.media.AudioManager::class.java) ?: return false
+        if (!audio.isMusicActive) return false
+        val private = setOf(android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET, android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+            android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO) + (if (Build.VERSION.SDK_INT >= 31) setOf(android.media.AudioDeviceInfo.TYPE_BLE_HEADSET) else emptySet())
+        return audio.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).none { it.type in private }
+    }
+
     private fun capture(model: Model, grammar: String) {
+        while (loop === Thread.currentThread() && !capturing) {
+            val echo = wantsEchoCancel()
+            if (!captureWith(model, grammar, echo)) return
+        }
+    }
+
+    /** One microphone session; returns true to reopen (the music started or stopped), false to end. */
+    private fun captureWith(model: Model, grammar: String, echo: Boolean): Boolean {
         val rate = 16000
         val frame = rate / 10 // 100 ms of 16-bit mono samples
+        val source = if (echo) android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION else android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION
         val record = try {
-            android.media.AudioRecord(android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION, rate,
+            android.media.AudioRecord(source, rate,
                 android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT,
                 maxOf(android.media.AudioRecord.getMinBufferSize(rate, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT), frame * 4))
-        } catch (failure: SecurityException) { handler.post { loop = null }; return }
+        } catch (failure: SecurityException) { handler.post { loop = null }; return false }
+        val effects = if (echo) listOfNotNull(
+            if (android.media.audiofx.AcousticEchoCanceler.isAvailable()) runCatching { android.media.audiofx.AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true } }.getOrNull() else null,
+            if (android.media.audiofx.NoiseSuppressor.isAvailable()) runCatching { android.media.audiofx.NoiseSuppressor.create(record.audioSessionId)?.apply { enabled = true } }.getOrNull() else null,
+        ) else emptyList()
         val recognizer = Recognizer(model, rate.toFloat(), grammar)
         val buffer = ShortArray(frame)
         val preroll = ArrayDeque<ShortArray>()
         var hangover = 0
+        // Background level (music left after echo cancelling, room noise): speech must rise above it.
+        var floor = 300.0
+        var frames = 0
+        var reopen = false
         try {
             record.startRecording()
             while (loop === Thread.currentThread() && !capturing) {
@@ -180,7 +213,10 @@ class WakeWordService : Service() {
                 if (read <= 0) { Thread.sleep(50); continue }
                 var sum = 0.0
                 for (i in 0 until read) sum += buffer[i] * buffer[i].toDouble()
-                val loud = kotlin.math.sqrt(sum / read) > 800 // ~ -32 dBFS: a voice within arm's reach, not room noise
+                val rms = kotlin.math.sqrt(sum / read)
+                // ~ -32 dBFS in silence: a voice within arm's reach, not room noise; over music, clearly above it.
+                val loud = rms > maxOf(800.0, floor * 1.8)
+                floor = if (rms < floor) floor * 0.8 + rms * 0.2 else floor * 0.995 + rms * 0.005
                 val chunk = buffer.copyOf(read)
                 if (loud) hangover = 12 // keep decoding 1.2 s after the last loud frame
                 if (hangover > 0) {
@@ -191,14 +227,22 @@ class WakeWordService : Service() {
                 } else {
                     preroll.addLast(chunk); if (preroll.size > 5) preroll.removeFirst()
                 }
+                // Every 2 s: if the music started or stopped, reopen the microphone on the right path.
+                if (++frames % 20 == 0) {
+                    if (android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG)) android.util.Log.d(LOG_TAG, "wake mic echo=$echo aec=${effects.size} rms=${rms.toInt()} floor=${floor.toInt()}")
+                    if (hangover == 0 && wantsEchoCancel() != echo) { reopen = true; break }
+                }
             }
         } catch (failure: Exception) {
             android.util.Log.w("MURMUR", "Wake word listener stopped", failure)
             if (running && !capturing) handler.postDelayed({ loop = null; listen() }, 3_000)
+            reopen = false
         } finally {
             runCatching { record.stop() }; record.release(); recognizer.close()
-            if (loop === Thread.currentThread()) loop = null
+            effects.forEach { runCatching { it.release() } }
+            if (!reopen && loop === Thread.currentThread()) loop = null
         }
+        return reopen
     }
 
     private fun feed(recognizer: Recognizer, samples: ShortArray) {

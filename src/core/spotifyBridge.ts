@@ -1,6 +1,6 @@
-import { Auth, isNative } from "../native";
+import { Audio, Auth, isNative } from "../native";
 import { db } from "./db";
-import { normalize } from "./FanUploadParser";
+import { normalize, parseFanUpload } from "./FanUploadParser";
 import { similarity } from "./SourceResolver";
 import { creditedArtists } from "../components/ArtistProfile";
 import type { QueueItem } from "./types";
@@ -95,4 +95,31 @@ export function bridged(track: QueueItem, twin: YouTubeSong): QueueItem {
     artworkUrl: track.artworkUrl || twin.artworkUrl,
     bridgedFrom: "spotify",
   };
+}
+
+/**
+ * Any YouTube upload of the same song (YouTube Music song, official video, lyric video), for when
+ * YouTube Music has no twin of a Spotify track or its copy is blocked here. `exclude` skips the
+ * upload that just failed. Stricter than nothing, looser than the twin: 0.6.
+ */
+export async function anotherVersion(track: Pick<QueueItem, "title" | "artist" | "duration">, exclude?: string): Promise<YouTubeSong | undefined> {
+  if (!isNative) return;
+  const query = [cleanTitle(track.title), creditedArtists(track.artist)[0] ?? track.artist].filter(Boolean).join(" ");
+  const [songs, videos] = await Promise.allSettled([Auth.youtubeSongs({ query }), Audio.searchYouTube({ query })]);
+  const candidates: YouTubeSong[] = [
+    ...(songs.status === "fulfilled" ? songs.value.songs ?? [] : []),
+    ...(videos.status === "fulfilled" ? videos.value.tracks ?? [] : []).flatMap((video) => {
+      if (!video.videoId) return [];
+      const parsed = parseFanUpload(video.title);
+      return [{ videoId: video.videoId, title: parsed.title || video.title, artist: parsed.artist || video.artist,
+        duration: video.duration, artworkUrl: video.artworkUrl }];
+    }),
+  ].filter((song) => song.videoId && song.videoId !== exclude);
+  let best: YouTubeSong | undefined;
+  let score = 0;
+  for (const song of candidates) {
+    const s = twinScore(track, song);
+    if (s > score) { score = s; best = song; }
+  }
+  return score >= 0.6 ? best : undefined;
 }

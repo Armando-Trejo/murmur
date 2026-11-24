@@ -42,6 +42,8 @@ export interface QueueItem extends CustomArtwork {
   bridgedFrom?: "spotify";
   /** Added by "Aleatorio mágico": related to the context, removed when shuffle is turned off. */
   smart?: boolean;
+  /** Added because the queue was about to end, so music never stops; stays when shuffle is turned off. */
+  continuation?: boolean;
 }
 export interface Playlist extends CustomArtwork {
   kind?: "playlist" | "album";

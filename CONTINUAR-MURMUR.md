@@ -220,3 +220,11 @@ Para recompilar, ejecutar `npm.cmd run android:sync` y luego `.\gradlew.bat :app
 Punto para retomar en un teléfono. Probar YouTube y Spotify salteando rápido desde la app, la notificación y la pantalla musical. Interrumpir Wi-Fi durante una pista, comprobar que la posición de esa pista se conserva al recuperar y que Siguiente abre desde cero. Probar una versión restringida y verificar las acciones de reintento, búsqueda y conexión. Comparar el pulso con audio real y el modo Reducir animaciones. No había un teléfono conectado por ADB durante esta sesión.
 
 Resultado de cierre de 2.5. Pasaron 141 pruebas web, 64 pruebas Android locales, lint y el smoke público de extracción de YouTube en una ejecución separada. El APK 2.5, código 17, quedó firmado con esquema v2 y contiene exactamente los cinco archivos del build web. La vista previa pasó las pruebas de aura, letras, movimiento reducido y navegación en Chrome. Resultados en `session25-final.log`, `session25-browser.log` y `verification/vitest-25.json`.
+
+## 2.12.0 (code 27) — la música no se detiene
+- `src/core/continuation.ts`: con 2 o menos canciones restantes, `AudioOrchestrator.ensureContinuation()` agrega 12 (radio de YouTube Music + artistas afines + escuchadas recientes), sin repetir versiones (`songKey`). Marcadas `continuation` (no se quitan al apagar el aleatorio).
+- Buscar: tocar un resultado reproduce solo esa canción (`songRow(..., solo)`); antes encolaba los demás resultados, que eran otras versiones de la misma.
+- Versiones: `anotherVersion()` en spotifyBridge. Spotify sin gemela → cualquier subida de YouTube; YouTube bloqueado (AUDIO_UNAVAILABLE…) → otra subida; si no hay, salta (máx. 4 seguidas).
+- Voz: plataforma al final («… en Spotify / desde YouTube»), álbumes («pon el disco X de Y», `albumTracks`), `bestSong` prefiere estudio; si no está en la plataforma pedida avisa y usa la otra.
+- «Ok MURMUR» con música: con música por la bocina del teléfono usa VOICE_COMMUNICATION + AcousticEchoCanceler/NoiseSuppressor; umbral adaptable (piso de ruido ×1.8). Diagnóstico: `adb shell setprop log.tag.MURMUR DEBUG` → líneas «wake mic».
+- Prueba sin hablar: `adb shell am start -n com.personal.murmur/.MainActivity --es voice_text "'pon X de Y en spotify'"`.

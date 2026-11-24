@@ -1,4 +1,6 @@
 import { Auth, isNative } from "../native";
+import { spotifyTrack } from "./DiscoveryEngine";
+import type { QueueItem } from "./types";
 
 export interface AlbumResult {
   /** Route id for the collection view: MPREb… (YouTube Music) or spalbum-<id> (Spotify). */
@@ -89,4 +91,12 @@ export async function searchAlbums(query: string) {
     albums: interleave(youtube.status === "fulfilled" ? youtube.value : [], spotify.status === "fulfilled" ? spotify.value : []),
     failed,
   };
+}
+
+/** The songs of an album result, in album order, without saving it to the library. */
+export async function albumTracks(album: Pick<AlbumResult, "feedId" | "source">): Promise<QueueItem[]> {
+  if (album.source === "youtube") return (await Auth.youtubeCollection({ id: album.feedId })).tracks ?? [];
+  const id = album.feedId.slice(SPOTIFY_ALBUM_PREFIX.length);
+  const { data } = await Auth.spotifyRequest({ path: "/albums/" + id });
+  return (data?.tracks?.items ?? []).filter((t: { id?: string }) => t?.id).map((t: object) => spotifyTrack({ ...t, album: data }));
 }

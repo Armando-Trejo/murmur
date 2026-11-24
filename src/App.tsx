@@ -945,6 +945,8 @@ export default function App() {
     collection: QueueItem[],
     onChoose?: () => void,
     numbered = false,
+    /** Search results: play only this song; MURMUR then continues with related music, never with other versions of it. */
+    solo = false,
   ) => (
     <SwipeSurface
       className={"song-row" + (current?.id === track.id ? " is-current" : "")}
@@ -962,7 +964,7 @@ export default function App() {
         onPointerDown={() => prefetchAudio([track], 1)}
         onClick={() => {
           onChoose?.();
-          void player.playList(collection, index);
+          void (solo ? player.playList([track]) : player.playList(collection, index));
         }}
       >
         {numbered ? (
@@ -1635,7 +1637,7 @@ export default function App() {
                   />
                 </div>
                 {orderedResults.map((t, i) =>
-                  songRow(t, i, orderedResults, () => rememberSearch(query)),
+                  songRow(t, i, orderedResults, () => rememberSearch(query), false, true),
                 )}
               </>
             ) : query.trim().length >= 2 ? (
