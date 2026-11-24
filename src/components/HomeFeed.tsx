@@ -86,7 +86,10 @@ export function HomeFeed({ active, status, onPlay, onCollection, onConnect, rend
     youtube: useProviderFeed("youtube", isNative && youtube ? status.youtubeRevision ?? 0 : undefined, started, revision),
     spotify: useProviderFeed("spotify", isNative && spotify ? status.spotifyRevision ?? 0 : undefined, started, revision),
   };
-  const providers: Provider[] = filter === "all" ? ["youtube", "spotify"] : [filter];
+  // "Todos" shows only the connected sources: a disconnected one is a choice made in Conexiones,
+  // not something to nag about at the top of Home. Its own filter still offers to connect it.
+  const linked = (["youtube", "spotify"] as const).filter(provider => provider === "youtube" ? youtube : spotify);
+  const providers: Provider[] = filter !== "all" ? [filter] : status.preview || !linked.length ? ["youtube", "spotify"] : [...linked];
   if (!isNative) return null;
   return (
     <section className="home-feed" aria-label={status.preview ? "Demostración de Inicio" : "Descubre música"}>
@@ -127,7 +130,8 @@ export function HomeFeed({ active, status, onPlay, onCollection, onConnect, rend
                 </button>}
               </div>
               {status.preview && connected && <p className="feed-note">Pistas de ejemplo para probar la interfaz.</p>}
-              {!connected ? <button className="text-button" onClick={onConnect}>Conectar {names[provider]}</button>
+              {!connected ? <p className="feed-note">{names[provider]} no está conectado.{" "}
+                  <button className="text-button" onClick={onConnect}>Conectar</button></p>
                 : feed.loading && !feed.shelves.length ? <div className="feed-skeleton" role="status" aria-label="Cargando tu música">
                     <span className="skeleton feed-skeleton-title" />
                     <div className="feed-grid">
