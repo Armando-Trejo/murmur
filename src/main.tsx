@@ -6,6 +6,7 @@ import { AppBoundary } from "./components/AppBoundary";
 import "./styles.css";
 import "./mobile-qa.css";
 import "./experience.css";
+import "./premium.css";
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <AppBoundary>

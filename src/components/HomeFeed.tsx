@@ -128,7 +128,16 @@ export function HomeFeed({ active, status, onPlay, onCollection, onConnect, rend
               </div>
               {status.preview && connected && <p className="feed-note">Pistas de ejemplo para probar la interfaz.</p>}
               {!connected ? <button className="text-button" onClick={onConnect}>Conectar {names[provider]}</button>
-                : feed.loading && !feed.shelves.length ? <p className="feed-note" role="status">Cargando tu música…</p>
+                : feed.loading && !feed.shelves.length ? <div className="feed-skeleton" role="status" aria-label="Cargando tu música">
+                    <span className="skeleton feed-skeleton-title" />
+                    <div className="feed-grid">
+                      {[0, 1, 2, 3].map(index => <span className="feed-card" key={index} aria-hidden="true">
+                        <span className="skeleton feed-skeleton-cover" />
+                        <span className="skeleton feed-skeleton-line" />
+                        <span className="skeleton feed-skeleton-line short" />
+                      </span>)}
+                    </div>
+                  </div>
                 : feed.error ? <p className="feed-note" role="status">{feed.error}</p>
                 : !feed.shelves.length ? <p className="feed-note">No hay música disponible en esta sección.</p> : null}
               {feed.shelves.map((shelf, index) => {

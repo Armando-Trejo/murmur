@@ -1,12 +1,15 @@
 # Relevo para el siguiente agente de MURMUR
 
-Continúa sobre MURMUR 2.5.1. Entrega mejoras implementadas, una vista previa navegable, un APK verificable y un registro de lo que pudo probarse. Mantén la biblioteca, la cola, los ajustes y las sesiones al actualizar. Toma las referencias previas de YouTube Music como guía de jerarquía y navegación y conserva la identidad de MURMUR.
+Continúa sobre MURMUR 2.6.0. La entrega 2.6 añadió reproductor con luz de carátula, letras sincronizadas, Tu resumen, búsquedas recientes, temporizador al final de pista, hápticos y el diagnóstico toque→audio (primer paso de «Medir antes de ajustar», P0 #2). [PREMIUM-ROADMAP.md](PREMIUM-ROADMAP.md) prioriza lo siguiente. Entrega mejoras implementadas, una vista previa navegable, un APK verificable y un registro de lo que pudo probarse. Mantén la biblioteca, la cola, los ajustes y las sesiones al actualizar. Toma las referencias previas de YouTube Music como guía de jerarquía y navegación y conserva la identidad de MURMUR.
 
 ## Punto de partida
 
 [CONTINUAR-MURMUR.md](CONTINUAR-MURMUR.md) contiene el estado técnico y la matriz para el teléfono. [REPOSITORY-REVIEW.md](REPOSITORY-REVIEW.md) explica qué se tomó de Square, Spotui, NewTube y ytmusicapi. El último APK funcionaba con YouTube y Spotify en el teléfono del usuario según su prueba previa. Las verificaciones automatizadas usan respuestas y audio de prueba, salvo el smoke que consulta YouTube público. Confirma primero qué modo de Spotify se usa cuando reproduzcas un fallo.
 
 ## P0 · Conexión, reproducción y cola
+
+Estado 2.6: el diagnóstico de Conexiones ya registra p50/p95 y códigos por proveedor. Pide al usuario el informe copiado antes de tocar el motor. Aún faltan las etapas internas (resolución, preparación, primer audio) y la latencia audible.
+
 
 1. **Diagnóstico por proveedor.** Separa estado de la sesión de biblioteca, autorización de reproducción, estado del reproductor y conectividad. Muestra comprobaciones y acciones claras al renovar YouTube Music, autorizar Spotify, activar Web Playback SDK o elegir Connect. Comprueba PKCE, retorno al dispositivo, expiración, cambio de cuenta y revocación. Conserva la biblioteca local al desconectar. Mantén credenciales, cookies y URLs firmadas fuera de repositorios, capturas y diagnósticos.
 2. **Medir antes de ajustar.** Registra tiempos de toque a confirmación visual, resolución, preparación y primer audio, con proveedor, modo y código saneado. Mide pistas preparadas, en caché y frías. La selección debe confirmarse de inmediato. Reporta latencia audible por separado con p50/p95 y red de prueba. Investiga expiración, Wi-Fi a datos, desconexión y regreso, HTTP 429, contenido retirado o restringido y archivos offline perdidos. Recupera sólo la misma pista y posición con reintentos acotados. Ofrece búsqueda explícita si la versión no está disponible.

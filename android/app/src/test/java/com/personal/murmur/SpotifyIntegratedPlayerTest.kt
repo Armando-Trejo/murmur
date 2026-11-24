@@ -55,6 +55,17 @@ class SpotifyIntegratedPlayerTest {
             backend.listener!!.onEvent("end_of_track",uri,0);shadowOf(Looper.getMainLooper()).idle();assertEquals(1,ended)
         }finally{val stop=player.shutdown();await{stop.isCompleted};scope.cancel()}
     }
+    @Test fun naturalEndUsesTheEndCallbackInsteadOfSkipping() {
+        val backend=Backend();var skipped=0;var ended=0
+        val player=SpotifyIntegratedPlayer(RuntimeEnvironment.getApplication(),{skipped++},backend,onEnded={ended++}){"test-token"}
+        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main);var failure:Throwable?=null
+        try {
+            val job=scope.launch{try{player.load(data())}catch(error:Throwable){failure=error}}
+            await{job.isCompleted};assertNull(failure)
+            backend.listener!!.onEvent("end_of_track",uri,0);shadowOf(Looper.getMainLooper()).idle()
+            assertEquals("The end of a track goes to the sleep-aware callback",1,ended);assertEquals(0,skipped)
+        }finally{val stop=player.shutdown();await{stop.isCompleted};scope.cancel()}
+    }
     @Test fun deactivationDuringHandshakeNeverLoadsOrPlaysTheOldTrack() {
         val backend=Backend().apply{gate=CountDownLatch(1)};val player=SpotifyIntegratedPlayer(RuntimeEnvironment.getApplication(),{},backend){"test-token"}
         val scope=CoroutineScope(SupervisorJob()+Dispatchers.Main)

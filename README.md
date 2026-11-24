@@ -1,8 +1,8 @@
-# MURMUR 2.5.1
+# MURMUR 2.6.0
 
-App Android de música con biblioteca local, reproducción de Spotify y YouTube, feeds por proveedor, visualizador de aura y letras de LRCLIB con búsqueda en Genius. Paquete `com.personal.murmur`, Android 8.0 o posterior. Interfaz React y Capacitor, servicio Kotlin/Media3 y motor Rust/librespot.
+App Android de música con biblioteca local, reproducción de Spotify y YouTube, feeds por proveedor, reproductor con luz de la carátula, letras sincronizadas, resumen de escucha local, visualizador de aura y letras de LRCLIB con búsqueda en Genius. Paquete `com.personal.murmur`, Android 8.0 o posterior. Interfaz React y Capacitor, servicio Kotlin/Media3 y motor Rust/librespot.
 
-[Plan del siguiente agente](SIGUIENTE-AGENTE.md) · [Estado y pruebas para retomar](CONTINUAR-MURMUR.md) · [Componentes externos](REPOSITORY-REVIEW.md)
+[Plan del siguiente agente](SIGUIENTE-AGENTE.md) · [Estado y pruebas para retomar](CONTINUAR-MURMUR.md) · [Hoja de ruta premium](PREMIUM-ROADMAP.md) · [Componentes externos](REPOSITORY-REVIEW.md)
 
 ## Compilar
 
@@ -14,6 +14,18 @@ App Android de música con biblioteca local, reproducción de Spotify y YouTube,
 Usa `npm test` para las pruebas web. Ejecuta `npm run dev` para la interfaz o `node scripts/build-motion-preview.mjs` para generar el HTML interactivo de prueba. La demo usa pistas, carátulas y pulso de ejemplo. Las bibliotecas nativas generadas, el APK y el HTML se construyen localmente.
 
 ## Historial
+
+## Novedades 2.6
+
+- **Reproductor inmersivo.** El fondo del reproductor toma la luz de la carátula y se funde con el negro AMOLED; cambia con un fundido al pasar de pista. El minirreproductor adopta el tono de la portada. Todo depende de **Conexiones → Luz ambiental**: si la desactivas, vuelve el negro puro. Las carátulas conservan sus colores.
+- **Letras sincronizadas.** La línea que suena se mantiene centrada y resaltada, las anteriores se atenúan y tocar una línea salta a ese momento. Al desplazarte a mano la letra deja de seguir la canción unos segundos y aparece **Seguir la letra**.
+- **Tu resumen.** Desde Tu Biblioteca o la tarjeta de Inicio: tiempo escuchado (7 días, 30 días o todo), racha de días, hora favorita, porcentaje de canciones saltadas, minutos de los últimos 7 días, reparto Spotify/YouTube y tus artistas y canciones principales. Se calcula en el teléfono con el historial existente.
+- **Inicio y Buscar.** Saludo según la hora con el tiempo escuchado en la semana, esqueletos de carga en los feeds y **búsquedas recientes** (se guardan al pulsar Buscar o al reproducir un resultado; se pueden quitar una a una o todas).
+- **Temporizador de sueño en el reproductor.** Botón con cuenta atrás junto a Mezclar ahora: 15/30/45/60 minutos o **Al terminar esta canción** (YouTube y Spotify integrado). Spotify Connect sigue en su propio dispositivo.
+- **Respuesta háptica.** Vibración breve del sistema al reproducir, saltar, guardar y añadir a la cola. Respeta el ajuste de vibración táctil de Android y se desactiva en Conexiones.
+- **Diagnóstico de reproducción.** Conexiones mide en el teléfono el tiempo desde que eliges una canción hasta que el motor confirma el audio (p50/p95 por proveedor, fallos y último código). **Copiar informe** genera un texto sin cuentas, tokens ni enlaces.
+
+Verificación de 2.6: 162 pruebas web, 69 pruebas Android (1 omitida: smoke de red), lint sin errores, APK v2 `2.6.0` código 19 con assets idénticos al build web y sin credenciales. La vista previa HTML se revisó en Chrome a 375 px y 768 px. Falta validar en un teléfono Android: hápticos, temporizador al final de pista y fluidez del fondo.
 
 ## Novedades2.0
 

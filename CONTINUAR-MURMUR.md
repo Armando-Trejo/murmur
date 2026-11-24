@@ -1,6 +1,48 @@
-# Continuidad de MURMUR 2.5.1
+# Continuidad de MURMUR 2.6.0
 
 ## Estado para retomar
+
+Repositorio local en `D:/PROYECTOS IA/APP HYBRIDA`, remoto `https://github.com/Armando-Trejo/murmur.git`, rama `main`. El commit de esta entrega se titula «Publica MURMUR 2.6.0: experiencia premium». APK `com.personal.murmur` 2.6.0, código de versión 19, firmado con la misma clave local de depuración que 2.5.1, así que se instala encima conservando biblioteca y sesiones.
+
+Lo nuevo de 2.6 y dónde vive:
+
+- Fondo del reproductor y tono del minirreproductor: `src/core/palette.ts`, `src/components/PlayerBackdrop.tsx`, estilos en `src/premium.css`. Depende del ajuste Luz ambiental (`data-glows`).
+- Letras sincronizadas: `src/core/lyrics.ts` y `src/components/SyncedLyrics.tsx`, montado dentro del panel Letras de `App.tsx`.
+- Tu resumen: `src/core/insights.ts` y `src/components/ListeningInsights.tsx`; ruta `#/library?directory=insights`.
+- Búsquedas recientes: `src/core/recentSearches.ts`, guardadas en `db.settings` con la clave `search.recent` (viajan en los respaldos).
+- Temporizador: hoja `sleep` en `useInterfaceNavigation.ts`; `setSleepTimer({minutes:-2})` arma `HybridMediaService.sleepAtTrackEnd`. YouTube cierra con un fundido en los últimos 6 s; Spotify integrado se detiene en `end_of_track` mediante el nuevo callback `onEnded` de `SpotifyIntegratedPlayer`. El servicio emite `onSleepTimerFinished`.
+- Hápticos: `src/core/haptics.ts` → `YouTubeAudio.haptic` → `HapticPatterns.kt` (`performHapticFeedback`, sin permiso de vibración). Preferencia `murmur.haptics` en localStorage.
+- Métricas toque→audio: `src/core/PlaybackMetrics.ts` (`SelectionTimer` dentro de `AudioOrchestrator.update`) y `src/components/PlaybackDiagnostics.tsx`. Guarda hasta 80 muestras en localStorage con códigos saneados, sin mensajes ni URLs.
+
+## Primera tarea del siguiente modelo
+
+Instalar el APK 2.6.0 sobre 2.5.1 en el teléfono del usuario y recorrer esta matriz. No hubo teléfono conectado por ADB en esta sesión.
+
+| Caso | Resultado esperado |
+| --- | --- |
+| Abrir el reproductor con YouTube y con Spotify | El fondo toma el color de la carátula y se funde a negro; al cambiar de pista hace un fundido. Con Luz ambiental desactivada queda negro. Desplazar el reproductor es fluido. |
+| Letras de una canción conocida | La línea activa queda centrada y avanza sola. Al deslizar la letra aparece «Seguir la letra» y a los 6 s vuelve a seguir. Tocar una línea salta a ese momento. |
+| Temporizador «Al terminar esta canción» en YouTube | La pista se apaga con fundido antes del final, queda en pausa y el botón vuelve a «Temporizador». Play reanuda. |
+| Lo mismo en Spotify integrado | Se detiene al terminar y no avanza a la siguiente. |
+| Temporizador de 15 min con pantalla bloqueada | Cierre gradual al llegar a cero. La cuenta atrás desaparece. |
+| Hápticos | Vibración breve en play, saltos, guardar y deslizar a la cola; ninguna si el sistema tiene la vibración táctil apagada o el ajuste de MURMUR desactivado. |
+| Conexiones → Diagnóstico tras 10 selecciones por proveedor | p50/p95 coherentes con lo percibido. Copiar informe no incluye cuentas, tokens ni URLs. |
+| Tu resumen | Totales coherentes con el historial real; tocar un artista abre su página y Reproducir arma la cola de favoritas. |
+
+## Verificación de 2.6.0
+
+- `npm.cmd test`: 162 pruebas web en 15 archivos (incluye `premium.test.ts` y `AudioOrchestrator.metrics.test.ts`).
+- `.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug -Pkotlin.incremental=false`: 69 pruebas Android, 1 omitida (smoke de red), lint con 0 errores. Nuevas: `SleepAndHapticsTest` y `SpotifyIntegratedPlayerTest.naturalEndUsesTheEndCallbackInsteadOfSkipping`.
+- `apksigner verify`: esquema v2, `versionName 2.6.0`, `versionCode 19`. Los cinco archivos web del APK coinciden byte a byte con `dist`. `scripts/verify-artifact.ps1` no detecta credenciales.
+- Vista previa `preview/MURMUR-animaciones.html` (regenerar con `node scripts/build-motion-preview.mjs`) revisada en Chrome a 375 px y 768 px, sin errores de consola ni desbordes. Ahora incluye historial y letra sintéticos, marcados como demostración.
+
+Propuestas para la siguiente iteración: [PREMIUM-ROADMAP.md](PREMIUM-ROADMAP.md).
+
+---
+
+# Historial: continuidad de MURMUR 2.5.1
+
+## Estado de 2.5.1
 
 Repositorio local en `D:/PROYECTOS IA/APP HYBRIDA`. MURMUR es una app Android con interfaz React/Capacitor, Media3 para YouTube y tres modos de Spotify. El APK de esta entrega usa `com.personal.murmur` y el código de versión 18. La vista previa HTML usa pistas y pulso de demostración.
 
@@ -11,7 +53,7 @@ Repositorio local en `D:/PROYECTOS IA/APP HYBRIDA`. MURMUR es una app Android co
 
 Lee primero el [plan completo para el siguiente agente](SIGUIENTE-AGENTE.md).
 
-## Primera tarea del siguiente modelo
+## Pruebas pendientes de 2.5.1
 
 Validar el APK 2.5.1 sobre una instalación existente con las dos cuentas conectadas. El desarrollo automatizado no dispone de teléfono conectado. Si el usuario reporta un fallo, anotar proveedor, modo Spotify, acción de transporte, si había red y si cambia la posición o la entrada de la cola. Reproducir ese caso antes de reescribir el motor.
 

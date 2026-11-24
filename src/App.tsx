@@ -98,6 +98,42 @@ import {
 } from "./components/AppearanceSettings";
 import { artworkFor, artworkOptions } from "./core/artwork";
 import { orderMusic, listeningStats, type MusicOrder } from "./core/musicOrder";
+import { PlayerBackdrop, useArtworkTone } from "./components/PlayerBackdrop";
+import { SyncedLyrics } from "./components/SyncedLyrics";
+import { ListeningInsights } from "./components/ListeningInsights";
+import { PlaybackDiagnostics } from "./components/PlaybackDiagnostics";
+import { formatListening, greeting, listenedSeconds } from "./core/insights";
+import { haptic, hapticsEnabled, setHapticsEnabled } from "./core/haptics";
+import {
+  loadRecentSearches,
+  pushRecent,
+  removeRecent,
+  saveRecentSearches,
+} from "./core/recentSearches";
+import { APP_VERSION } from "./config";
+import { BarChart3, Clock3, History, Vibrate } from "lucide-react";
+
+type SleepState =
+  | { mode: "off" }
+  | { mode: "minutes"; minutes: number; endsAt: number }
+  | { mode: "track" };
+const sleepChoices = [15, 30, 45, 60] as const;
+
+function SleepCountdown({ sleep, onExpire }: { sleep: SleepState; onExpire: () => void }) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (sleep.mode !== "minutes") return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [sleep]);
+  useEffect(() => {
+    if (sleep.mode === "minutes" && now >= sleep.endsAt) onExpire();
+  }, [now, sleep]);
+  if (sleep.mode === "off") return <>Temporizador</>;
+  if (sleep.mode === "track") return <>Al terminar</>;
+  const left = Math.max(0, Math.ceil((sleep.endsAt - now) / 1000));
+  return <>{Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}</>;
+}
 
 const tabs = [
   { id: "home", label: "Inicio", icon: Home },
@@ -197,6 +233,8 @@ function Equalizer() {
 export default function App() {
   const state = useSyncExternalStore(player.subscribe, player.getSnapshot);
   const current = state.queue[state.index];
+  const currentArtwork = artworkFor(current);
+  const tone = useArtworkTone(currentArtwork);
   const nav = useInterfaceNavigation();
   const tab = nav.route.view;
   const appearance = useAppearance();
@@ -233,6 +271,7 @@ export default function App() {
   const shared =
     nav.route.sheet?.kind === "shared" ? nav.route.sheet.track : undefined;
   const newPlaylist = nav.route.sheet?.kind === "create";
+  const sleepSheet = nav.route.sheet?.kind === "sleep";
   const setActionTrack = (track?: QueueItem) =>
     track ? nav.sheet("actions", track) : nav.close("sheet", "actions");
   const setPlaylistPicker = (track?: QueueItem) =>
@@ -270,8 +309,19 @@ export default function App() {
   const [online, setOnline] = useState(navigator.onLine);
 
   const [voiceBusy, setVoiceBusy] = useState(false);
-  const [sleepMinutes, setSleepMinutes] = useState(0);
+  const [sleep, setSleep] = useState<SleepState>({ mode: "off" });
+  const [haptics, setHaptics] = useState(hapticsEnabled);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const allTracks = useLiveQuery(() => db.tracks.toArray(), [], []);
+  const weekSeconds = useLiveQuery(async () => {
+    const since = new Date();
+    since.setHours(0, 0, 0, 0);
+    since.setDate(since.getDate() - 6);
+    const entries = await db.history.where("at").aboveOrEqual(since.getTime()).toArray();
+    const known = new Map((await db.tracks.bulkGet([...new Set(entries.map(e => e.trackId))]))
+      .flatMap(track => (track ? [[track.id, track] as const] : [])));
+    return entries.reduce((sum, entry) => sum + listenedSeconds(entry, known.get(entry.trackId)), 0);
+  }, [], 0);
   const stats = useLiveQuery(
     async () => listeningStats(await db.history.toArray()),
     [],
@@ -489,6 +539,43 @@ export default function App() {
       }
     }
   };
+  const storeRecent = (next: string[]) => {
+    setRecentSearches(next);
+    void saveRecentSearches(next).catch(() => {});
+  };
+  const rememberSearch = (value: string) => {
+    const next = pushRecent(recentSearches, value);
+    if (next !== recentSearches) storeRecent(next);
+  };
+  const forgetSearch = (value?: string) =>
+    storeRecent(value === undefined ? [] : removeRecent(recentSearches, value));
+  const chooseSleep = (choice: number | "track") =>
+    guard(async () => {
+      if (!isNative) throw new Error("El temporizador funciona en Android.");
+      const minutes = choice === "track" ? -2 : choice;
+      await Audio.setSleepTimer({ minutes });
+      setSleep(
+        choice === "track"
+          ? { mode: "track" }
+          : minutes > 0
+            ? { mode: "minutes", minutes, endsAt: Date.now() + minutes * 60_000 }
+            : { mode: "off" },
+      );
+      haptic("confirm");
+      const external =
+        minutes !== 0 &&
+        current?.source === "spotify" &&
+        !state.deviceName.includes("MURMUR");
+      notify(
+        external
+          ? "Temporizador activo para MURMUR. Spotify Connect sigue en su dispositivo: detenlo allí si hace falta."
+          : choice === "track"
+            ? "Se detendrá al terminar la canción."
+            : minutes
+              ? `Se detendrá en ${minutes} minutos.`
+              : "Temporizador desactivado.",
+      );
+    });
   const startSearch = (value: string, source = "all") => {
     setQuery(value);
     setProvider(source);
@@ -529,6 +616,7 @@ export default function App() {
       await player.init();
       await refreshStatus();
     });
+    void loadRecentSearches().then(setRecentSearches).catch(() => {});
     const on = () => setOnline(navigator.onLine);
     window.addEventListener("online", on);
     window.addEventListener("offline", on);
@@ -610,6 +698,7 @@ export default function App() {
           "success",
         );
       });
+      void add("onSleepTimerFinished", () => setSleep({ mode: "off" }));
       void add("onVoiceError", (e) => notify(e.message, "error"));
       void add("onPlaybackNotice", (e) => notify(e.message, "error"));
       void add("onShortcutReceived", (e) => {
@@ -720,6 +809,7 @@ export default function App() {
     playlistPicker ||
     newPlaylist ||
     shared ||
+    sleepSheet ||
     expanded
   );
   useEffect(() => {
@@ -772,7 +862,7 @@ export default function App() {
       document.removeEventListener("keydown", handler);
       before?.focus();
     };
-  }, [modalOpen, expanded, actionTrack, playlistPicker, newPlaylist, shared]);
+  }, [modalOpen, expanded, actionTrack, playlistPicker, newPlaylist, shared, sleepSheet]);
 
   async function exportData() {
     const content = await exportBackup();
@@ -812,6 +902,7 @@ export default function App() {
     track: QueueItem,
     index: number,
     collection: QueueItem[],
+    onChoose?: () => void,
   ) => (
     <SwipeSurface
       className="song-row"
@@ -819,12 +910,16 @@ export default function App() {
       positive
       onSwipe={() => {
         player.enqueue(track, true);
+        haptic("confirm");
         notify("Añadida a continuación");
       }}
     >
       <button
         className="song-main"
-        onClick={() => void player.playList(collection, index)}
+        onClick={() => {
+          onChoose?.();
+          void player.playList(collection, index);
+        }}
       >
         <Cover track={track} kind={index} />
         <span className="song-copy">
@@ -965,6 +1060,12 @@ export default function App() {
         <div className="view-content" ref={viewRef}>
         {tab === "home" && (
           <div className="home-shortcuts">
+            <div className="home-greeting">
+              <h1>{greeting(new Date().getHours())}</h1>
+              {weekSeconds > 0 && (
+                <p>Esta semana llevas {formatListening(weekSeconds)} de música.</p>
+              )}
+            </div>
             {(current || recent[0] || tracks[0]) && (
               <button
                 className="listening-hero"
@@ -1025,6 +1126,22 @@ export default function App() {
                 </motion.button>
               ))}
             </div>
+            {weekSeconds > 0 && (
+              <motion.button
+                whileTap={{ scale: 0.98 }}
+                className="insights-teaser"
+                onClick={() => nav.push({ view: "library", directory: "insights" })}
+              >
+                <span className="quick-art" aria-hidden="true">
+                  <BarChart3 size={21} />
+                </span>
+                <span>
+                  <strong>Tu resumen</strong>
+                  <small>Tus artistas y canciones de la semana</small>
+                </span>
+                <ChevronRight size={20} aria-hidden="true" />
+              </motion.button>
+            )}
           </div>
         )}
         <div hidden={tab !== "home"} className="home-provider-region">
@@ -1317,7 +1434,10 @@ export default function App() {
                 }}
                 onBlur={() => setSearchFocused(false)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") event.currentTarget.blur();
+                  if (event.key === "Enter") {
+                    rememberSearch(query);
+                    event.currentTarget.blur();
+                  }
                 }}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -1438,7 +1558,9 @@ export default function App() {
                   Popularidad dentro de cada fuente cuando está disponible; en
                   el resto se conserva la relevancia.
                 </p>
-                {orderedResults.map((t, i) => songRow(t, i, orderedResults))}
+                {orderedResults.map((t, i) =>
+                  songRow(t, i, orderedResults, () => rememberSearch(query)),
+                )}
               </>
             ) : query.trim().length >= 2 ? (
               <div className="empty-state">
@@ -1452,6 +1574,39 @@ export default function App() {
               </div>
             ) : (
               <>
+                {recentSearches.length > 0 && (
+                  <section className="recent-searches" aria-labelledby="recent-heading">
+                    <div className="section-heading">
+                      <h2 id="recent-heading">Búsquedas recientes</h2>
+                      <button className="text-button" onClick={() => forgetSearch()}>
+                        Borrar
+                      </button>
+                    </div>
+                    <ul>
+                      {recentSearches.map((item) => (
+                        <li key={item}>
+                          <button
+                            className="recent-query"
+                            onClick={() => {
+                              setQuery(item);
+                              rememberSearch(item);
+                            }}
+                          >
+                            <History size={18} aria-hidden="true" />
+                            <span>{item}</span>
+                          </button>
+                          <button
+                            className="icon-button"
+                            aria-label={"Quitar " + item + " de recientes"}
+                            onClick={() => forgetSearch(item)}
+                          >
+                            <X size={17} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
                 <h2 className="browse-heading">Explora algo distinto</h2>
                 <div className="browse-grid">
                   {[
@@ -1500,11 +1655,17 @@ export default function App() {
         )}
         {tab === "library" && (
           <div className="page">
-            {!nav.route.playlistId && <>
+            {!nav.route.playlistId && nav.route.directory !== "insights" && <>
               <CollectionLinkImport notify={notify} onImported={p=>nav.push({view:"library",playlistId:p.id})} />
-              <div className="provider-search-links"><button onClick={()=>nav.push({view:"library",directory:"artists"})}>Artistas</button><button onClick={()=>nav.push({view:"library",directory:"albums"})}>Álbumes</button></div>
+              <div className="provider-search-links"><button onClick={()=>nav.push({view:"library",directory:"artists"})}>Artistas</button><button onClick={()=>nav.push({view:"library",directory:"albums"})}>Álbumes</button><button className="insights-link" onClick={()=>nav.push({view:"library",directory:"insights"})}><BarChart3 size={16} aria-hidden="true" />Tu resumen</button></div>
             </>}
-            {nav.route.artist || nav.route.directory ? <MusicDirectory artist={nav.route.artist} mode={nav.route.directory} tracks={allTracks} playlists={playlists} onArtist={artist=>nav.push({view:"library",artist})} onAlbum={p=>nav.push({view:"library",playlistId:p.id})} onPlay={(items,index)=>void player.playList(items,index)} onBack={()=>nav.push({view:"library"})} /> : nav.route.playlistId && !activePlaylist ? <section className="empty-state">
+            {nav.route.directory === "insights" && !nav.route.playlistId ? <ListeningInsights
+              tracks={allTracks}
+              onBack={() => nav.push({ view: "library" })}
+              onPlay={(items, index) => void player.playList(items, index)}
+              onArtist={artist => nav.push({ view: "library", artist })}
+              renderCover={track => <Cover track={track} />}
+            /> : nav.route.artist || nav.route.directory ? <MusicDirectory artist={nav.route.artist} mode={nav.route.directory === "insights" ? undefined : nav.route.directory} tracks={allTracks} playlists={playlists} onArtist={artist=>nav.push({view:"library",artist})} onAlbum={p=>nav.push({view:"library",playlistId:p.id})} onPlay={(items,index)=>void player.playList(items,index)} onBack={()=>nav.push({view:"library"})} /> : nav.route.playlistId && !activePlaylist ? <section className="empty-state">
               {collection?.error ? <>
                 <p role="alert">{collection.error}</p>
                 <button className="button secondary" onClick={() => setCollectionRetry(value => value + 1)}>Reintentar</button>
@@ -1763,30 +1924,36 @@ export default function App() {
                 </div>
                 <select
                   aria-label="Temporizador de sueño"
-                  value={sleepMinutes}
+                  value={sleep.mode === "track" ? "track" : sleep.mode === "minutes" ? sleep.minutes : 0}
                   onChange={(e) =>
-                    void guard(async () => {
-                      if (!isNative)
-                        throw new Error("El temporizador funciona en Android.");
-                      const minutes = Number(e.target.value);
-                      await Audio.setSleepTimer({ minutes });
-                      setSleepMinutes(minutes);
-                      notify(
-                        minutes
-                          ? `Se detendrá en ${minutes} minutos`
-                          : "Temporizador desactivado",
-                      );
-                    })
+                    void chooseSleep(e.target.value === "track" ? "track" : Number(e.target.value))
                   }
                 >
                   <option value="0">Off</option>
-                  {[15, 30, 45, 60].map((n) => (
+                  {sleepChoices.map((n) => (
                     <option value={n} key={n}>
                       {n} min
                     </option>
                   ))}
+                  <option value="track">Al terminar la canción</option>
                 </select>
               </div>
+              <label className="setting-label setting-toggle">
+                <Vibrate size={21} />
+                <div>
+                  <strong>Respuesta háptica</strong>
+                  <p>Una vibración breve al reproducir, saltar y guardar</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={haptics}
+                  onChange={(event) => {
+                    setHapticsEnabled(event.target.checked);
+                    setHaptics(event.target.checked);
+                    if (event.target.checked) haptic("confirm");
+                  }}
+                />
+              </label>
               <button
                 className="setting-label setting-button"
                 onClick={() => void listen()}
@@ -1881,6 +2048,12 @@ export default function App() {
                 <ArrowUpRight size={18} />
               </button>
             </div>
+            <PlaybackDiagnostics
+              status={status}
+              online={online}
+              version={APP_VERSION}
+              notify={notify}
+            />
             <div className="section-heading">
               <h2>Tu biblioteca va contigo</h2>
               <ShieldCheck size={20} />
@@ -1924,7 +2097,7 @@ export default function App() {
             </div>
             <p className="privacy-note">
               <ShieldCheck size={16} />
-              Biblioteca y ajustes guardados en este dispositivo.
+              Biblioteca y ajustes guardados en este dispositivo · MURMUR {APP_VERSION}
             </p>
           </div>
         )}
@@ -1933,12 +2106,14 @@ export default function App() {
       <div className="bottom-shell">
         {current && (
           <SwipeSurface
-            className="mini-player"
-            onSwipe={(direction) =>
+            className={"mini-player" + (tone ? " toned" : "")}
+            style={tone ? ({ "--tone": tone } as React.CSSProperties) : undefined}
+            onSwipe={(direction) => {
+              haptic();
               void guard(() =>
                 direction < 0 ? player.next() : player.previous(),
-              )
-            }
+              );
+            }}
           >
             <button
               className="mini-info"
@@ -1959,7 +2134,10 @@ export default function App() {
             <button
               className="icon-button"
               aria-label="Guardar canción"
-              onClick={() => void guard(() => save(current))}
+              onClick={() => {
+                haptic("confirm");
+                void guard(() => save(current));
+              }}
             >
               <MotionGlyph state={tracks.some(t => t.id === current.id) ? "saved" : "save"}>
                 {tracks.some(t => t.id === current.id) ? <Check size={22} className="highlight" /> : <Plus size={22} />}
@@ -1970,7 +2148,10 @@ export default function App() {
               aria-label={
                 state.playing || state.loading ? "Pausar" : "Reproducir"
               }
-              onClick={() => void player.toggle()}
+              onClick={() => {
+                haptic();
+                void player.toggle();
+              }}
             >
               <MotionGlyph state={state.loading ? "loading" : state.playing ? "pause" : "play"}>
               {state.loading ? (
@@ -2016,6 +2197,7 @@ export default function App() {
       <PlayerLayer open={expanded && !!current}>
         {current && (
           <>
+            <PlayerBackdrop url={currentArtwork} />
             <div className="player-top">
               <button
                 className="icon-button"
@@ -2067,7 +2249,10 @@ export default function App() {
                 <button
                   className="icon-button"
                   aria-label="Guardar canción actual"
-                  onClick={() => void guard(() => save(current))}
+                  onClick={() => {
+                    haptic("confirm");
+                    void guard(() => save(current));
+                  }}
                 >
                   {tracks.some((t) => t.id === current.id) ? (
                     <Check className="highlight" />
@@ -2119,7 +2304,10 @@ export default function App() {
                 <button
                   className="icon-button"
                   aria-label="Anterior"
-                  onClick={() => void guard(() => player.previous())}
+                  onClick={() => {
+                    haptic();
+                    void guard(() => player.previous());
+                  }}
                 >
                   <SkipBack size={29} fill="currentColor" />
                 </button>
@@ -2129,7 +2317,10 @@ export default function App() {
                   aria-label={
                     state.playing || state.loading ? "Pausar" : "Reproducir"
                   }
-                  onClick={() => void player.toggle()}
+                  onClick={() => {
+                    haptic();
+                    void player.toggle();
+                  }}
                 >
                   <MotionGlyph state={state.loading ? "loading" : state.playing ? "pause" : "play"}>
                   {state.loading ? (
@@ -2147,7 +2338,10 @@ export default function App() {
                 <button
                   className="icon-button"
                   aria-label="Siguiente"
-                  onClick={() => void guard(() => player.next())}
+                  onClick={() => {
+                    haptic();
+                    void guard(() => player.next());
+                  }}
                 >
                   <SkipForward size={29} fill="currentColor" />
                 </button>
@@ -2180,10 +2374,24 @@ export default function App() {
                   <AudioLines size={18} />
                   Mezclar ahora
                 </button>
-                <span>
-                  Auto-Mix · {modes.find((m) => m.value === state.mode)?.label}
-                </span>
+                <button
+                  className={"mix-now sleep-button" + (sleep.mode !== "off" ? " active" : "")}
+                  aria-label={
+                    sleep.mode === "off"
+                      ? "Temporizador de sueño"
+                      : "Temporizador de sueño activo"
+                  }
+                  onClick={() => nav.sheet("sleep")}
+                >
+                  <Moon size={17} />
+                  <span className="sleep-countdown">
+                    <SleepCountdown sleep={sleep} onExpire={() => setSleep({ mode: "off" })} />
+                  </span>
+                </button>
               </div>
+              <p className="mix-mode-note">
+                Auto-Mix · {modes.find((m) => m.value === state.mode)?.label}
+              </p>
               {state.error && (
                 <div className="error-box" role="alert">
                   <p>{state.error}</p>
@@ -2242,21 +2450,11 @@ export default function App() {
                   exit={{ opacity: 0, y: reduced ? 0 : -3, pointerEvents: "none", transition: { duration: 0.13 } }}
                   transition={{ duration: reduced ? 0.1 : 0.22, ease: settle }}>
                   {lyrics.length ? (
-                    lyrics.map((l, i) => (
-                      <button
-                        key={l.time + ":" + i}
-                        className={
-                          state.position >= l.time &&
-                          (!lyrics[i + 1] ||
-                            state.position < lyrics[i + 1].time)
-                            ? "active"
-                            : ""
-                        }
-                        onClick={() => void guard(() => player.seek(l.time))}
-                      >
-                        {l.text || "♪"}
-                      </button>
-                    ))
+                    <SyncedLyrics
+                      lines={lyrics}
+                      position={state.position}
+                      onSeek={(seconds) => void guard(() => player.seek(seconds))}
+                    />
                   ) : lyricsState?.result?.plain ? (
                     <p className="lyrics-plain">{lyricsState.result.plain}</p>
                   ) : lyricsState?.failed ? (
@@ -2265,7 +2463,11 @@ export default function App() {
                       <button className="text-button" onClick={() => setLyricsRetry(value => value + 1)}>Reintentar letras</button>
                     </>
                   ) : !lyricsState ? (
-                    <p role="status">Buscando letra…</p>
+                    <div className="lyrics-loading" role="status" aria-label="Buscando letra">
+                      <span className="skeleton" />
+                      <span className="skeleton" />
+                      <span className="skeleton" />
+                    </div>
                   ) : (
                     <p>{lyricsState.result?.instrumental ? "Esta pista es instrumental." : "LRCLIB no encontró letra para esta versión."}</p>
                   )}
@@ -2365,7 +2567,7 @@ export default function App() {
         )}
       </PlayerLayer>
       <AnimatePresence>
-        {(actionTrack || playlistPicker || newPlaylist || shared) && (
+        {(actionTrack || playlistPicker || newPlaylist || shared || sleepSheet) && (
           <motion.div
             className="sheet-backdrop"
             initial={{ opacity: 0 }}
@@ -2377,6 +2579,7 @@ export default function App() {
               setPlaylistPicker(undefined);
               setNewPlaylist(false);
               setShared(undefined);
+              nav.close("sheet", "sleep");
             }}
           >
             <motion.div
@@ -2384,7 +2587,11 @@ export default function App() {
               role="dialog"
               aria-modal="true"
               aria-label={
-                newPlaylist ? "Crear playlist" : "Acciones de canción"
+                newPlaylist
+                  ? "Crear playlist"
+                  : sleepSheet
+                    ? "Temporizador de sueño"
+                    : "Acciones de canción"
               }
               className="action-sheet"
               initial={{ y: reduced ? 0 : 42, opacity: reduced ? 1 : 0.72 }}
@@ -2402,11 +2609,60 @@ export default function App() {
                   setPlaylistPicker(undefined);
                   setNewPlaylist(false);
                   setShared(undefined);
+                  nav.close("sheet", "sleep");
                 }}
               >
                 <X size={20} />
               </button>
-              {newPlaylist ? (
+              {sleepSheet ? (
+                <>
+                  <h2>Temporizador de sueño</h2>
+                  <p className="help-copy">
+                    La música se apaga con un cierre gradual. Sigue funcionando con la pantalla bloqueada.
+                  </p>
+                  <div className="sleep-options" role="group" aria-label="Detener la música">
+                    {sleepChoices.map((minutes) => (
+                      <button
+                        key={minutes}
+                        className="sheet-action"
+                        aria-pressed={sleep.mode === "minutes" && sleep.minutes === minutes}
+                        onClick={() => {
+                          nav.close("sheet", "sleep");
+                          void chooseSleep(minutes);
+                        }}
+                      >
+                        <Clock3 size={20} />
+                        {minutes} minutos
+                        {sleep.mode === "minutes" && sleep.minutes === minutes && <Check size={18} className="highlight" />}
+                      </button>
+                    ))}
+                    <button
+                      className="sheet-action"
+                      aria-pressed={sleep.mode === "track"}
+                      onClick={() => {
+                        nav.close("sheet", "sleep");
+                        void chooseSleep("track");
+                      }}
+                    >
+                      <Music2 size={20} />
+                      Al terminar esta canción
+                      {sleep.mode === "track" && <Check size={18} className="highlight" />}
+                    </button>
+                    {sleep.mode !== "off" && (
+                      <button
+                        className="sheet-action"
+                        onClick={() => {
+                          nav.close("sheet", "sleep");
+                          void chooseSleep(0);
+                        }}
+                      >
+                        <X size={20} />
+                        Desactivar temporizador
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : newPlaylist ? (
                 <>
                   <h2>Una playlist, tus dos mundos</h2>
                   <label>

@@ -3,6 +3,7 @@ import type { QueueItem, MixMode } from "./types";
 import { recordListening } from "./DiscoveryEngine";
 import { parseChapters } from "./FanUploadParser";
 import { db } from "./db";
+import { SelectionTimer } from "./PlaybackMetrics";
 export interface PlayerState {
   queue: QueueItem[];
   index: number;
@@ -43,6 +44,8 @@ export class AudioOrchestrator {
   private seekTimer?: ReturnType<typeof setTimeout>;
   private finishSeek?: () => void;
   private ignoreNative = false;
+  /** Measures tap-to-playback for the newest explicit selection only. */
+  readonly selection = new SelectionTimer();
   private clearLoadingTimer() {
     clearTimeout(this.loadingTimer);
     this.loadingTimer = undefined;
@@ -114,6 +117,13 @@ export class AudioOrchestrator {
         });
       }, 30000);
     }
+    this.selection.observe({
+      queueId: this.current?.queueId,
+      playing: this.state.playing,
+      loading: this.state.loading,
+      error: this.state.error,
+      errorCode: this.state.errorCode,
+    });
     this.listeners.forEach((l) => l());
   }
   get current() {
@@ -269,6 +279,7 @@ export class AudioOrchestrator {
     this.ignoreNative = false;
     this.loadedId = "";
     this.clearLoadingTimer();
+    this.selection.start(track.queueId, track.source);
     this.update({ loading: true, playing: false, error: "", errorCode: "" });
     try {
       if (!isNative)
@@ -415,6 +426,7 @@ export class AudioOrchestrator {
     const remoteSpotify = this.loadedSource === "spotify" && this.spotifyTransport !== "integrated";
     this.ignoreNative = true;
     this.clearLoadingTimer();
+    this.selection.cancel();
     if (this.state.loading) this.loadedId = "";
     this.update({ playing: false, loading: false });
     try {

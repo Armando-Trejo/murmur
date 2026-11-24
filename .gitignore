@@ -31,3 +31,7 @@ android/app/src/main/jniLibs/
 verification/*
 !verification/music-art-fixtures.json
 !verification/fixtures/
+
+# Local tooling and delivered builds
+.claude/
+*.apk

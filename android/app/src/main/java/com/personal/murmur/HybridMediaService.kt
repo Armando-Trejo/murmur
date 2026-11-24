@@ -35,7 +35,11 @@ import kotlin.math.*
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class HybridMediaService : MediaSessionService() {
-    companion object { var instance: HybridMediaService? = null; private set }
+    companion object {
+        var instance: HybridMediaService? = null
+            private set
+        const val SLEEP_AT_TRACK_END = -2
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
     lateinit var primaryPlayer: ExoPlayer
@@ -105,6 +109,8 @@ class HybridMediaService : MediaSessionService() {
     private var pendingTrack: JSONObject? = null
     private var mode = "smooth"
     private var sleepAt = 0L
+    /** Set by the "end of this track" sleep option; consumed once by the next natural ending. */
+    var sleepAtTrackEnd = false; private set
     private var ducking = false
     private val meters = mutableMapOf<ExoPlayer, Meter>()
     val visualPlaying get() = if (spotifyActive) spotifyIntegrated.playing else primaryPlayer.isPlaying
@@ -114,10 +120,10 @@ class HybridMediaService : MediaSessionService() {
     private val alternatives = ArrayDeque<PlaybackSource>()
     private var sourceAttempts = 0
     private var refreshedSource=false
-    private val integratedDelegate=lazy { com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={ advanceNative() }) }
+    private val integratedDelegate=lazy { com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={ advanceNative() },onEnded={ spotifyTrackEnded() }) }
     private val nativeIntegrated by integratedDelegate
     private val webSession by lazy{SpotifySession.stored(this)}
-    private val webDelegate=lazy{com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={advanceNative()},backend=com.personal.murmur.spotify.SpotifyWebBackend(this,tokenProvider={force->webSession.webToken(force)}),manageFocus=false,deviceLabel="MURMUR · Web",tokenSupplier={webSession.webToken()})}
+    private val webDelegate=lazy{com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={advanceNative()},backend=com.personal.murmur.spotify.SpotifyWebBackend(this,tokenProvider={force->webSession.webToken(force)}),manageFocus=false,deviceLabel="MURMUR · Web",tokenSupplier={webSession.webToken()},onEnded={spotifyTrackEnded()})}
     private val webIntegrated by webDelegate
     private var selectedWeb=false
     private val spotifyIntegrated get()=if(selectedWeb)webIntegrated else nativeIntegrated
@@ -440,15 +446,25 @@ class HybridMediaService : MediaSessionService() {
         primaryPlayer.volume = (primaryPlayer.volume * ratio).coerceIn(0f, 1f)
         secondaryPlayer.volume = (secondaryPlayer.volume * ratio).coerceIn(0f, 1f)
     }
-    fun sleep(minutes: Int) { if (minutes == -1) { fadeVolume(5000); return }; if(minutes<=0){volumeFade?.cancel();if(spotifyActive)spotifyIntegrated.fadeGain(1f);if(fade==null)primaryPlayer.volume=if(ducking).15f else 1f}; sleepAt = if (minutes <= 0) 0 else System.currentTimeMillis() + minutes * 60_000L }
+    fun sleep(minutes: Int) { if (minutes == -1) { fadeVolume(5000); return }; if (minutes == SLEEP_AT_TRACK_END) { sleepAt = 0; sleepAtTrackEnd = true; return }; sleepAtTrackEnd = false; if(minutes<=0){volumeFade?.cancel();if(spotifyActive)spotifyIntegrated.fadeGain(1f);if(fade==null)primaryPlayer.volume=if(ducking).15f else 1f}; sleepAt = if (minutes <= 0) 0 else System.currentTimeMillis() + minutes * 60_000L }
     private fun fadeVolume(duration: Long) {
         volumeFade?.cancel();val native=spotifyActive;val id=track?.optString("id")
         volumeFade=scope.launch {val initial=primaryPlayer.volume;val start=android.os.SystemClock.elapsedRealtime()
-            while(isActive && android.os.SystemClock.elapsedRealtime()-start<duration){if(native!=spotifyActive || track?.optString("id")!=id)return@launch;val p=(android.os.SystemClock.elapsedRealtime()-start).toFloat()/duration;val gain=(1-p).pow(2);if(native)spotifyIntegrated.fadeGain(gain)else primaryPlayer.volume=initial*gain;delay(30)}
+            while(isActive && android.os.SystemClock.elapsedRealtime()-start<duration){if(native!=spotifyActive || track?.optString("id")!=id){if(native)spotifyIntegrated.fadeGain(1f)else primaryPlayer.volume=if(ducking).15f else 1f;return@launch};val p=(android.os.SystemClock.elapsedRealtime()-start).toFloat()/duration;val gain=(1-p).pow(2);if(native)spotifyIntegrated.fadeGain(gain)else primaryPlayer.volume=initial*gain;delay(30)}
             if(native)spotifyIntegrated.pauseIntegrated()else primaryPlayer.pause();if(native)spotifyIntegrated.fadeGain(1f)else primaryPlayer.volume=if(ducking).15f else 1f
         }
     }
+    private fun finishSleepAtTrackEnd(): Boolean {
+        if (!sleepAtTrackEnd) return false
+        sleepAtTrackEnd = false
+        PlaybackRequests.next()
+        pausePlayback()
+        NativeEvents.emit("onSleepTimerFinished", JSObject().put("reason", "track_end"))
+        return true
+    }
+    private fun spotifyTrackEnded() { if (!finishSleepAtTrackEnd()) advanceNative() }
     private fun advanceAfterEnd() {
+        if (finishSleepAtTrackEnd()) return
         if (upcoming.isNotEmpty()) advanceNative()
         else NativeEvents.emit("onTrackEnded", JSObject().put("trackId", track?.optString("id"))
             .put("queueId", track?.optString("queueId")))
@@ -548,8 +564,14 @@ class HybridMediaService : MediaSessionService() {
                     preloadRetryAt = now + 8_000
                 }
                 val fadeMs = minOf(if (mode == "dj") 10_000L else 5_000L, duration / 3)
-                if (!spotifyActive && mode != "off" && remaining in 1..fadeMs) startOverlap(fadeMs)
-                if (sleepAt > 0 && System.currentTimeMillis() >= sleepAt - 15_000) { sleepAt = 0; fadeVolume(15_000) }
+                if (sleepAtTrackEnd && !spotifyActive && primaryPlayer.isPlaying && fade == null && duration > 0 && remaining in 1..6_000) {
+                    // Close the track softly just before its end so a later Play resumes instead of ending.
+                    sleepAtTrackEnd = false
+                    fadeVolume(maxOf(1_200L, remaining - 400))
+                    NativeEvents.emit("onSleepTimerFinished", JSObject().put("reason", "track_end"))
+                }
+                if (!sleepAtTrackEnd && volumeFade?.isActive != true && !spotifyActive && mode != "off" && remaining in 1..fadeMs) startOverlap(fadeMs)
+                if (sleepAt > 0 && System.currentTimeMillis() >= sleepAt - 15_000) { sleepAt = 0; fadeVolume(15_000); NativeEvents.emit("onSleepTimerFinished", JSObject().put("reason", "timer")) }
             }
             handler.postDelayed(this, 500)
         }

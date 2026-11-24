@@ -119,6 +119,12 @@ class YouTubeAudioPlugin : Plugin() {
     @PluginMethod fun setAutoMixMode(call: PluginCall) = async(call) { val mode = call.getString("mode") ?: "off"; context.getSharedPreferences("playback", 0).edit().putString("mix_mode", mode).apply(); HybridMediaService.instance?.setMode(mode); null }
     @PluginMethod fun triggerManualMix(call: PluginCall) = async(call) { service().manualMix(); null }
     @PluginMethod fun setSleepTimer(call: PluginCall) = async(call) { service().sleep(call.getInt("minutes") ?: 0); null }
+    @PluginMethod fun haptic(call: PluginCall) {
+        val view = bridge?.webView ?: return call.resolve()
+        val feedback = HapticPatterns.constant(call.getString("kind") ?: "tick", android.os.Build.VERSION.SDK_INT)
+        view.post { view.performHapticFeedback(feedback) }
+        call.resolve()
+    }
     @PluginMethod fun setDucking(call: PluginCall) = async(call) { HybridMediaService.instance?.setDucking(call.getBoolean("ducking") ?: false); null }
     @PluginMethod fun getState(call: PluginCall) = async(call) { val s = HybridMediaService.instance; val integrated=if(s?.spotifyActive==true)s.integratedState()else null; val result = JSObject().put("playing", integrated?.optBoolean("is_playing") ?: s?.primaryPlayer?.isPlaying ?: false).put("positionMs", integrated?.optLong("progress_ms") ?: s?.youtubePositionMs ?: 0).put("durationMs", integrated?.optJSONObject("item")?.optLong("duration_ms") ?: s?.primaryPlayer?.duration ?: 0).put("loading",integrated?.optBoolean("loading")?:(s?.youtubeLoading ?: false)).put("transport",if(integrated!=null)"integrated" else "youtube"); s?.track?.let { result.put("track", it); result.put("queue", s.snapshotQueue()) }; result }
     @PluginMethod fun showVideo(call: PluginCall) { val id = call.getString("videoId") ?: return call.reject("Falta ID"); activity.startActivity(Intent(context, VideoActivity::class.java).putExtra("videoId", id)); call.resolve() }

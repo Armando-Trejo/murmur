@@ -50,7 +50,9 @@ interface AudioBridge {
     videoId: string;
     fileName: string;
   }): Promise<{ path: string }>;
+  /** minutes > 0 stops after that time, -2 at the end of the current track, 0 cancels. */
   setSleepTimer(o: { minutes: number }): Promise<void>;
+  haptic(o: { kind: "tick" | "confirm" | "reject" }): Promise<void>;
   getState(): Promise<{
     playing: boolean;
     positionMs: number;

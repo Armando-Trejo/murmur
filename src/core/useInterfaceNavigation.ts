@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { resolveView, type ViewId } from "./navigation";
 import type { QueueItem } from "./types";
 type Sheet = {
-  kind: "actions" | "picker" | "shared" | "create";
+  kind: "actions" | "picker" | "shared" | "create" | "sleep";
   track?: QueueItem;
   parentTrack?: QueueItem;
 };
@@ -10,7 +10,7 @@ export interface InterfaceRoute {
   view: ViewId;
   playlistId?: string;
   artist?: string;
-  directory?: "artists" | "albums";
+  directory?: "artists" | "albums" | "insights";
   player?: boolean;
   panel?: "queue" | "lyrics";
   sheet?: Sheet;
@@ -30,7 +30,7 @@ function fromUrl(): InterfaceRoute {
     view: resolveView(path).view,
     playlistId: params.get("playlist") || undefined,
     artist: params.get("artist") || undefined,
-    directory: ["artists","albums"].includes(params.get("directory")||"") ? params.get("directory") as "artists"|"albums" : undefined,
+    directory: ["artists","albums","insights"].includes(params.get("directory")||"") ? params.get("directory") as "artists"|"albums"|"insights" : undefined,
     player: params.get("player") === "1" || undefined,
   };
 }
