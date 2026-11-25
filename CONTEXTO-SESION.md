@@ -10,7 +10,10 @@ Léelo primero si continúas MURMUR en otra PC u otra sesión. El detalle técni
 - No escribir contraseñas en formularios. Las sesiones de YouTube Music y Spotify las inicia él en el teléfono.
 - No inventar resultados: lo probado en el teléfono se dice como probado, y lo demás como no verificado.
 
-## Estado actual: 2.17.0 (code 33)
+## Estado actual: 2.17.1 (code 34)
+La 2.17.1 agrega el indicador de voz en cada paso: escucha, búsqueda y preparación.
+
+### 2.17.0 (code 33)
 La 2.17.0 trae voz que busca primero en tu biblioteca por cómo suenan los nombres, buscador y ordenamientos en la biblioteca, mix del momento personal, modos de escucha de «Ok MURMUR» y botón de voz en el widget. Cada versión se publica también como release en GitHub con su APK (`gh` está en esta PC). Detalle en [CONTINUAR-MURMUR.md](CONTINUAR-MURMUR.md).
 
 ### 2.16.0 (code 32)

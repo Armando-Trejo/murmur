@@ -78,3 +78,30 @@
 }
 .wake-mode-options button.on { background: rgba(var(--brand-rgb), 0.18); border-color: rgba(var(--brand-rgb), 0.7); }
 .wake-mode-options small, .wake-mode-hint { color: rgba(255, 255, 255, 0.64); font-size: 0.76rem; line-height: 1.4; }
+
+/* Voice: MURMUR is working on the request («Buscando «…»», «Preparando música…»). */
+.voice-listening.thinking { max-width: calc(100vw - 32px); }
+.voice-thinking-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-thinking-spinner {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--accent, #ffffff);
+  animation: voice-thinking-spin 760ms linear infinite;
+}
+@keyframes voice-thinking-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .voice-thinking-spinner { animation: none; border-top-color: rgba(255, 255, 255, 0.18); background: radial-gradient(circle, var(--accent, #fff) 0 3px, transparent 3.5px); }
+}
+
+/* The voice status spans the top bar (no half-covered logo or mic underneath). */
+.voice-listening {
+  left: 12px;
+  right: 12px;
+  translate: none;
+  justify-content: center;
+  background: rgb(18 18 20 / 0.94);
+}
+.voice-listening.thinking { max-width: none; }

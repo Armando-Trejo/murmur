@@ -12,3 +12,17 @@ export function spokenReply(answer: string): string | undefined {
   if (/^(?:Reproduciendo|Mix de|Otra de|Lo mejor de|Lo más nuevo de|Tus guardadas|Lo que escuchaste|Lo que estabas escuchando|Álbum|Música|Mix por vibra)/.test(text)) return undefined;
   return text.replace(/^Error: /, "");
 }
+
+/**
+ * The request as heard, for the "Buscando «…»" status: the recognizer's first alternative, without
+ * the wake phrase or a trailing «por favor», kept short enough for one line on a phone.
+ */
+export function heardLabel(text: string, max = 38): string {
+  const first = (text.split(/\r?\n/).find((line) => line.trim()) ?? "").trim();
+  const clean = first
+    .replace(/^(?:oye\s+|ok\s+|okay\s+|okey\s+)?(?:murmur\w*|mur\s*mur\w*)[,.\s]*/i, "")
+    .replace(/[,.\s]*(?:por favor|porfa|please)[.!]?$/i, "")
+    .trim();
+  const label = clean || first || "tu petición";
+  return label.length > max ? label.slice(0, max - 1).trimEnd() + "…" : label;
+}

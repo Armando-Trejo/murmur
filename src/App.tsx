@@ -136,7 +136,7 @@ import { VoiceExtrasSetting } from "./components/VoiceExtrasSetting";
 import { MomentMix } from "./components/MomentMix";
 import { VoiceChoices } from "./components/VoiceChoices";
 import type { MomentMixResult } from "./core/momentMix";
-import { spokenReply } from "./core/voiceReplies";
+import { heardLabel, spokenReply } from "./core/voiceReplies";
 import { checkForUpdate, dismissUpdate } from "./core/updates";
 import { Welcome, needsWelcome } from "./components/Welcome";
 import {
@@ -350,6 +350,19 @@ export default function App() {
 
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [wakeListening, setWakeListening] = useState(false);
+  /** What MURMUR is doing with a voice request after hearing it ("Buscando «…»", "Preparando música…"). */
+  const [voiceThinking, setVoiceThinking] = useState("");
+  const voicePreparing = useRef(false);
+  useEffect(() => {
+    if (!voiceThinking) return;
+    const t = setTimeout(() => { voicePreparing.current = false; setVoiceThinking(""); }, 25000);
+    return () => clearTimeout(t);
+  }, [voiceThinking]);
+  // "Preparando música…" stays until the song actually sounds (or fails).
+  useEffect(() => {
+    if (!voicePreparing.current) return;
+    if ((!state.loading && state.playing) || state.error) { voicePreparing.current = false; setVoiceThinking(""); }
+  }, [state.loading, state.playing, state.error]);
   // Safety net: the native side always ends the capture within 14 s; never leave the pill stuck.
   useEffect(() => {
     if (!wakeListening) return;
@@ -751,19 +764,33 @@ export default function App() {
   const playMoment = (request: string) => {
     if (momentBusy) return;
     setMomentBusy(true);
-    void guard(() => voiceCommand(request)).finally(() => setMomentBusy(false));
+    void guard(() => voiceCommand(request, undefined, true)).finally(() => setMomentBusy(false));
   };
-  const voiceCommand = async (text: string, source?: string) => {
+  const voiceCommand = async (text: string, source?: string, quiet = false) => {
     let answer: string;
+    // Heard: say so (a light tap) and show what is being looked for until there is an answer.
+    if (!quiet) {
+      voicePreparing.current = false;
+      setVoiceThinking(`Buscando «${heardLabel(text)}»…`);
+      haptic();
+    }
     try {
       answer = await routeVoiceCommand(text, save);
     } catch (error) {
+      if (!quiet) setVoiceThinking("");
       // Hands-free: what went wrong is also said out loud.
       const reply = source === "wake" ? spokenReply((error as Error).message) : undefined;
       if (reply) void Audio.speak({ text: reply }).catch(() => {});
       throw error;
     }
-    notify(answer);
+    if (!quiet) {
+      const loading = answer.startsWith("Preparando") && player.getSnapshot().loading;
+      voicePreparing.current = loading;
+      setVoiceThinking(loading ? "Preparando música…" : "");
+      // The status at the top already says it; a second notice would repeat it.
+      if (loading) answer = "";
+    }
+    if (answer) notify(answer);
     // After «Ok MURMUR» the phone may be in a pocket: answer out loud (unless the music already does).
     const reply = source === "wake" ? spokenReply(answer) : undefined;
     if (reply && isNative) void Audio.speak({ text: reply }).catch(() => {});
@@ -3398,10 +3425,11 @@ export default function App() {
       </AnimatePresence>
       {/* «¿No era esta?»: the closest options when a voice request was not clear enough. */}
       <VoiceChoices />
-      <AnimatePresence>
-        {wakeListening && (
+      <AnimatePresence mode="wait">
+        {(wakeListening || voiceThinking || voiceBusy) && (
           <motion.div
-            className="voice-listening"
+            key={voiceThinking ? "thinking" : "listening"}
+            className={"voice-listening" + (voiceThinking ? " thinking" : "")}
             role="status"
             aria-live="polite"
             initial={{ y: reduced ? 0 : -14, opacity: 0, scale: reduced ? 1 : 0.94 }}
@@ -3409,8 +3437,17 @@ export default function App() {
             exit={{ opacity: 0, scale: reduced ? 1 : 0.96, transition: { duration: 0.15, ease: release } }}
             transition={{ duration: 0.26, ease: settle }}
           >
-            <span className="voice-listening-bars" aria-hidden="true"><i /><i /><i /><i /></span>
-            <span>Te escucho…</span>
+            {voiceThinking ? (
+              <>
+                <span className="voice-thinking-spinner" aria-hidden="true" />
+                <span className="voice-thinking-text">{voiceThinking}</span>
+              </>
+            ) : (
+              <>
+                <span className="voice-listening-bars" aria-hidden="true"><i /><i /><i /><i /></span>
+                <span>Te escucho…</span>
+              </>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

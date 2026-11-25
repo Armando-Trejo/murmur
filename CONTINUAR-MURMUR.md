@@ -381,3 +381,13 @@ La 2.7.1 de la PC RAM nunca llegó a GitHub; la 2.8.0 solo trasladó su precarga
   - «Solo en pantalla»: el micrófono se apaga al salir de la app (`WakeWordService.appVisible`).
 - El widget tiene botón de micrófono, que abre `VoiceCaptureActivity` sin escucha continua.
 - Por qué el indicador no se puede quitar: solo el asistente del sistema puede usar el chip de bajo consumo que espera la palabra; cualquier otra app usa el micrófono normal y Android lo indica.
+
+## 2.17.1 (code 34) — indicador de voz en cada paso
+- La píldora de arriba (`voice-listening` en `App.tsx`) muestra el estado de la petición de voz:
+  1. «Te escucho…» mientras capta, con «Ok MURMUR» o con el botón de micrófono de la app.
+  2. «Buscando «lo que dijiste»…» con un indicador giratorio mientras la resuelve (`heardLabel`).
+  3. «Preparando música…» hasta que la canción suena o falla.
+- Una vibración ligera confirma que terminó de oír.
+- Si el indicador ya dice «Preparando música…», no aparece el aviso inferior «Preparando audio…».
+- La píldora abarca toda la barra superior para no tapar a medias el logo ni el micrófono.
+- Verificado en el teléfono con «pon las mejores de caifanes» y «pon algo de enjambre».
