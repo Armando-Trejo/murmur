@@ -58,7 +58,11 @@ class MainActivity : BridgeActivity() {
     override fun onStart() {
         super.onStart(); visible = true; HybridMediaService.uiVisible = true; WakeWordService.appVisible = true
         // "Ok MURMUR" was on but Android stopped it (reboot, memory): resume it while MURMUR is in front.
-        if (WakeWordService.enabled(this) && !WakeWordService.running) runCatching { WakeWordService.start(this) }
+        if (WakeWordService.enabled(this) && !WakeWordService.running) {
+            val started = runCatching { WakeWordService.start(this) }.getOrDefault(false)
+            if (!started && !WakeWordService.canListen(this)) NativeEvents.emit("onVoiceError", JSObject().put("message",
+                "«Ok MURMUR» está activado pero falta el permiso del micrófono. Vuelve a activarlo en Conexiones."))
+        }
     }
     override fun onStop() { visible = false; HybridMediaService.uiVisible = false; WakeWordService.appVisible = false; super.onStop() }
     override fun onResume() {

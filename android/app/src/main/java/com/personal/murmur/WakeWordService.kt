@@ -97,7 +97,15 @@ class WakeWordService : Service() {
         @Volatile var running = false; private set
         fun enabled(context: Context) = context.getSharedPreferences("playback", 0).getBoolean("wake_word", false)
         fun setEnabled(context: Context, value: Boolean) = context.getSharedPreferences("playback", 0).edit().putBoolean("wake_word", value).apply()
-        fun start(context: Context) = ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
+        /** Android refuses a microphone service without the microphone permission (it would crash MURMUR). */
+        fun canListen(context: Context) = ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        /** Starts listening when allowed; returns false when the microphone permission is missing. */
+        fun start(context: Context): Boolean {
+            if (!canListen(context)) return false
+            ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
+            return true
+        }
         fun stop(context: Context) { context.stopService(Intent(context, WakeWordService::class.java)) }
 
         /** True when recognised text contains the wake phrase (Vosk spells it loosely in Spanish). */
@@ -160,7 +168,12 @@ class WakeWordService : Service() {
             NativeEvents.emit("onWakeWordChanged", JSObject().put("enabled", false))
             stopSelf(); return START_NOT_STICKY
         }
-        startInForeground()
+        // No permission (e.g. after reinstalling) or MURMUR not allowed to start it from the background:
+        // stay off instead of crashing; it starts again the next time MURMUR opens with permission.
+        if (!canListen(this) || runCatching { startInForeground() }.isFailure) {
+            running = false
+            stopSelf(); return START_NOT_STICKY
+        }
         if (model == null && !loading) { loading = true; Thread { load() }.start() }
         return START_STICKY
     }

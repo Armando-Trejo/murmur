@@ -65,7 +65,7 @@ class LocalIntentPlugin : Plugin() {
     }
     /** "Ok MURMUR": state, and turning it on (needs the microphone; must start while MURMUR is in front). */
     @PluginMethod fun wakeWordStatus(call: PluginCall) {
-        call.resolve(JSObject().put("enabled", WakeWordService.enabled(context)).put("running", WakeWordService.running)
+        call.resolve(JSObject().put("enabled", WakeWordService.enabled(context) && WakeWordService.canListen(context)).put("running", WakeWordService.running)
             .put("model", WakeWordModel.available(context)).put("mode", WakeWordService.mode(context)))
     }
     /** When «Ok MURMUR» may open the microphone: "music" (on screen or with music) or "screen" (only on screen). */
