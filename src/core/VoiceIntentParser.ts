@@ -1,5 +1,6 @@
 import { normalize } from "./FanUploadParser";
 import { similarity } from "./SourceResolver";
+import { soundsLike } from "./voicePhonetics";
 export type Platform = "spotify" | "youtube";
 export type VoiceIntent =
   | { type: "mix" | "next" | "previous" | "save" | "pause" | "resume" | "nowPlaying" | "moreLikeThis" | "shuffle" }
@@ -7,22 +8,30 @@ export type VoiceIntent =
   /** Sleep timer: minutes from now, "track" (when this song ends) or 0 (cancel). */
   | { type: "sleep"; minutes: number | "track" }
   | { type: "youtube" | "vibe"; query: string }
-  | { type: "artist"; query: string; platform?: Platform }
+  /** `another`: "otra de X", a song by them other than the one playing. */
+  | { type: "artist"; query: string; platform?: Platform; another?: boolean }
+  /** "Las mejores de X" (their top songs) and "lo nuevo de X" (their latest release). */
+  | { type: "top" | "latest"; query: string; platform?: Platform }
+  /** "Mis favoritas", "mi música": the saved songs, shuffled. */
+  | { type: "saved" }
+  /** "Lo que escuché ayer": what played then, from the history. */
+  | { type: "history"; when: "yesterday" | "today" | "recent" }
   | { type: "album"; query: string; title: string; artist?: string; platform?: Platform }
   /** `said` keeps the words as spoken ("vamonos de viaje"): the catalogue decides if "de" splits title and artist. */
   | { type: "track"; query: string; title: string; artist: string; platform?: Platform; said?: string; exact?: boolean }
   /** Anything else that sounds like music: resolved against the catalogues (song, artist or album). */
   /** `strict`: said without a verb; plays only if the catalogue clearly confirms it. */
-  | { type: "request"; query: string; platform?: Platform; strict?: boolean }
+  /** `want: "song"`: said as a song ("la canción X", "la de X"), never an artist or an album. */
+  | { type: "request"; query: string; platform?: Platform; strict?: boolean; want?: "song" }
   | { type: "unknown" };
 
+/**
+ * The wake phrase as recognizers write it: "Ok MURMUR", "okay murmuro", "okay mur", "Okay muro",
+ * "oye mur mur". After "ok"/"oye" any "mur…" is the name; alone, only clear spellings of it are.
+ */
+const WAKE = /^(?:(?:oye|ok|okey|okay|oki|hey|o que|o k)\s+(?:mur\s+mur\w*|murmu\w*|mor\s*mur\w*|mormor\w*|murmullo|muro|mur)|(?:murmur\w*|mur\s+mur\w*|mormor\w*|mor\s+mur\w*))(?:\s+|$)/;
 export function stripInvocation(text: string) {
-  return normalize(text)
-    .replace(
-      /^(?:(?:oye|ok|okey|okay|hey|o que)\s+)?(?:murmur\w*|mur\s+mur\w*|mormor|mor\s+mur)(?:\s+|$)/,
-      "",
-    )
-    .trim();
+  return normalize(text).replace(WAKE, "").trim();
 }
 
 /**
@@ -43,10 +52,10 @@ export function splitPlatform(text: string): { text: string; platform?: Platform
 }
 
 /** Courtesy and filler words people add before a request; they carry no meaning for MURMUR. */
-const FILLER = /^(?:(?:por favor|porfa|please|oye|bueno|a ver|ahora|mejor|y|ya)\s+)+/;
+const FILLER = /^(?:(?:por favor|porfa|please|oye|bueno|a ver si|a ver|ahora|mejor|y|ya|ok|okay|okey|oki|orale|andale|sale|va|hey|entonces|pues)\s+)+/;
 const ASK = /^(?:(?:me |nos )?(?:puedes|podrias|quieres|quisiera|quiero|queremos|deseo|me gustaria|necesito|vamos a|hay que|me late|me laten|se me antoja|tengo ganas de|ando con ganas de|me apetece|me dan ganas de|antojo de)\s+)+/;
 /** Every way of saying "play" (with the pronouns Spanish glues to it). */
-const PLAY = /^(?:(?:me |nos )?(?:pones|pondrias|pondras|pon(?:me|nos|le|la|lo)?|ponga|poner(?:me)?|reproduc(?:e|eme|ir|elo|ela)|toca(?:me|r)?|escuchar|oir|play|dale play a|dale play|busca(?:me|r)?|encuentra(?:me)?|suena|que suene|mete(?:me)?|agrega(?:me)?|manda(?:me)?|ponte|oir|escuche|escuchemos|reproduzcas|toques))\s+/;
+const PLAY = /^(?:(?:me |nos )?(?:pones|pondrias|pondras|pon(?:me|nos|le|la|lo)?|ponga|poner(?:me)?|reproduc(?:e|eme|ir|elo|ela)|toca(?:me|r)?|escuchar|oir|play|dale play a|dale play|busca(?:me|r)?|encuentra(?:me)?|suena|que suene|mete(?:me)?|agrega(?:me)?|manda(?:me)?|ponte(?: con)?|oir|escuche|escuchemos|reproduzcas|toques|echa(?:me|nos|le)?|echate(?: con)?|echale|echas|rola(?:me|nos)|rolate(?: con)?|avienta(?:me|nos)|avientate(?: con)?|lanzate(?: con)?|rifate(?: con)?|arrancate(?: con)?|da(?:me|nos)|regala(?:me|nos)|suelta(?:me|nos)?|tira(?:me|nos)))\s+/;
 
 /** What a control can act on, optional: "la música", "esta canción", "la reproducción". */
 const MUSIC_OBJECT = "(?: (?:(?:la|el|esta|esa|este|ese) )?(?:musica|cancion|rola|reproduccion|audio|tema|rolita))?";
@@ -86,10 +95,24 @@ const LOOSE: [RegExp, VoiceIntent["type"]][] = [
  * merely sounds like a title ("la casa de mi mamá") is not played: MURMUR asks for "pon" instead.
  */
 export function asksToPlay(text: string) {
-  const n = stripInvocation(text).replace(FILLER, "").trim();
+  const n = spokenContent(text);
   if (ASK.test(n)) return true;
   const rest = n.replace(ASK, "");
   return PLAY.test(rest + " ") || splitPlatform(rest).platform !== undefined;
+}
+
+/** What was said once the wake phrase and the filler are gone ("" when it was only "Ok MURMUR"). */
+export function spokenContent(text: string) {
+  return stripInvocation(text).replace(FILLER, "").replace(/^(?:por favor|porfa|please|oye|ok|okay|bueno|hey)$/, "").trim();
+}
+
+/**
+ * "Pon" misheard as "don", "con" or "bon" ("Don Can you West"): the rest, to be played only if it
+ * clearly names something (the router checks); undefined otherwise.
+ */
+export function misheardPlay(text: string): string | undefined {
+  const m = spokenContent(text).match(/^(?:don|con|bon)\s+(.+)$/);
+  return m && m[1].split(" ").length <= 8 ? m[1] : undefined;
 }
 
 const NUMBERS: Record<string, number> = {
@@ -133,6 +156,18 @@ export function musicQuery(text: string) {
     .trim();
 }
 
+/** The owner's own music, by what it is rather than by name: saved songs, what played yesterday. */
+function ownMusic(rest: string): VoiceIntent | undefined {
+  if (/^(?:(?:todas )?(?:mis|my) (?:favoritas|favoritos|guardadas|guardados|canciones|rolas|temas|me gusta|likes|liked songs)(?: (?:guardadas|favoritas|favoritos))?|mi (?:musica|biblioteca|libreria|coleccion)|(?:lo|las|los) que me gusta(?:n)?|(?:canciones|musica|rolas) que me gusta(?:n)?)$/.test(rest))
+    return { type: "saved" };
+  const heard = rest.match(/^(?:lo|la|las|los) (?:ultimo |ultima )?que (?:estaba |estuve |estabamos |andaba )?(?:escuchando|oyendo|escuche|oi|puse|sonaba|sono|ponia)(?: (ayer|anoche|antier|hoy|hace rato|antes|en la manana|en la tarde|en la noche|esta manana|esta tarde))?$/);
+  if (heard) {
+    const when = heard[1] ?? "";
+    return { type: "history", when: /^(?:ayer|anoche|antier)$/.test(when) ? "yesterday" : /^(?:hoy|esta |en la )/.test(when) ? "today" : "recent" };
+  }
+  return undefined;
+}
+
 export function parseVoiceIntent(
   text: string,
   playlists: { id: string; title: string }[] = [],
@@ -158,10 +193,24 @@ export function parseVoiceIntent(
   const verb = n.match(PLAY);
   if (/^(?:algo |mas |musica |canciones |rolas )?(?:parecid\w*|similar\w*|como esta|del estilo de esta|asi)\b/.test(n.slice(verb?.[0].length ?? 0)))
     return { type: "moreLikeThis" };
-  // "Algo de Miranda", "música de Enjambre": the artist, not one song.
-  let what = musicQuery(verb ? n.slice(verb[0].length) : n);
-  const artistOnly = /^(?:algo|musica|canciones|rolas|temas|lo que sea|cualquier cosa|puro|pura|puras|puros|exitos|lo mejor) (?:de|del)\s+/.test(what);
-  if (artistOnly) what = what.replace(/^\S+(?: \S+)? (?:de|del)\s+/, "").replace(/^(?:lo mejor|lo que sea|cualquier cosa) (?:de|del)\s+/, "");
+  const rest = (verb ? n.slice(verb[0].length) : n).trim();
+  // "Dame un momento" is not a song.
+  if (verb && /^da(?:me|nos)/.test(verb[0]) && /^(?:un |una )?(?:momento|segundo|minuto|chance|permiso|tiempo|break|oportunidad)$/.test(rest))
+    return { type: "unknown" };
+  const special = ownMusic(rest);
+  if (special) return special;
+  // "La canción X", "la de X": a song, not an artist or an album.
+  const songWanted = /^(?:(?:la|una|esa|esta) )?(?:cancion(?:cita)?|rola|rolita|tema|song|track)\b/.test(rest) || /^la de \S/.test(rest);
+  // "Algo de Miranda", "música de Enjambre", "otra de Misfits": the artist, not one song.
+  let what = musicQuery(rest).replace(/^la de (?=\S)/, "");
+  const ranked = what.match(/^(?:(?:las|los|lo|sus|puros|puras|los grandes|grandes|el) )?(?:mejores|exitos|mejor|grandes exitos|top|hits|clasicos|mas (?:famosas|famosos|conocidas|conocidos|escuchadas|escuchados|populares|sonadas|tocadas))(?: (?:canciones|rolas|temas|exitos))? (?:de|del) (.+)$/);
+  if (ranked) return { type: "top", query: ranked[1], platform };
+  const latest = what.match(/^(?:(?:lo|la|el|las|los|su) )?(?:mas )?(?:nuevo|nueva|nuevos|nuevas|ultimo|ultima|ultimos|ultimas|reciente|recientes|mas reciente|estreno)(?: (?:disco|album|cancion|rola|sencillo|single|lanzamiento|estreno|ep))? (?:de|del) (.+)$/) ??
+    what.match(/^(?:el|la|su) (?:disco|album|sencillo|single|lanzamiento|cancion|rola) (?:mas )?(?:nuevo|nueva|ultimo|ultima|reciente) (?:de|del) (.+)$/);
+  if (latest) return { type: "latest", query: latest[1], platform };
+  const artistOnly = /^(?:algo|musica|canciones|rolas|temas|lo que sea|cualquier cosa|puro|pura|puras|puros|una|unas|unos|otra|otras|otro|alguna|algunas|un poco|algo mas) (?:de|del)\s+/.test(what);
+  const another = /^otr[ao]s? /.test(what);
+  if (artistOnly) what = what.replace(/^\S+(?: \S+)? (?:de|del)\s+/, "").replace(/^(?:lo que sea|cualquier cosa) (?:de|del)\s+/, "");
   what = what.replace(/^(?:a|al)\s+(?=\S)/, "").trim();
   if (!what) return verb ? { type: "resume" } : { type: "unknown" };
   // Without a verb only something that clearly names music counts (a song "de" an artist, a platform…).
@@ -173,7 +222,9 @@ export function parseVoiceIntent(
   if (playlist) {
     const p =
       playlists.find((p) => normalize(p.title) === playlist[1]) ??
-      playlists.find((p) => similarity(p.title, playlist[1]) > 0.75);
+      playlists.find((p) => similarity(p.title, playlist[1]) > 0.75) ??
+      // Said the way the recognizer writes English ("mi playlist jolidei" → "Holiday").
+      playlists.map((p) => ({ p, s: soundsLike(playlist[1], p.title, 0.7) })).filter((x) => x.s >= 0.8).sort((a, b) => b.s - a.s)[0]?.p;
     if (p) return { type: "playlist", id: p.id };
     if (/^(?:mi|my) /.test(what)) return { type: "unknown" };
   }
@@ -184,10 +235,14 @@ export function parseVoiceIntent(
     return { type: "album", query: [album[1], album[2]].filter(Boolean).join(" "), title: album[1], artist: album[2], platform };
   const vibe = what.match(/^(?:algo|something|una playlist|un mix|musica|ambiente) (?:para |pa |tipo |con |que sea |bien |de onda |medio )?(?!de |del )(.+)$/);
   if (vibe && !artistOnly) return { type: "vibe", query: vibe[1] };
-  if (artistOnly) return { type: "artist", query: what, platform };
+  if (artistOnly) return { type: "artist", query: what, platform, ...(another ? { another } : {}) };
   // "(una rola) de Miranda que se llama Bailarina" / "la que se llama Bailarina de Miranda".
   const named = what.match(/^(?:de|del) (.+?) que se llama (.+)$/);
   if (named) return { type: "track", query: `${named[2]} ${named[1]}`, title: named[2], artist: named[1], platform, said: `${named[2]} de ${named[1]}` };
+  // "Una canción de Misfits": a song by them.
+  const by = what.match(/^(?:de|del) (.+)$/);
+  if (by) return { type: "artist", query: by[1], platform };
+  if (songWanted && !/ (?:de|by|del) /.test(what)) return { type: "request", query: what, platform, want: "song" };
   const song = what.replace(/^(?:la |el )?que se llama /, "").match(/^(.+?) (?:de|by|del) (.+)$/);
   if (song)
     return {

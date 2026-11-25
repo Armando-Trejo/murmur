@@ -342,3 +342,42 @@ La 2.7.1 de la PC RAM nunca llegó a GitHub; la 2.8.0 solo trasladó su precarga
 - Escuchar las respuestas habladas y el presentador: el volumen estaba en 0.
 - Poner el widget en la pantalla de inicio: lo hace el dueño.
 - Pendiente conocido: con la hoja de entrenamiento abierta, el gesto atrás de Android también afecta a la pantalla de atrás.
+
+## 2.17.0 (code 33) — voz que entiende tu música, biblioteca con buscador, mix personal y micrófono bajo control
+**Voz**
+- `voicePhonetics.ts`: claves fonéticas para inglés oído en español.
+- `voiceLibrary.ts`: busca primero en tu biblioteca.
+- `routeVoiceCommand`: evalúa todas las alternativas del reconocedor.
+- Umbrales de confianza:
+  - biblioteca: 0.85 o más reproduce; menos de 0.75 nunca;
+  - catálogos: 0.82 o más reproduce; menos de 0.70 solo ofrece opciones;
+  - entre ambos, reproduce la mejor y muestra `VoiceChoices`, «¿No era esta?».
+- Frases nuevas: «la canción X», «lo nuevo de X», «las mejores de X», «mis favoritas», «échame/rólame…».
+- Hasta 500 nombres de tu biblioteca se pasan como pistas al reconocedor.
+- Probado en el teléfono con los fallos reales del registro:
+  - «Pon misfits» → Misfits;
+  - «King Caesars and the leaser weaser» → King Gizzard;
+  - «Don Can you West» → Kanye West;
+  - «okay murmuro» → «Te escucho»;
+  - pláticas → nada;
+  - «los backs» → la mejor opción, más opciones para elegir.
+
+**Biblioteca** (`librarySearch.ts`, `LibraryTools.tsx`, `library217.css`):
+- Buscador general tolerante a errores, con resultados agrupados por tipo.
+- Filtro dentro de cada categoría.
+- «Ordenar» por categoría, guardado en `murmur.sort.<categoría>`:
+  - recientes, más escuchadas, escuchadas recientemente, A–Z, artista, álbum, duración y número de canciones;
+  - los datos salen de `history` y del nuevo `addedAt`.
+- Artistas y Álbumes ahora solo listan canciones guardadas.
+
+**Mix del momento personal** (`momentMix.ts`):
+- 14 canciones tuyas que sueles oír a esta hora (±2 h, mismo tipo de día, últimos 60 días, ponderadas) y 11 descubrimientos cercanos de `continuationPicks`.
+- Si hay pocos datos: la misma hora cualquier día, luego tus favoritas por ambiente y, al final, el catálogo.
+- Caché de 30 min; se arma 1.5 s después de abrir para que el toque sea inmediato.
+
+**Micrófono:**
+- Modo de escucha `wake_mode`:
+  - «Con música»: en pantalla, con música y 3 min después;
+  - «Solo en pantalla»: el micrófono se apaga al salir de la app (`WakeWordService.appVisible`).
+- El widget tiene botón de micrófono, que abre `VoiceCaptureActivity` sin escucha continua.
+- Por qué el indicador no se puede quitar: solo el asistente del sistema puede usar el chip de bajo consumo que espera la palabra; cualquier otra app usa el micrófono normal y Android lo indica.

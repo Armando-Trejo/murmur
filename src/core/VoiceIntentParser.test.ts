@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { asksToPlay, parseVoiceIntent, stripInvocation } from "./VoiceIntentParser";
+import { asksToPlay, misheardPlay, parseVoiceIntent, spokenContent, stripInvocation } from "./VoiceIntentParser";
 describe("MURMUR VoiceIntentParser", () => {
   it.each([
     "Murmur, siguiente canción, por favor.",
@@ -170,4 +170,86 @@ describe("sleep timer by voice (2.16)", () => {
   it("a plain stop is still a pause", () => expect(parseVoiceIntent("para la música").type).toBe("pause"));
   it("a song title with numbers is not a timer", () =>
     expect(parseVoiceIntent("pon 20 minutos de los caifanes").type).not.toBe("sleep"));
+});
+
+describe("more natural requests (2.17)", () => {
+  it.each([
+    ["pon la canción holiday in cambodia", { type: "request", query: "holiday in cambodia", want: "song" }],
+    ["ponme la de last caress", { type: "request", query: "last caress", want: "song" }],
+    ["pon la de bailarina de miranda", { type: "track", title: "bailarina", artist: "miranda" }],
+    ["pon el disco static age de misfits", { type: "album", title: "static age", artist: "misfits" }],
+    ["pon algo de misfits", { type: "artist", query: "misfits" }],
+    ["ponme otra de misfits", { type: "artist", query: "misfits", another: true }],
+    ["ponme una canción de misfits", { type: "artist", query: "misfits" }],
+    ["pon lo nuevo de misfits", { type: "latest", query: "misfits" }],
+    ["pon lo último de caifanes", { type: "latest", query: "caifanes" }],
+    ["pon lo más nuevo de king gizzard", { type: "latest", query: "king gizzard" }],
+    ["pon el disco nuevo de enjambre", { type: "latest", query: "enjambre" }],
+    ["pon el último disco de ween", { type: "latest", query: "ween" }],
+    ["pon la nueva de miranda", { type: "latest", query: "miranda" }],
+    ["pon las mejores de misfits", { type: "top", query: "misfits" }],
+    ["pon los éxitos de caifanes", { type: "top", query: "caifanes" }],
+    ["pon lo mejor de enjambre", { type: "top", query: "enjambre" }],
+    ["ponme puros éxitos de los vaguens", { type: "top", query: "los vaguens" }],
+    ["pon las más famosas de ween", { type: "top", query: "ween" }],
+    ["pon las canciones más escuchadas de death grips", { type: "top", query: "death grips" }],
+    ["pon los grandes éxitos de alejandro sanz", { type: "top", query: "alejandro sanz" }],
+    ["pon mis favoritas", { type: "saved" }],
+    ["ponme mis guardadas", { type: "saved" }],
+    ["pon mi música", { type: "saved" }],
+    ["pon mis canciones", { type: "saved" }],
+    ["pon lo que me gusta", { type: "saved" }],
+    ["pon lo que escuché ayer", { type: "history", when: "yesterday" }],
+    ["pon la que estaba escuchando ayer", { type: "history", when: "yesterday" }],
+    ["ponme lo que estaba escuchando", { type: "history", when: "recent" }],
+    ["pon lo que oí hoy", { type: "history", when: "today" }],
+  ])("%s", (text, expected) => expect(parseVoiceIntent(text)).toMatchObject(expected));
+
+  it("«mi playlist X» also by sound", () =>
+    expect(parseVoiceIntent("pon mi playlist jolidei", [{ id: "p1", title: "Holiday" }, { id: "p2", title: "Rock" }])).toEqual({ type: "playlist", id: "p1" }));
+
+  it.each([
+    ["échame algo de misfits", "artist"],
+    ["rólame una de caifanes", "artist"],
+    ["aviéntate con unas de enjambre", "artist"],
+    ["ponte con algo de ween", "artist"],
+    ["échate una de los vaguens", "artist"],
+    ["dame algo de misfits", "artist"],
+    ["a ver ponme misfits", "request"],
+    ["a ver si me pones misfits", "request"],
+    ["porfa pon misfits", "request"],
+    ["ok pon misfits", "request"],
+    ["órale ponme dead kennedys porfa", "request"],
+  ])("colloquial: %s → %s", (text, type) => {
+    expect(parseVoiceIntent(text).type).toBe(type);
+    expect(asksToPlay(text)).toBe(true);
+  });
+
+  it("«dame un momento» is not a song", () => expect(parseVoiceIntent("dame un momento").type).toBe("unknown"));
+  it("«otra de X» without a verb still asks for «pon»", () => expect(asksToPlay("otra de misfits")).toBe(false));
+});
+
+describe("wake phrase and misheard «pon» (2.17)", () => {
+  it.each(["okay murmuro", "okay mur", "Okay muro", "okay murmu", "Ok MURMUR", "oye mur mur", "ok"])("«%s» says nothing else", (text) =>
+    expect(spokenContent(text)).toBe(""));
+  it.each([
+    ["oye mur mur pon misfits", "pon misfits"],
+    ["okay mur pon misfits", "pon misfits"],
+    ["okay murmuro ponme algo de ween", "ponme algo de ween"],
+  ])("«%s» → «%s»", (text, rest) => expect(stripInvocation(text)).toBe(rest));
+  it("the wake phrase alone is not music", () => expect(parseVoiceIntent("okay murmuro").type).toBe("unknown"));
+  it.each([
+    ["Don Can you West", "can you west"],
+    ["con kanye west", "kanye west"],
+    ["Bon misfits", "misfits"],
+    ["pon misfits", undefined],
+    ["de lo de Roma", undefined],
+    ["Costa sabes", undefined],
+  ])("misheardPlay(%s) = %s", (text, rest) => expect(misheardPlay(text)).toBe(rest));
+  it.each([
+    "punkies de lizard wizard", "wizard", "deliciar wizard", "de lo de Roma", "lo de Román", "del primo", "te acuerdas",
+    "bueno y cuál fue el personaje que más odiaste", "pero si tengo que separar", "Costa sabes", "Sí sí te escucha", "Don Can you West",
+  ])("talk near the phone does not ask to play: %s", (text) => expect(asksToPlay(text)).toBe(false));
+  it.each(["Pon King de lizard weiser", "Reproduce los backs", "Pon el álbum Avengers", "pon static age de misfits en youtube"])(
+    "these do: %s", (text) => expect(asksToPlay(text)).toBe(true));
 });

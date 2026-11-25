@@ -103,7 +103,13 @@ class WakeWordService : Service() {
         /** True when recognised text contains the wake phrase (Vosk spells it loosely in Spanish). */
         fun heard(text: String) = WakePhrase.heard(text)
         /** After music stops, keep listening this long so "Ok MURMUR, continúa" still works. */
-        const val IDLE_GRACE_MS = 10 * 60_000L
+        const val IDLE_GRACE_MS = 3 * 60_000L
+        /** "music": with MURMUR on screen or while music plays (and a short while after); "screen": only on screen. */
+        fun mode(context: Context) = context.getSharedPreferences("playback", 0).getString("wake_mode", "music") ?: "music"
+        fun setMode(context: Context, value: String) = context.getSharedPreferences("playback", 0).edit()
+            .putString("wake_mode", if (value == "screen") "screen" else "music").apply()
+        /** MURMUR's own screen is showing (set by MainActivity; false until it says so). */
+        @Volatile var appVisible = false
 
         @Volatile private var instance: WakeWordService? = null
         /** True while "Entrena tu voz" has the microphone: the listener stays closed. */
@@ -175,6 +181,7 @@ class WakeWordService : Service() {
             .setSmallIcon(R.drawable.ic_stat_sound)
             .setContentTitle(if (listening) "Di «Ok MURMUR»" else "«Ok MURMUR» en espera")
             .setContentText(if (listening) "Escucha local, sin enviar audio hasta que dices la frase."
+                else if (mode(this) == "screen") "Micrófono apagado. Escucha de nuevo al abrir MURMUR."
                 else "Micrófono apagado. Vuelve a escuchar cuando suena música o abres MURMUR.")
             .setOngoing(true).setContentIntent(open).addAction(0, "Desactivar", stop)
             .setPriority(NotificationCompat.PRIORITY_MIN).build()
@@ -192,7 +199,8 @@ class WakeWordService : Service() {
         val now = android.os.SystemClock.elapsedRealtime()
         val audio = getSystemService(android.media.AudioManager::class.java)
         if (audio?.isMusicActive == true || HybridMediaService.instance?.visualPlaying == true) lastMusicAt = now
-        return HybridMediaService.uiVisible || now - lastMusicAt < IDLE_GRACE_MS
+        if (mode(this) == "screen") return appVisible
+        return appVisible || now - lastMusicAt < IDLE_GRACE_MS
     }
 
     private fun showListening(listening: Boolean) {

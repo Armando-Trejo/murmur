@@ -32,6 +32,8 @@ export interface QueueItem extends CustomArtwork {
   offlinePath?: string;
   description?: string;
   saved?: boolean;
+  /** When the song entered the library (ms). Stamped from 2.17 on; older songs have none. */
+  addedAt?: number;
   bpm?: number;
   popularity?: number;
   viewCount?: number;

@@ -13,9 +13,13 @@ import android.speech.RecognizerIntent
  */
 object VoiceHints {
     private const val KEY = "voice_hints"
+    /** Names the app may send: top artists, saved and most played songs, albums and playlists. */
+    const val MAX_SAVED = 480
+    /** Biasing strings handed to the recognizer in total (it ignores what it cannot use). */
+    const val MAX_BIASING = 500
     private val base = listOf("Spotify", "YouTube", "YouTube Music", "MURMUR", "álbum", "disco", "playlist", "siguiente", "pausa", "aleatorio", "rola")
     fun save(context: Context, hints: List<String>) =
-        context.getSharedPreferences("playback", 0).edit().putString(KEY, hints.take(200).joinToString("\n")).apply()
+        context.getSharedPreferences("playback", 0).edit().putString(KEY, hints.take(MAX_SAVED).joinToString("\n")).apply()
     private fun load(context: Context) =
         context.getSharedPreferences("playback", 0).getString(KEY, "")!!.split("\n").filter { it.isNotBlank() }
 
@@ -28,9 +32,13 @@ object VoiceHints {
             // Let people pause mid-sentence ("ponme… la de… Bailarina") without being cut off.
             .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
             .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
-        if (Build.VERSION.SDK_INT >= 33) intent.putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, ArrayList((base + load(context)).distinct().take(250)))
+        if (Build.VERSION.SDK_INT >= 33) intent.putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, ArrayList(biasing(load(context))))
         return intent
     }
+
+    /** Commands and platform names first, then the library's names, without repeats, at most MAX_BIASING. */
+    fun biasing(saved: List<String>): List<String> =
+        (base + saved.map { it.trim() }.filter { it.isNotBlank() }).distinct().take(MAX_BIASING)
 
     /** The recognizer's alternatives, best first, joined for the app (which picks the one it understands). */
     fun join(results: List<String>?): String? =

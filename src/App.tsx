@@ -134,6 +134,8 @@ import { useHeaderScroll } from "./core/useHeaderScroll";
 import { WakeWordSetting } from "./components/WakeWordSetting";
 import { VoiceExtrasSetting } from "./components/VoiceExtrasSetting";
 import { MomentMix } from "./components/MomentMix";
+import { VoiceChoices } from "./components/VoiceChoices";
+import type { MomentMixResult } from "./core/momentMix";
 import { spokenReply } from "./core/voiceReplies";
 import { checkForUpdate, dismissUpdate } from "./core/updates";
 import { Welcome, needsWelcome } from "./components/Welcome";
@@ -145,6 +147,34 @@ import {
 } from "./core/recentSearches";
 import { APP_VERSION } from "./config";
 import { BarChart3, Clock3, History, Vibrate } from "lucide-react";
+import {
+  LibraryResults,
+  LibrarySearchBox,
+  LibraryToolbar,
+  SortChip,
+  albumPlaylist,
+  songsLabel,
+  useDebouncedValue,
+  useListening,
+  useOpenedPlaylists,
+  useSortPreference,
+} from "./components/LibraryTools";
+import {
+  PLAYLIST_SORTS,
+  SONG_SORTS,
+  addedRanks,
+  albumIndexer,
+  artistIndexer,
+  collectAlbums,
+  collectArtists,
+  filterItems,
+  likedPositions,
+  playlistIndexer,
+  searchLibrary,
+  songIndexer,
+  sortPlaylists,
+  sortSongs,
+} from "./core/librarySearch";
 
 type SleepState =
   | { mode: "off" }
@@ -715,6 +745,9 @@ export default function App() {
     return () => clearTimeout(t);
   }, []);
   const [momentBusy, setMomentBusy] = useState(false);
+  /** The personal mix (your songs at this hour + close discoveries), built ahead so the tap is instant. */
+  const playMomentMix = (tracks: QueueItem[], mix: MomentMixResult) =>
+    guard(async () => { await player.playList(tracks); notify(mix.reason); });
   const playMoment = (request: string) => {
     if (momentBusy) return;
     setMomentBusy(true);
@@ -1145,6 +1178,79 @@ export default function App() {
       return words.every((w) => text.includes(w));
     });
   }, [collectionQuery, displayedPlaylistItems]);
+  // 2.17 «Tu Biblioteca»: one search for everything, plus a search and a remembered order per category.
+  const libraryHome = tab === "library" && !nav.route.playlistId && !nav.route.artist && !nav.route.directory;
+  const libraryLists = tab === "library" && !nav.route.playlistId && !nav.route.artist && nav.route.directory !== "insights";
+  const listening = useListening(libraryLists);
+  const openedPlaylists = useOpenedPlaylists(feedId ? undefined : nav.route.playlistId);
+  const [songSort, setSongSort] = useSortPreference("songs", SONG_SORTS, "recent");
+  const [downloadSort, setDownloadSort] = useSortPreference("downloads", SONG_SORTS, "recent");
+  const [playlistSort, setPlaylistSort] = useSortPreference("playlists", PLAYLIST_SORTS, "recent");
+  const [libraryQuery, setLibraryQuery] = useState("");
+  const librarySearchText = useDebouncedValue(libraryQuery.trim());
+  const [categoryQuery, setCategoryQuery] = useState("");
+  const categorySearchText = useDebouncedValue(categoryQuery.trim(), 120);
+  useEffect(() => setCategoryQuery(""), [libraryFilter]);
+  useEffect(() => {
+    if (tab !== "library") setLibraryQuery("");
+  }, [tab]);
+  useEffect(() => setVisibleSongs(80), [songSort, downloadSort, categorySearchText]);
+  const likedOrder = useMemo(() => likedPositions(storedPlaylists), [storedPlaylists]);
+  const songOrderContext = useMemo(() => ({ stats: listening, liked: likedOrder }), [listening, likedOrder]);
+  const addedRank = useMemo(
+    () => (libraryLists ? addedRanks(allTracks.filter((t) => t.saved !== false), songOrderContext) : undefined),
+    [libraryLists, allTracks, songOrderContext],
+  );
+  const libraryAlbums = useMemo(() => (libraryLists ? collectAlbums(tracks, playlists) : []), [libraryLists, tracks, playlists]);
+  const libraryArtists = useMemo(() => (libraryLists ? collectArtists(tracks) : []), [libraryLists, tracks]);
+  const songIndex = useMemo(() => songIndexer(), []);
+  const albumIndex = useMemo(() => albumIndexer(), []);
+  const artistIndex = useMemo(() => artistIndexer(), []);
+  const playlistIndex = useMemo(() => playlistIndexer(), []);
+  const librarySongs = useMemo(
+    () => (libraryHome ? sortSongs(tracks, songSort, songOrderContext) : []),
+    [libraryHome, tracks, songSort, songOrderContext],
+  );
+  const libraryDownloads = useMemo(
+    () =>
+      libraryHome && libraryFilter === "Descargas"
+        ? sortSongs(tracks.filter((t) => t.offlinePath), downloadSort, songOrderContext)
+        : [],
+    [libraryHome, libraryFilter, tracks, downloadSort, songOrderContext],
+  );
+  const categorySongs = libraryFilter === "Descargas" ? libraryDownloads : librarySongs;
+  const categorySongMatches = useMemo(
+    () => filterItems(songIndex(categorySongs), categorySearchText),
+    [songIndex, categorySongs, categorySearchText],
+  );
+  const categorySongPosition = useMemo(() => new Map(categorySongs.map((t, i) => [t.id, i])), [categorySongs]);
+  const librarySongPosition = useMemo(() => new Map(librarySongs.map((t, i) => [t.id, i])), [librarySongs]);
+  const libraryPlaylists = useMemo(
+    () =>
+      libraryHome && libraryFilter === "Playlists"
+        ? filterItems(
+            playlistIndex(sortPlaylists(playlists, playlistSort, { stats: listening, opened: openedPlaylists })),
+            categorySearchText,
+          )
+        : { items: [], fuzzy: false },
+    [libraryHome, libraryFilter, playlistIndex, playlists, playlistSort, listening, openedPlaylists, categorySearchText],
+  );
+  const libraryResults = useMemo(
+    () =>
+      libraryHome && librarySearchText
+        ? searchLibrary(
+            {
+              songs: songIndex(tracks),
+              albums: albumIndex(libraryAlbums),
+              artists: artistIndex(libraryArtists),
+              playlists: playlistIndex(playlists.filter((p) => p.kind !== "album")),
+            },
+            librarySearchText,
+            listening,
+          )
+        : undefined,
+    [libraryHome, librarySearchText, songIndex, albumIndex, artistIndex, playlistIndex, tracks, libraryAlbums, libraryArtists, playlists, listening],
+  );
   // Playlists without a cover of their own (liked songs, local ones) show their first song's artwork.
   const trackArt = useMemo(() => new Map(allTracks.map((t) => [t.id, t.artworkUrl] as const)), [allTracks]);
   const playlistArt = (p: Playlist) => p.artworkUrl || p.customArtwork ? p : { artworkUrl: p.trackIds.slice(0, 40).map((id) => trackArt.get(id)).find(Boolean) };
@@ -1218,10 +1324,6 @@ export default function App() {
   const libraryMenu: MenuEntry[] = [
     { label: "Crear playlist híbrida", icon: <Plus size={18} />, onSelect: () => setNewPlaylist(true) },
     { label: "Importar desde un enlace", icon: <LinkIcon size={18} />, hint: "Playlists, mixes y álbumes", onSelect: () => setImportOpen(true) },
-    "divider",
-    { heading: "Ordenar canciones" },
-    { label: "Más escuchadas por mí", checked: libraryOrder === "listening", onSelect: () => setLibraryOrder("listening") },
-    { label: "Título · A–Z", checked: libraryOrder === "title", onSelect: () => setLibraryOrder("title") },
   ];
   const setCollectionKind = (kind: "playlist" | "album") => {
     if (!activePlaylist) return;
@@ -1443,7 +1545,7 @@ export default function App() {
           </div>
         )}
         <div hidden={tab !== "home"} className="home-provider-region">
-          {isNative && !status.preview && <MomentMix onPlay={playMoment} busy={momentBusy} />}
+          {isNative && !status.preview && <MomentMix onPlayMix={playMomentMix} onPlay={playMoment} busy={momentBusy} />}
           <MadeForYou
             enabled={tab === "home" && isNative && !status.preview}
             onOpen={(playlistId) => nav.push({ view: "library", playlistId })}
@@ -1887,7 +1989,7 @@ export default function App() {
               onArtist={(name, id) => nav.push({ view: "library", artist: name, ...(id ? { artistId: id } : {}) })}
               onSearch={value => startSearch(value, "all")}
               renderSong={(track, index, list) => songRow(track, index, list)}
-            /> : nav.route.directory ? <MusicDirectory artist={undefined} mode={nav.route.directory === "insights" ? undefined : nav.route.directory} tracks={allTracks} playlists={playlists} onArtist={artist=>nav.push({view:"library",artist})} onAlbum={p=>nav.push({view:"library",playlistId:p.id})} onPlay={(items,index)=>void player.playList(items,index)} onBack={()=>nav.push({view:"library"})} /> : nav.route.playlistId && !activePlaylist ? <section className="empty-state">
+            /> : nav.route.directory ? <MusicDirectory artist={undefined} mode={nav.route.directory === "insights" ? undefined : nav.route.directory} tracks={tracks} playlists={playlists} albums={libraryAlbums} artists={libraryArtists} stats={listening} ranks={addedRank} onArtist={artist=>nav.push({view:"library",artist})} onAlbum={p=>nav.push({view:"library",playlistId:p.id})} onPlay={(items,index)=>void player.playList(items,index)} onBack={()=>nav.push({view:"library"})} /> : nav.route.playlistId && !activePlaylist ? <section className="empty-state">
               {collection?.error ? <>
                 <p role="alert">{collection.error}</p>
                 <button className="button secondary" onClick={() => setCollectionRetry(value => value + 1)}>Reintentar</button>
@@ -2040,116 +2142,170 @@ export default function App() {
                   </div>
                   <OverflowMenu label="Opciones de tu biblioteca" entries={libraryMenu} />
                 </div>
-                <div className="library-links">
-                  <motion.button whileTap={{ scale: 0.95 }} onClick={() => nav.push({ view: "library", directory: "artists" })}>Artistas</motion.button>
-                  <motion.button whileTap={{ scale: 0.95 }} onClick={() => nav.push({ view: "library", directory: "albums" })}>Álbumes</motion.button>
-                  <motion.button whileTap={{ scale: 0.95 }} onClick={() => nav.push({ view: "library", directory: "insights" })}>
-                    <BarChart3 size={15} aria-hidden="true" />Tu resumen
-                  </motion.button>
-                </div>
-                <div className="pills">
-                  {["Canciones", "Playlists", ...(hasDownloads || filter === "Descargas" ? ["Descargas"] : [])].map((f) => (
-                    <button
-                      key={f}
-                      className={
-                        filter === f ||
-                        (f === "Canciones" &&
-                          !["Playlists", "Descargas"].includes(filter))
-                          ? "active"
-                          : ""
-                      }
-                      onClick={() => setFilter(f)}
-                    >
-                      {f}
-                    </button>
-                  ))}
-                </div>
-                {filter === "Playlists" ? (
-                  <>
-                    {playlists.map((p) => (
-                      <button
-                        className="playlist-row"
-                        key={p.id}
-                        onClick={() => void guard(() => openPlaylist(p))}
-                      >
-                        <Cover track={playlistArt(p)} size="small" />
-                        <span>
-                          <strong>{p.title}</strong>
-                          <small>
-                            {p.trackIds.length} canciones ·{" "}
-                            {p.source === "hybrid"
-                              ? "Playlist híbrida"
-                              : p.source}
-                          </small>
-                        </span>
-                        <Badge source={p.source} />
-                      </button>
-                    ))}
-                    <button
-                      className="create-playlist"
-                      onClick={() => setNewPlaylist(true)}
-                    >
-                      <Plus />
-                      Crear playlist híbrida
-                    </button>
-                  </>
+                <LibrarySearchBox value={libraryQuery} onChange={setLibraryQuery} />
+                {libraryResults ? (
+                  <LibraryResults
+                    query={librarySearchText}
+                    results={libraryResults}
+                    renderSong={(t) => songRow(t, librarySongPosition.get(t.id) ?? 0, librarySongs)}
+                    onAlbum={(album) =>
+                      void guard(async () => {
+                        const p = await albumPlaylist(album);
+                        nav.push({ view: "library", playlistId: p.id });
+                      })
+                    }
+                    onArtist={(artist) => nav.push({ view: "library", artist: artist.name })}
+                    onPlaylist={(p) => void guard(() => openPlaylist(p))}
+                    onSearchEverywhere={() => startSearch(librarySearchText, "all")}
+                  />
                 ) : (
-                  (filter === "Descargas"
-                    ? tracks.filter((t) => t.offlinePath)
-                    : tracks
-                  )
-                    .slice(0, visibleSongs)
-                    .map((t, i) =>
-                      songRow(
-                        t,
-                        i,
-                        filter === "Descargas"
-                          ? tracks.filter((item) => item.offlinePath)
-                          : tracks,
-                      ),
-                    )
-                )}
-                {filter !== "Playlists" &&
-                  (filter === "Descargas"
-                    ? tracks.filter((t) => t.offlinePath)
-                    : tracks
-                  ).length > visibleSongs && (
-                    <button
-                      className="button secondary full"
-                      onClick={() => setVisibleSongs((n) => n + 80)}
-                    >
-                      Mostrar más canciones
-                    </button>
-                  )}
-                {(filter === "Descargas"
-                  ? !tracks.some((t) => t.offlinePath)
-                  : filter !== "Playlists" && !tracks.length) && (
-                  <div className="empty-state">
-                    <Library size={42} />
-                    <h2>
-                      {filter === "Descargas"
-                        ? "Tu música, también sin señal"
-                        : "Empieza a hacerla tuya"}
-                    </h2>
-                    <p>
-                      {filter === "Descargas"
-                        ? "Descarga audio desde el menú de una canción de YouTube."
-                        : "Guarda canciones con + o conecta tus cuentas para importar tu biblioteca."}
-                    </p>
-                    <button
-                      className="button primary"
-                      onClick={() =>
-                        setTab(
-                          filter === "Descargas" ? "search" : "connections",
-                        )
-                      }
-                    >
-                      {filter === "Descargas"
-                        ? "Buscar música"
-                        : "Conectar mi música"}
-                      <ArrowUpRight size={18} />
-                    </button>
-                  </div>
+                  <>
+                    <div className="library-links">
+                      <motion.button whileTap={{ scale: 0.95 }} onClick={() => nav.push({ view: "library", directory: "artists" })}>Artistas</motion.button>
+                      <motion.button whileTap={{ scale: 0.95 }} onClick={() => nav.push({ view: "library", directory: "albums" })}>Álbumes</motion.button>
+                      <motion.button whileTap={{ scale: 0.95 }} onClick={() => nav.push({ view: "library", directory: "insights" })}>
+                        <BarChart3 size={15} aria-hidden="true" />Tu resumen
+                      </motion.button>
+                    </div>
+                    <div className="pills">
+                      {["Canciones", "Playlists", ...(hasDownloads || filter === "Descargas" ? ["Descargas"] : [])].map((f) => (
+                        <button
+                          key={f}
+                          className={
+                            filter === f ||
+                            (f === "Canciones" &&
+                              !["Playlists", "Descargas"].includes(filter))
+                              ? "active"
+                              : ""
+                          }
+                          onClick={() => setFilter(f)}
+                        >
+                          {f}
+                        </button>
+                      ))}
+                    </div>
+                    {filter === "Playlists" ? (
+                      <>
+                        {playlists.length > 0 && (
+                          <LibraryToolbar
+                            count={`${playlists.length.toLocaleString("es")} ${playlists.length === 1 ? "playlist" : "playlists"}`}
+                            query={categoryQuery}
+                            onQuery={setCategoryQuery}
+                            placeholder="Buscar playlists"
+                            resetKey={playlistSort}
+                            sort={<SortChip noun="playlists" options={PLAYLIST_SORTS} value={playlistSort} onChange={setPlaylistSort} />}
+                          />
+                        )}
+                        {categorySearchText && (
+                          <p className="collection-count" role="status">
+                            {!libraryPlaylists.items.length
+                              ? `Ninguna playlist coincide con «${categorySearchText}».`
+                              : libraryPlaylists.fuzzy
+                                ? `Sin coincidencias exactas · ${libraryPlaylists.items.length} parecidas a «${categorySearchText}»`
+                                : `${libraryPlaylists.items.length} de ${playlists.length} playlists`}
+                          </p>
+                        )}
+                        {libraryPlaylists.items.map((p) => (
+                          <button
+                            className="playlist-row"
+                            key={p.id}
+                            onClick={() => void guard(() => openPlaylist(p))}
+                          >
+                            <Cover track={playlistArt(p)} size="small" />
+                            <span>
+                              <strong>{p.title}</strong>
+                              <small>
+                                {p.trackIds.length} canciones ·{" "}
+                                {p.source === "hybrid"
+                                  ? "Playlist híbrida"
+                                  : p.source}
+                              </small>
+                            </span>
+                            <Badge source={p.source} />
+                          </button>
+                        ))}
+                        {!categorySearchText && (
+                          <button
+                            className="create-playlist"
+                            onClick={() => setNewPlaylist(true)}
+                          >
+                            <Plus />
+                            Crear playlist híbrida
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {categorySongs.length > 0 && (
+                          <LibraryToolbar
+                            count={songsLabel(categorySongs.length)}
+                            query={categoryQuery}
+                            onQuery={setCategoryQuery}
+                            placeholder={filter === "Descargas" ? "Buscar descargas" : "Buscar canciones"}
+                            resetKey={filter === "Descargas" ? downloadSort : songSort}
+                            sort={
+                              filter === "Descargas" ? (
+                                <SortChip noun="descargas" options={SONG_SORTS} value={downloadSort} onChange={setDownloadSort} />
+                              ) : (
+                                <SortChip noun="canciones" options={SONG_SORTS} value={songSort} onChange={setSongSort} />
+                              )
+                            }
+                          />
+                        )}
+                        {categorySearchText && (
+                          <p className="collection-count" role="status">
+                            {!categorySongMatches.items.length
+                              ? `Ninguna canción coincide con «${categorySearchText}».`
+                              : categorySongMatches.fuzzy
+                                ? `Sin coincidencias exactas · ${categorySongMatches.items.length} parecidas a «${categorySearchText}»`
+                                : `${categorySongMatches.items.length.toLocaleString("es")} de ${songsLabel(categorySongs.length)}`}
+                          </p>
+                        )}
+                        {/* A song plays the whole list from there, as in a playlist search. */}
+                        {categorySongMatches.items
+                          .slice(0, visibleSongs)
+                          .map((t) => songRow(t, categorySongPosition.get(t.id) ?? 0, categorySongs))}
+                        {categorySongMatches.items.length > visibleSongs && (
+                          <button
+                            className="button secondary full"
+                            onClick={() => setVisibleSongs((n) => n + 80)}
+                          >
+                            Mostrar más · {visibleSongs} de {categorySongMatches.items.length.toLocaleString("es")}
+                          </button>
+                        )}
+                      </>
+                    )}
+                    {(filter === "Descargas"
+                      ? !tracks.some((t) => t.offlinePath)
+                      : filter !== "Playlists" && !tracks.length) && (
+                      <div className="empty-state">
+                        <Library size={42} />
+                        <h2>
+                          {filter === "Descargas"
+                            ? "Tu música, también sin señal"
+                            : "Empieza a hacerla tuya"}
+                        </h2>
+                        <p>
+                          {filter === "Descargas"
+                            ? "Descarga audio desde el menú de una canción de YouTube."
+                            : "Guarda canciones con + o conecta tus cuentas para importar tu biblioteca."}
+                        </p>
+                        <button
+                          className="button primary"
+                          onClick={() =>
+                            setTab(
+                              filter === "Descargas" ? "search" : "connections",
+                            )
+                          }
+                        >
+                          {filter === "Descargas"
+                            ? "Buscar música"
+                            : "Conectar mi música"}
+                          <ArrowUpRight size={18} />
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -3240,6 +3396,8 @@ export default function App() {
             onDone={() => { setWelcome(false); setTab("home"); }} />
         )}
       </AnimatePresence>
+      {/* «¿No era esta?»: the closest options when a voice request was not clear enough. */}
+      <VoiceChoices />
       <AnimatePresence>
         {wakeListening && (
           <motion.div

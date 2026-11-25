@@ -166,7 +166,8 @@ interface VoiceBridge {
   openSettings(): Promise<void>;
   downloadModel(): Promise<{ available: boolean; message: string }>;
   /** "Ok MURMUR" wake phrase (offline listener in a microphone foreground service). */
-  wakeWordStatus(): Promise<{ enabled: boolean; running: boolean; model: boolean }>;
+  wakeWordStatus(): Promise<{ enabled: boolean; running: boolean; model: boolean; mode?: "music" | "screen" }>;
+  setWakeMode(o: { mode: "music" | "screen" }): Promise<{ mode: "music" | "screen" }>;
   /** Report of the last unexpected close, once (null when there was none). */
   lastCrash(): Promise<{ report: string | null; version: string }>;
   /** Android's share sheet with a text. */

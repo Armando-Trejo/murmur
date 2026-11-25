@@ -1,0 +1,244 @@
+/* ---------- 2.17 · Tu Biblioteca: search everything, search and order each category ---------- */
+
+/* Search for the whole library, under the title. Sticks while its results scroll. */
+.library-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  margin: -12px 0 16px;
+  padding: 0 4px 0 14px;
+  border-radius: 14px;
+  color: var(--secondary);
+  background: rgba(28, 27, 34, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  transition: top 260ms cubic-bezier(0.2, 0.9, 0.3, 1), box-shadow 200ms ease, color 200ms ease;
+}
+.library-search:focus-within {
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(var(--brand-rgb), 0.5);
+}
+.library-search.is-active {
+  position: sticky;
+  top: calc(76px + env(safe-area-inset-top, 0px));
+  z-index: 4;
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+:root[data-header="hidden"] .library-search.is-active { top: calc(10px + env(safe-area-inset-top, 0px)); }
+.library-search input,
+.library-filter input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #fff;
+  font-size: 16px;
+}
+.library-search input { height: 46px; }
+.library-search input::placeholder,
+.library-filter input::placeholder { color: var(--secondary); }
+.library-search input::-webkit-search-cancel-button,
+.library-filter input::-webkit-search-cancel-button { display: none; }
+.library-search .icon-button,
+.library-filter .icon-button {
+  width: 40px;
+  height: 40px;
+  color: var(--secondary);
+}
+
+/* Row over each category: count · search · order. Full width, frosted once it sticks. */
+.library-toolbar-anchor {
+  height: 0;
+  scroll-margin-top: calc(84px + env(safe-area-inset-top, 0px));
+}
+.library-toolbar {
+  position: sticky;
+  top: calc(72px + env(safe-area-inset-top, 0px));
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  margin: -16px calc(-1 * var(--page-x, 22px)) 4px;
+  padding: 6px var(--page-x, 22px);
+  transition: top 260ms cubic-bezier(0.2, 0.9, 0.3, 1), background-color 200ms ease, box-shadow 200ms ease;
+}
+.library-toolbar.is-stuck {
+  background: rgba(var(--glass-tint, 0, 0, 0), 0.8);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06), 0 14px 24px -20px rgba(0, 0, 0, 0.9);
+}
+:root[data-header="hidden"] .library-toolbar { top: env(safe-area-inset-top, 0px); }
+.music-directory .library-toolbar { margin-top: -6px; }
+.library-toolbar-count {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.library-toolbar-count > span {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--secondary);
+  font-variant-numeric: tabular-nums;
+}
+.library-filter-open.icon-button {
+  width: 44px;
+  height: 44px;
+  color: #f4f2f8;
+}
+.library-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  padding: 0 2px 0 12px;
+  border-radius: 12px;
+  color: var(--secondary);
+  background: rgba(28, 27, 34, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: box-shadow 200ms ease, color 200ms ease;
+}
+.library-filter:focus-within {
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(var(--brand-rgb), 0.5);
+}
+.library-filter input { height: 42px; }
+
+/* «Ordenar: Recientes ▾» */
+.sort-chip { margin-left: auto; }
+.sort-chip > .icon-button {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  width: auto;
+  max-width: 62vw;
+  height: 38px;
+  gap: 6px;
+  padding: 0 10px 0 12px;
+  border-radius: 999px;
+  background: #16151b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #f4f2f8;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: transform 170ms cubic-bezier(0.2, 0.9, 0.3, 1), background-color 200ms ease, border-color 200ms ease;
+}
+.sort-chip > .icon-button:hover { background: #1d1c23; }
+.sort-chip > .icon-button:active { transform: scale(0.96); }
+.sort-chip > .icon-button[aria-expanded="true"] { border-color: rgba(var(--brand-rgb), 0.55); }
+.sort-chip > .icon-button > svg:first-child { color: var(--brand-readable); }
+.sort-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sort-chip-prefix { color: var(--secondary); font-weight: 500; }
+/* With the search open, the chip keeps only the order's name. */
+.library-toolbar.is-open .sort-chip-prefix { display: none; }
+.library-toolbar.is-open .sort-chip > .icon-button { max-width: 44vw; }
+@media (max-width: 379px) {
+  .sort-chip-prefix { display: none; }
+}
+
+/* Results of the library search */
+.library-results { padding-bottom: 8px; }
+.library-result-pills.pills { gap: 6px; margin: 0 0 10px; }
+.library-result-pills.pills button {
+  min-height: 40px;
+  padding: 8px 14px;
+  white-space: nowrap;
+}
+.library-result-pills .pill-count {
+  margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.62;
+}
+.library-hits { margin-top: 14px; }
+.library-hits-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 2px;
+}
+.library-hits-head h2 { font-size: 1.05rem; }
+.library-hits-count {
+  margin-right: auto;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--secondary);
+  font-variant-numeric: tabular-nums;
+}
+.library-hits-head .text-button {
+  min-height: 40px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--brand-readable);
+}
+.library-hit.playlist-row { padding: 8px 0; }
+.library-hit.playlist-row .cover {
+  width: 52px;
+  height: 52px;
+  flex: none;
+}
+.library-hit.is-artist .cover,
+.directory-grid.is-artists .cover { border-radius: 50%; }
+.library-hit strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.library-hit small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.library-elsewhere {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  margin: 18px 0 4px;
+  font-size: 0.82rem;
+  color: var(--secondary);
+}
+.library-empty {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 44px 12px 24px;
+  text-align: center;
+  color: var(--secondary);
+}
+.library-empty h2 {
+  max-width: 30ch;
+  font-size: 1.05rem;
+  color: #f4f2f8;
+  overflow-wrap: anywhere;
+}
+.library-empty p { max-width: 32ch; font-size: 0.85rem; }
+.library-empty .button { margin-top: 6px; }
+
+/* Artistas and Álbumes */
+.music-directory > .collection-count { margin-top: 6px; }
+.music-directory .directory-grid { margin-top: 10px; }
+.directory-grid.is-artists > button { text-align: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .library-search,
+  .library-toolbar,
+  .sort-chip > .icon-button { transition: none; }
+}

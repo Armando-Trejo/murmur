@@ -1,5 +1,5 @@
 import { Auth } from "../native";
-import { db } from "./db";
+import { addedStamp, db } from "./db";
 import type { Playlist, QueueItem } from "./types";
 import { parseFanUpload } from "./FanUploadParser";
 export async function importYouTubeLibrary(
@@ -27,13 +27,15 @@ export async function importYouTubeLibrary(
           saved: true,
         };
       });
+      const now = Date.now();
       await db.transaction("rw", [db.tracks, db.playlists], async () => {
-        for (const track of items) {
+        for (const [index, track] of items.entries()) {
           const existing = await db.tracks.get(track.id);
           await db.tracks.put({
             ...existing,
             ...track,
             offlinePath: existing?.offlinePath,
+            addedAt: addedStamp(existing, now - index),
           });
           tracks.add(track.id);
         }

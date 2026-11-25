@@ -17,4 +17,5 @@
     <color name="murmur_widget_accent">#FFB39DFA</color>
     <color name="murmur_widget_accent_deep">#FF8F74F0</color>
     <color name="murmur_widget_on_accent">#FF0C0A14</color>
+    <string name="murmur_widget_voice">Hablar con MURMUR</string>
 </resources>

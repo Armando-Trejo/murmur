@@ -1,5 +1,5 @@
 import { Auth, isNative } from "../native";
-import { db } from "./db";
+import { addedStamp, db } from "./db";
 import { fetchSpotifyPages, unwrapSpotifyTrack } from "./SpotifyLibrary";
 import type { Playlist, QueueItem } from "./types";
 export function parseCollectionLink(input:string){
@@ -44,8 +44,9 @@ export async function readCollectionLink(input:string, personalized=false){
  return { playlist, items };
 }
 export async function saveCollection({playlist, items}: Awaited<ReturnType<typeof readCollectionLink>>){
+ const now=Date.now();
  await db.transaction("rw",db.tracks,db.playlists,async()=>{
-  for(const track of items){const existing=await db.tracks.get(track.id);await db.tracks.put({...existing,...track,tags:[...new Set([...(existing?.tags||[]),...track.tags])],saved:true,offlinePath:existing?.offlinePath})}
+  for(const [index,track] of items.entries()){const existing=await db.tracks.get(track.id);await db.tracks.put({...existing,...track,tags:[...new Set([...(existing?.tags||[]),...track.tags])],saved:true,offlinePath:existing?.offlinePath,addedAt:addedStamp(existing,now-index)})}
   await db.playlists.put(playlist);
  });
  return playlist;

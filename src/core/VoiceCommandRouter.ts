@@ -1,7 +1,7 @@
-import { asksToPlay, parseVoiceIntent, type Platform, type VoiceIntent } from "./VoiceIntentParser";
+import { asksToPlay, misheardPlay, parseVoiceIntent, spokenContent, type Platform, type VoiceIntent } from "./VoiceIntentParser";
 
 /** Intents that start music (as opposed to controlling what already plays). */
-const MUSIC = new Set<VoiceIntent["type"]>(["track", "album", "artist", "vibe", "youtube", "request", "playlist"]);
+const MUSIC = new Set<VoiceIntent["type"]>(["track", "album", "artist", "vibe", "youtube", "request", "playlist", "top", "latest", "saved", "history"]);
 import {
   searchAll,
   buildAffinity,
@@ -13,14 +13,19 @@ import { player } from "./AudioOrchestrator";
 import { Auth, Voice, isNative } from "../native";
 import { similarity } from "./SourceResolver";
 import { songKey } from "./blendMixes";
-import { albumTracks, searchAlbums } from "./albumSearch";
+import { albumTracks, fromSpotify, searchAlbums, SPOTIFY_ALBUM_PREFIX, type AlbumResult } from "./albumSearch";
 import { creditedArtists } from "../components/ArtistProfile";
 import { continuationPicks } from "./continuation";
 import { magicPicks } from "./magicShuffle";
 import { normalize } from "./FanUploadParser";
-import { interpret, type Candidate } from "./requestResolver";
 import { spotifyTrack } from "./DiscoveryEngine";
 import type { QueueItem } from "./types";
+import { phraseScore, songScore, tokens, type Tok } from "./voicePhonetics";
+import {
+  artistLine, byArtist, compareHits, correctQuery, hintNames, knowsArtist, librarySongsBy, loadVoiceLibrary, matchLibrary,
+  titleVariants, type LibraryHit, type VoiceLibrary, type Want,
+} from "./voiceLibrary";
+import { offerVoiceChoices } from "./voiceChoices";
 
 async function playbackResult(action: () => Promise<unknown>, message: string, note = "") {
   await action();
@@ -56,9 +61,12 @@ const unwanted = /\b(live|en vivo|cover|karaoke|remix|instrumental|sped up|slowe
 export function bestSong(list: QueueItem[], title: string, artist?: string) {
   let best: QueueItem | undefined;
   let score = 0;
+  const said = tokens(title);
+  const by = artist ? tokens(artist) : [];
   for (const track of list) {
-    const t = similarity(track.title, title);
-    const a = artist ? Math.max(similarity(lead(track.artist), artist), similarity(track.artist, artist)) : 0.8;
+    // Spelling and sound: "jolidei in cambodia" is "Holiday in Cambodia".
+    const t = Math.max(similarity(track.title, title), ...titleVariants(track.title).map((v) => phraseScore(said, tokens(v), 0.7)));
+    const a = artist ? Math.max(similarity(lead(track.artist), artist), similarity(track.artist, artist), phraseScore(by, tokens(artistLine(track.artist)), 0.8)) : 0.8;
     const penalty = unwanted.test(normalize(track.title)) && !unwanted.test(normalize(title)) ? 0.25 : 0;
     const s = t * 0.6 + a * 0.4 - penalty;
     if (s > score) { score = s; best = track; }
@@ -82,11 +90,28 @@ async function remember(heard: string, understood: string, answer: string) {
   await db.settings.put({ key: LOG_KEY, value: [{ at: Date.now(), heard, understood, answer }, ...log].slice(0, 30) }).catch(() => {});
 }
 
+/**
+ * How sure MURMUR must be. From the library, `library` plays without asking and below `libraryFloor`
+ * it never plays (the library is only matched by sound); from a catalogue (which already found it
+ * by these words), `sure` plays without asking and below `floor` nothing plays. In between it plays
+ * the best and offers the others («¿No era esta?»). A misheard «pon» needs `misheard`.
+ */
+export const VOICE_CONFIDENCE = { library: 0.85, libraryFloor: 0.75, sure: 0.82, floor: 0.7, misheard: 0.85 } as const;
+/** How sure an option is (without the small preference the library gets when ranking). */
+const confidence = (o: Option) => o.score - (o.boost ?? 0);
+const playable = (o: Option, strict: boolean) =>
+  confidence(o) >= (strict ? VOICE_CONFIDENCE.misheard : o.from === "library" ? VOICE_CONFIDENCE.libraryFloor : VOICE_CONFIDENCE.floor);
+
+/** What the log keeps about the choice, for tuning: which alternative, what, from where, how sure. */
+interface Trace { alt?: number; pick?: string; from?: string; confidence?: number; choices?: number }
+/** One recognizer alternative that names music. */
+interface Alt { said: string; intent: VoiceIntent; index: number; asked: boolean }
+
 export async function routeVoiceCommand(
   text: string,
   save: (track: QueueItem) => Promise<void> = saveTrack,
 ): Promise<string> {
-  // The recognizer sends its alternatives one per line, best first: keep the first one that makes sense.
+  // The recognizer sends up to five alternatives, one per line, best first.
   const playlists = await db.playlists.toArray();
   const heard = text.split("\n").map((t) => t.trim()).filter(Boolean);
   const intents = heard.map((t) => parseVoiceIntent(t, playlists));
@@ -97,12 +122,29 @@ export async function routeVoiceCommand(
   intents.forEach((intent, index) => { if (rank(intent, heard[index]) > rank(intents[at], heard[at])) at = index; });
   const intent = intents[at] ?? { type: "unknown" as const };
   text = heard.join(" | ");
+  const trace: Trace = {};
   let answer = "";
   try {
-    // Music without "pon", a wish or a platform is not played: it may be talk near the phone.
-    if (MUSIC.has(intent.type) && !asksToPlay(heard[at] ?? "")) {
-      answer = `Para poner música, di «pon» y lo que quieres escuchar. Escuché: «${heard[at]}»`;
-      return answer;
+    // Only the wake phrase was caught ("okay murmuro"): MURMUR is listening, there is nothing to do yet.
+    if (heard.length && heard.every((h) => !spokenContent(h))) return (answer = "Te escucho: dime qué pongo");
+    if (MUSIC.has(intent.type)) {
+      const alts: Alt[] = heard.flatMap((said, index) =>
+        MUSIC.has(intents[index].type) ? [{ said, intent: intents[index], index, asked: asksToPlay(said) }] : []);
+      const asked = alts.filter((a) => a.asked);
+      if (!asked.length) {
+        // «Pon» misheard as «don»/«con» ("Don Can you West"): played only when the rest clearly names music.
+        const misheard = heard.flatMap((said, index): Alt[] => {
+          const rest = misheardPlay(said);
+          const i = rest ? parseVoiceIntent("pon " + rest, playlists) : undefined;
+          return i && ["track", "request", "artist"].includes(i.type) ? [{ said: "pon " + rest, intent: i, index, asked: true }] : [];
+        });
+        const played = misheard.length ? await resolveMusic(misheard, trace, true) : undefined;
+        if (played) return (answer = played);
+        // Music without "pon", a wish or a platform is not played: it may be talk near the phone.
+        return (answer = `Para poner música, di «pon» y lo que quieres escuchar. Escuché: «${heard[at]}»`);
+      }
+      // Every alternative that names music competes (those without the «pon», a little behind).
+      return (answer = (await resolveMusic([...asked, ...alts.filter((a) => !a.asked)], trace)) ?? "No te entendí");
     }
     answer = await run(intent, save);
     return answer;
@@ -110,7 +152,7 @@ export async function routeVoiceCommand(
     answer = "Error: " + (error as Error).message;
     throw error;
   } finally {
-    void remember(text, JSON.stringify(intent), answer).catch(() => {});
+    void remember(text, JSON.stringify({ ...intent, ...trace }), answer).catch(() => {});
   }
 }
 
@@ -176,29 +218,16 @@ async function run(intent: ReturnType<typeof parseVoiceIntent>, save: (track: Qu
         "Reproduciendo " + p.title,
       );
     }
-    case "artist": {
-      // "Pon X": an artist gets a mix of their songs; a song title plays that song (and MURMUR
-      // continues with related music when it ends). Never several versions of the same song.
-      // Songs (official audio), not concerts or full-album videos: Spotify's catalogue and YouTube
-      // Music's song search, the platform asked for first; without one, both (Spotify first).
-      const [fromSpotify, fromYouTube] = await Promise.all([artistSongs(intent.query, "spotify"), artistSongs(intent.query, "youtube")]);
-      const on = { spotify: fromSpotify, youtube: fromYouTube };
-      if (!intent.platform) {
-        const both = oncePerSong(interleaveTwo(fromSpotify, fromYouTube));
-        if (both.length >= 3) return playbackResult(() => player.playList(both.slice(0, 30)), "Mix de " + lead(both[0].artist));
-      }
-      for (const platform of platformOrder(intent.platform)) {
-        const byArtist = oncePerSong(on[platform]);
-        if (byArtist.length >= 3)
-          return playbackResult(() => player.playList(byArtist.slice(0, 30)), "Mix de " + lead(byArtist[0].artist), fallbackNote(intent.platform, platform));
-        const song = bestSong(await songsOn(platform, intent.query), intent.query);
-        if (song)
-          return playbackResult(() => player.playList([song]), "Reproduciendo " + song.title, fallbackNote(intent.platform, platform));
-      }
-      const rest = oncePerSong((await generateArtistMix(intent.query)).filter((t) => !longForm(t)));
-      if (!rest.length) return "No encontré ese artista ni esa canción";
-      return playbackResult(() => player.playList(rest), "Mix de " + intent.query);
-    }
+    case "artist":
+      return playArtist(intent.query, intent.platform, intent.another);
+    case "top":
+      return playTop(intent.query, intent.platform);
+    case "latest":
+      return playLatest(intent.query, intent.platform);
+    case "saved":
+      return playSaved();
+    case "history":
+      return playHistory(intent.when);
     case "youtube": {
       const tracks = await searchAll(intent.query, "youtube");
       if (!tracks.length) return "No encontré ese video";
@@ -207,38 +236,15 @@ async function run(intent: ReturnType<typeof parseVoiceIntent>, save: (track: Qu
         "Reproduciendo desde YouTube",
       );
     }
-    case "track": {
-      // "Vámonos de viaje" is a title, "Bailarina de Miranda" a title and an artist: the catalogues decide.
-      if (!intent.exact && intent.said) return resolveRequest(intent.said, intent.platform, save, false, intent);
-      for (const platform of platformOrder(intent.platform)) {
-        const song = bestSong(await songsOn(platform, intent.query), intent.title, intent.artist);
-        if (song)
-          return playbackResult(() => player.playList([song]), "Reproduciendo " + song.title, fallbackNote(intent.platform, platform));
-      }
-      return "No encontré esa canción en Spotify ni en YouTube";
-    }
-    case "album": {
-      const { albums } = await searchAlbums(intent.query);
-      for (const platform of platformOrder(intent.platform)) {
-        let best: (typeof albums)[number] | undefined;
-        let score = 0;
-        for (const album of albums.filter((a) => a.source === platform)) {
-          const s = similarity(album.title, intent.title) * 0.65 +
-            (intent.artist ? similarity(lead(album.artist), intent.artist) : 0.8) * 0.35;
-          if (s > score) { score = s; best = album; }
-        }
-        if (!best || score < 0.6) continue;
-        const tracks = await albumTracks(best).catch(() => []);
-        if (!tracks.length) continue;
-        return playbackResult(() => player.playList(tracks), "Álbum " + best.title, fallbackNote(intent.platform, platform));
-      }
-      return "No encontré ese álbum en Spotify ni en YouTube";
-    }
+    case "track":
+      if (!intent.exact) return (await resolveMusic([{ said: intent.said ?? intent.query, intent, index: 0, asked: true }], {})) ?? "No te entendí";
+      return playExact(intent.title, intent.artist, intent.query, intent.platform);
+    case "album":
     case "request":
-      return resolveRequest(intent.query, intent.platform, save, !!intent.strict);
+      return (await resolveMusic([{ said: intent.query, intent, index: 0, asked: true }], {})) ?? "No te entendí";
     case "vibe": {
       // The catalogue knows moods far better than the library's few tags; tags are the offline backup.
-      const fromCatalogue = await vibeFromCatalogue(intent.query);
+      const fromCatalogue = await playVibeFromCatalogue(intent.query);
       if (!fromCatalogue.startsWith("No encontré")) return fromCatalogue;
       const tracks = await db.tracks.toArray();
       if (!tracks.length) return fromCatalogue;
@@ -298,13 +304,14 @@ async function run(intent: ReturnType<typeof parseVoiceIntent>, save: (track: Qu
 /**
  * A mood or activity ("algo tranquilo para trabajar"): YouTube Music's playlists for it (its own
  * first), two of them mixed, with the artists you already listen to moved up and no repeats.
+ * Returns the songs without playing them; also the last resort of the mix of the moment (momentMix.ts).
  */
-async function vibeFromCatalogue(query: string) {
-  if (!isNative) return "No encontré música para «" + query + "»";
+export async function vibeFromCatalogue(query: string): Promise<{ tracks: QueueItem[]; list?: string }> {
+  if (!isNative) return { tracks: [] };
   const lists = (await Auth.youtubePlaylists({ query }).catch(() => undefined))?.playlists ?? [];
   const pools = await Promise.all(lists.slice(0, 2).map((p) => Auth.youtubeCollection({ id: p.id.replace(/^VL/, "") }).then((c) => c.tracks ?? []).catch(() => [] as QueueItem[])));
   const songs = oncePerSong(interleaveTwo(pools[0] ?? [], pools[1] ?? []).filter((t) => !longForm(t)));
-  if (!songs.length) return "No encontré música para «" + query + "»";
+  if (!songs.length) return { tracks: [] };
   const known = new Map<string, number>();
   for (const t of await db.tracks.toArray().catch(() => [] as QueueItem[])) {
     const a = normalize(lead(t.artist));
@@ -313,64 +320,515 @@ async function vibeFromCatalogue(query: string) {
   const ranked = songs
     .map((t, i) => ({ t, s: Math.min(3, known.get(normalize(lead(t.artist))) ?? 0) * 4 - i * 0.15 + Math.random() * 3 }))
     .sort((a, b) => b.s - a.s).map((x) => x.t).slice(0, 25);
-  return playbackResult(() => player.playList(ranked), "Música " + query + (lists[0] ? " · " + lists[0].title : ""));
+  return { tracks: ranked, list: lists[0]?.title };
+}
+
+async function playVibeFromCatalogue(query: string) {
+  const { tracks, list } = await vibeFromCatalogue(query);
+  if (!tracks.length) return "No encontré música para «" + query + "»";
+  return playbackResult(() => player.playList(tracks), "Música " + query + (list ? " · " + list : ""));
 }
 
 /**
- * Anything that sounds like music but has no fixed shape: asks both catalogues and keeps the song,
- * artist or album that best explains the words said (see requestResolver). If nothing explains them
- * well, plays the catalogue's own top hit, which already tolerates loose wording.
+ * The music words as they sound: like musicText, but a "gü" the recognizer wrote ("güin") keeps
+ * its w sound, which plain normalizing would lose ("guin").
  */
-async function resolveRequest(query: string, asked: Platform | undefined, save: (track: QueueItem) => Promise<void>,
-  strict = false, hint?: { title: string; artist: string; query: string }): Promise<string> {
-  const [spotify, youtube] = await Promise.allSettled([
-    isNative ? Auth.spotifyRequest({ path: "/search?type=track,artist,album&limit=5&q=" + encodeURIComponent(query) }) : Promise.reject(new Error("web")),
-    songsOn("youtube", query),
-  ]);
-  const data = spotify.status === "fulfilled" ? spotify.value.data : undefined;
-  const spTracks: QueueItem[] = (data?.tracks?.items ?? []).filter(Boolean).map(spotifyTrack);
-  const ytSongs = youtube.status === "fulfilled" ? youtube.value.slice(0, 6) : [];
-  const candidates: Candidate[] = [
-    ...spTracks.map((t): Candidate => ({ kind: "track", title: t.title, artist: t.artist, popularity: t.popularity, ref: t })),
-    ...ytSongs.map((t): Candidate => ({ kind: "track", title: t.title, artist: t.artist, ref: t })),
-    ...(data?.artists?.items ?? []).filter((a: { name?: string }) => a?.name)
-      .map((a: { name: string; popularity?: number }): Candidate => ({ kind: "artist", name: a.name, popularity: a.popularity, ref: a.name })),
-    ...(data?.albums?.items ?? []).filter((a: { name?: string }) => a?.name)
-      .map((a: { name: string; artists?: { name: string }[] }): Candidate => ({ kind: "album", title: a.name, artist: (a.artists ?? []).map((x) => x.name).join(", "), ref: a })),
-    // Without Spotify, YouTube's song artists are the artist candidates.
-    ...(data ? [] : [...new Set(ytSongs.map((t) => lead(t.artist)))].map((name): Candidate => ({ kind: "artist", name, ref: name }))),
-  ];
-  const pick = interpret(candidates, query);
-  if (pick?.kind === "artist") return run({ type: "artist", query: pick.ref as string, platform: asked }, save);
-  if (pick?.kind === "album") return run({ type: "album", query: pick.title + " " + lead(pick.artist), title: pick.title, artist: lead(pick.artist), platform: asked }, save);
-  if (pick?.kind === "track") {
-    const t = pick.ref as QueueItem;
-    if (!asked || t.source === asked) return playbackResult(() => player.playList([t]), "Reproduciendo " + t.title);
-    return run({ type: "track", query: t.title + " " + lead(t.artist), title: t.title, artist: lead(t.artist), platform: asked, exact: true }, save);
+function soundText(alt: Alt) {
+  let text = musicText(alt.intent);
+  for (const word of alt.said.toLowerCase().match(/\S*gü\S*/g) ?? []) {
+    const plain = normalize(word);
+    if (plain) text = text.replace(new RegExp(`(^| )${plain}(?= |$)`), "$1" + normalize(word.replace(/gü/g, "w")));
   }
-  // The grammar's own reading ("title de artist"), checked against each platform.
-  if (hint) {
-    const exact = await run({ type: "track", query: hint.query, title: hint.title, artist: hint.artist, platform: asked, exact: true }, save);
-    if (!exact.startsWith("No encontré")) return exact;
-  }
-  if (strict) return "No te entendí «" + query + "». Prueba: «pon Bailarina de Miranda», «algo de Enjambre», «la que sigue»";
-  // Nothing explains the words well: the top hit of the platform asked for (Spotify first otherwise).
-  for (const platform of platformOrder(asked)) {
-    const top = platform === "spotify" ? spTracks[0] : ytSongs[0];
-    if (top) return playbackResult(() => player.playList([top]), "Reproduciendo " + top.title, fallbackNote(asked, platform));
-  }
-  return "No encontré «" + query + "» en Spotify ni en YouTube";
+  return text;
 }
 
-/** Tells the speech recognizer which names to expect: your most played artists and your playlists. */
+/** The music words of an alternative (no verbs, no platform). */
+function musicText(intent: VoiceIntent) {
+  switch (intent.type) {
+    case "track": return intent.said ?? intent.query;
+    case "request": case "artist": case "album": case "top": case "latest": return intent.query;
+    default: return "";
+  }
+}
+const platformOf = (intent: VoiceIntent) => ("platform" in intent ? intent.platform : undefined);
+const distinct = (list: (string | undefined)[]) => [...new Set(list.filter((x): x is string => !!x && !!x.trim()).map((x) => x.trim()))];
+
+/**
+ * Music asked for by voice. The owner's library is matched first, by sound (what the owner means);
+ * the catalogues only when it is not sure. Every recognizer alternative is scored and the best
+ * interpretation wins. Below VOICE_CONFIDENCE.floor nothing plays: the closest options are offered.
+ * `strict` (a misheard «pon»): only a sure match plays, and nothing is offered otherwise.
+ */
+async function resolveMusic(alts: Alt[], trace: Trace, strict = false): Promise<string | undefined> {
+  const first = alts[0].intent;
+  const platform = platformOf(first);
+  switch (first.type) {
+    case "artist":
+    case "top":
+    case "latest": {
+      const same = alts.filter((a) => a.intent.type === first.type);
+      const named = await canonicalArtist(distinct(same.map(soundText)), distinct(same.map((a) => musicText(a.intent))));
+      if (strict && named.score < VOICE_CONFIDENCE.misheard) return undefined;
+      Object.assign(trace, { pick: "artist: " + named.name, from: named.from, confidence: round(named.score) });
+      if (first.type === "top") return playTop(named.name, platform);
+      if (first.type === "latest") return playLatest(named.name, platform);
+      return playArtist(named.name, platform, first.type === "artist" && first.another);
+    }
+    case "album":
+      if (strict) return undefined;
+      return resolveNamed(alts.filter((a) => a.intent.type === "album"), "album", platform, trace, false);
+    case "track":
+    case "request":
+      return resolveNamed(alts.filter((a) => a.intent.type === "track" || a.intent.type === "request"), "any", platform, trace, strict);
+    default:
+      if (strict) return undefined;
+      return run(first, saveTrack);
+  }
+}
+
+/** A possible meaning of what was said, from the library or a catalogue. */
+interface Option {
+  kind: LibraryHit["kind"];
+  /** Confidence 0..1 (with the small library, plays and popularity bonuses). */
+  score: number;
+  base: number;
+  from: "library" | "spotify" | "youtube";
+  /** Index of the recognizer alternative that explains it. */
+  alt: number;
+  label: string;
+  key: string;
+  /** Preference added for ranking only (the library's), not part of the confidence. */
+  boost?: number;
+  /** The song itself, or one by the artist / on the album (its cover in the choices). */
+  track?: QueueItem;
+  name?: string;
+  album?: { title: string; artist: string; playlistId?: string; result?: AlbumResult; tracks?: QueueItem[]; artworkUrl?: string };
+  playlistId?: string;
+}
+const round = (n: number) => Math.round(n * 100) / 100;
+const sortOptions = (options: Option[], songFirst = false) => options.sort((a, b) => compareHits(a, b, songFirst));
+
+function fromLibrary(hit: LibraryHit, alt: number, behind: number, lib: VoiceLibrary): Option {
+  const o = { score: hit.score - behind, base: hit.base - behind, from: "library" as const, alt, label: hit.label, key: hit.key };
+  switch (hit.kind) {
+    case "track": return { ...o, kind: "track", track: hit.track };
+    case "artist": return { ...o, kind: "artist", name: hit.name, track: librarySongsBy(lib, hit.name)[0] };
+    case "album": return { ...o, kind: "album", album: { title: hit.title, artist: hit.artist, playlistId: hit.playlistId, tracks: hit.tracks, artworkUrl: hit.artworkUrl }, track: hit.tracks[0] };
+    case "playlist": return { ...o, kind: "playlist", playlistId: hit.id };
+  }
+}
+
+/** Songs, artists or albums named by the alternatives: library first, then the catalogues. */
+async function resolveNamed(alts: Alt[], want: Want, platform: Platform | undefined, trace: Trace, strict: boolean): Promise<string | undefined> {
+  const lib = await loadVoiceLibrary();
+  const songFirst = alts.some((a) => a.intent.type === "request" && a.intent.want === "song");
+  const options: Option[] = [];
+  alts.forEach((a, n) => {
+    const wanted: Want = a.intent.type === "request" && a.intent.want === "song" ? "song" : want;
+    // Later alternatives, and those where no «pon» was heard, a little behind.
+    const behind = (a.asked ? 0 : 0.03) + n * 0.005;
+    for (const hit of matchLibrary(lib, soundText(a), wanted)) options.push(fromLibrary(hit, a.index, behind, lib));
+  });
+  sortOptions(options, songFirst);
+  const ctx = { alts, platform, trace, strict, songFirst };
+  if (options[0] && options[0].score >= VOICE_CONFIDENCE.library) return decide(once(options), ctx);
+  // Not sure from the library: the catalogues, with what was said, the library's spelling of it and the best library guess.
+  const said = musicText(alts[0].intent);
+  const guess = options[0] && options[0].score >= 0.65 ? (options[0].kind === "artist" ? options[0].name : options[0].kind === "album" ? `${options[0].album!.title} ${options[0].album!.artist}` : options[0].kind === "track" ? `${options[0].track!.title} ${lead(options[0].track!.artist)}` : undefined) : undefined;
+  // "X de Y" with Y an artist the owner knows: the search is narrowed to them, other artists' X fall behind.
+  const split = alts[0].intent.type === "track" ? alts[0].intent : undefined;
+  const knownBy = split ? matchLibrary(lib, split.artist, "artist", 1)[0] : undefined;
+  const artist = knownBy?.kind === "artist" && knownBy.score >= VOICE_CONFIDENCE.library ? knownBy.name : undefined;
+  const queries = distinct([
+    musicText(alts[0].intent),
+    split && artist ? `${split.title} ${artist}` : undefined,
+    ...alts.slice(1, 3).map((a) => musicText(a.intent)),
+    split ? split.query : undefined,
+    correctQuery(lib, said),
+    guess,
+  ]).slice(0, 4);
+  // "La canción X": only songs.
+  const found = await catalogueOptions(queries, alts, songFirst && want === "any" ? "song" : want, lib, platform, strict, artist);
+  // What the library knows stays a little ahead: it is what the owner listens to.
+  return decide(once(sortOptions([...options.map((o) => ({ ...o, score: o.score + 0.03, base: o.base + 0.03, boost: 0.03 })), ...found], songFirst)), ctx);
+}
+
+/** One option per song, artist, album or playlist (the best scored). */
+function once(options: Option[]) {
+  const seen = new Set<string>();
+  return options.filter((o) => !seen.has(o.key) && !!seen.add(o.key));
+}
+
+/** What the catalogues answer for the queries, scored against every alternative. */
+async function catalogueOptions(queries: string[], alts: Alt[], want: Want, lib: VoiceLibrary, platform: Platform | undefined, strict: boolean, artist?: string): Promise<Option[]> {
+  const saids = alts.map((a) => ({ toks: tokens(soundText(a)), alt: a.index, behind: a.asked ? 0 : 0.03, raw: normalize(musicText(a.intent)) }));
+  const best = (score: (toks: Tok[]) => number) => {
+    let top = { score: 0, alt: saids[0]?.alt ?? 0 };
+    for (const s of saids) { const v = score(s.toks) - s.behind; if (v > top.score) top = { score: v, alt: s.alt }; }
+    return top;
+  };
+  const out: Option[] = [];
+  if (want === "album") {
+    const albums = (await Promise.all(queries.slice(0, 3).map((q) => searchAlbums(q).then((r) => r.albums).catch(() => [] as AlbumResult[])))).flat();
+    const seen = new Set<string>();
+    for (const album of albums) {
+      if (seen.has(album.feedId)) continue;
+      seen.add(album.feedId);
+      const known = knowsArtist(lib, album.artist);
+      const title = tokens(titleVariants(album.title)[0]);
+      let { score, alt } = best((t) => songScore(t, title, tokens(lead(album.artist))));
+      const artistHeard = best((t) => songScore(t, title, tokens(lead(album.artist)))).score > best((t) => phraseScore(t, title, 0.7)).score + 0.02;
+      if (known) score += 0.04;
+      else if (!artistHeard && title.length <= 1) score = Math.min(score, 0.58);
+      if (album.source === (platform ?? "spotify")) score += 0.02;
+      out.push({ kind: "album", score: Math.min(1, score), base: score, from: album.source, alt, label: `${album.title} · ${album.artist}`, key: "l:" + normalize(album.title) + "|" + normalize(lead(album.artist)), album: { title: album.title, artist: album.artist, result: album, artworkUrl: album.artworkUrl } });
+    }
+    return out;
+  }
+  const results = await Promise.all(queries.map(async (q) => {
+    const [spotify, youtube] = await Promise.allSettled([
+      isNative ? Auth.spotifyRequest({ path: "/search?type=track,artist,album&limit=5&q=" + encodeURIComponent(q) }) : Promise.reject(new Error("web")),
+      songsOn("youtube", q),
+    ]);
+    return { data: spotify.status === "fulfilled" ? spotify.value.data : undefined, youtube: youtube.status === "fulfilled" ? youtube.value.slice(0, 6) : [] as QueueItem[] };
+  }));
+  const tracks = new Map<string, QueueItem>();
+  const artists = new Map<string, { name: string; popularity?: number; source: "spotify" | "youtube" }>();
+  const albums = new Map<string, AlbumResult>();
+  for (const { data, youtube } of results) {
+    for (const t of [...(data?.tracks?.items ?? []).filter(Boolean).map(spotifyTrack), ...youtube]) if (!tracks.has(t.id)) tracks.set(t.id, t);
+    for (const a of (data?.artists?.items ?? []) as { name?: string; popularity?: number }[])
+      if (a?.name && !artists.has(normalize(a.name))) artists.set(normalize(a.name), { name: a.name, popularity: a.popularity, source: "spotify" });
+    for (const al of fromSpotify(data?.albums?.items ?? [])) albums.set(al.feedId, al);
+    // Without Spotify, YouTube's song artists are the artist candidates (popular when several songs are theirs).
+    if (!data)
+      for (const name of new Set(youtube.map((t) => lead(t.artist))))
+        if (!artists.has(normalize(name))) artists.set(normalize(name), { name, popularity: youtube.filter((t) => lead(t.artist) === name).length >= 2 ? 50 : 20, source: "youtube" });
+  }
+  for (const a of want === "song" ? [] : artists.values()) {
+    const toks = tokens(a.name);
+    let { score, alt } = best((t) => phraseScore(t, toks, 0.75));
+    if (knowsArtist(lib, a.name)) score += 0.04;
+    // A short, little known name that merely sounds like the words is a guess, not an answer.
+    else if (toks.reduce((n, t) => n + t.key.length, 0) < 6 && (a.popularity ?? 0) < 40) score = Math.min(score, 0.58);
+    if (strict && score < 0.88) continue;
+    const sample = [...tracks.values()].find((t) => byArtist(t, a.name));
+    out.push({ kind: "artist", score: Math.min(1, score), base: score, from: a.source, alt, label: a.name, key: "a:" + tokens(a.name).map((t) => t.key).join(" "), name: a.name, track: sample });
+  }
+  if (strict) return out;
+  for (const t of tracks.values()) {
+    if (longForm(t)) continue;
+    const by = tokens(artistLine(t.artist));
+    let top = { score: 0, alt: 0 };
+    let artistHeard = false;
+    let words = 99;
+    for (const variant of titleVariants(t.title)) {
+      const title = tokens(variant);
+      const withArtist = best((s) => songScore(s, title, by));
+      if (withArtist.score > top.score) {
+        top = withArtist;
+        artistHeard = withArtist.score > best((s) => phraseScore(s, title, 0.7)).score + 0.02;
+        words = title.length;
+      }
+    }
+    let score = top.score;
+    const known = knowsArtist(lib, t.artist);
+    if (known) score += artistHeard ? 0.03 : 0.05;
+    // A title alone, by someone the owner does not listen to, is never sure (the options are offered);
+    // a one-word one is only a fair guess when it is a hit.
+    else if (!artistHeard) score = Math.min(score, words > 1 ? 0.8 : (t.popularity ?? 0) >= 70 ? 0.75 : 0.58);
+    if (unwanted.test(normalize(t.title)) && !saids.some((s) => unwanted.test(s.raw))) score -= 0.15;
+    if (artist && !byArtist(t, artist)) score -= 0.1;
+    score += ((t.popularity ?? 0) / 100) * 0.02 + (t.source === platform ? 0.02 : 0);
+    out.push({ kind: "track", score: Math.min(1, score), base: score, from: t.source, alt: top.alt, label: `${t.title} · ${t.artist}`, key: "t:" + songKey(t), track: t });
+  }
+  for (const album of want === "song" ? [] : albums.values()) {
+    const title = tokens(titleVariants(album.title)[0]);
+    let { score, alt } = best((s) => songScore(s, title, tokens(lead(album.artist))));
+    // An album named like a song is the song: albums stay just behind.
+    score -= 0.03;
+    if (title.length <= 1 && !knowsArtist(lib, album.artist)) score = Math.min(score, 0.58);
+    out.push({ kind: "album", score, base: score, from: "spotify", alt, label: `${album.title} · ${album.artist}`, key: "l:" + normalize(album.title) + "|" + normalize(lead(album.artist)), album: { title: album.title, artist: album.artist, result: album, artworkUrl: album.artworkUrl } });
+  }
+  return out;
+}
+
+const KIND_LABEL: Record<Option["kind"], string> = { track: "Canción", artist: "Artista", album: "Álbum", playlist: "Playlist" };
+/** How an option looks among the choices: a song is itself; the rest, a stand-in with their name and cover. */
+function choiceItem(o: Option): QueueItem {
+  if (o.kind === "track" && o.track) return o.track;
+  const cover = o.track ?? o.album?.tracks?.[0];
+  return {
+    id: "voice:" + o.key, source: cover?.source ?? "youtube", videoId: cover?.videoId, duration: 0, tags: [],
+    title: o.kind === "artist" ? o.name! : o.kind === "album" ? o.album!.title : o.label,
+    artist: o.kind === "artist" ? "Artista" : o.kind === "album" ? "Álbum · " + o.album!.artist : "Playlist",
+    artworkUrl: o.album?.artworkUrl ?? cover?.artworkUrl,
+  };
+}
+/** The songs one option stands for. */
+async function songsFor(o: Option, platform?: Platform): Promise<QueueItem[]> {
+  switch (o.kind) {
+    case "track": return o.track ? [o.track] : [];
+    case "artist": return (await artistMix(o.name!, platform)).list;
+    case "album": return (await albumSongs(o.album!, platform)).list;
+    case "playlist": {
+      const p = await db.playlists.get(o.playlistId!);
+      return p ? playlistTracks(p) : [];
+    }
+  }
+}
+function offer(heard: string, options: Option[], played: boolean, platform: Platform | undefined, trace: Trace) {
+  const picks = options.slice(0, 3);
+  if (!picks.length) return;
+  trace.choices = picks.length;
+  offerVoiceChoices({
+    heard, played,
+    choices: picks.map(choiceItem),
+    kinds: picks.map((o) => KIND_LABEL[o.kind]),
+    expand: (i) => songsFor(picks[i], platform),
+  });
+}
+
+/** Plays the best option if it is good enough, and offers the close ones («¿No era esta?»). */
+async function decide(options: Option[], ctx: { alts: Alt[]; platform?: Platform; trace: Trace; strict: boolean }): Promise<string | undefined> {
+  const best = options.find((o) => playable(o, ctx.strict));
+  const top = best ?? options[0];
+  const heardAs = (o?: Option) => ctx.alts.find((a) => a.index === o?.alt)?.said ?? ctx.alts[0].said;
+  const query = musicText(ctx.alts.find((a) => a.index === top?.alt)?.intent ?? ctx.alts[0].intent);
+  if (top) Object.assign(ctx.trace, { alt: top.alt, pick: `${top.kind}: ${top.label}`, from: top.from, confidence: round(confidence(top)) });
+  if (!best) {
+    if (ctx.strict) return undefined;
+    // Not sure enough to play anything: the closest options, one tap away.
+    const close = options.filter((o) => o.score >= 0.35);
+    offer(ctx.alts[0].said, close, false, ctx.platform, ctx.trace);
+    if (top) ctx.trace.pick = "none (" + ctx.trace.pick + ")";
+    return close.length ? `No estoy seguro de qué es «${query}». ¿Es alguna de estas?` : `No encontré «${query}» en tu música, Spotify ni YouTube`;
+  }
+  const answer = await playOption(best, ctx.platform);
+  const rest = options.filter((o) => o !== best && o.score >= 0.45);
+  const unsure = confidence(best) < (best.from === "library" ? VOICE_CONFIDENCE.library : VOICE_CONFIDENCE.sure);
+  if (rest.length && (unsure || confidence(rest[0]) >= confidence(best) - 0.04)) offer(heardAs(best), rest, true, ctx.platform, ctx.trace);
+  return answer;
+}
+
+async function playOption(o: Option, platform?: Platform): Promise<string> {
+  switch (o.kind) {
+    case "track": {
+      const t = o.track!;
+      // Asked on the other platform: the same song there, if it is.
+      if (platform && t.source !== platform) return playExact(titleVariants(t.title).at(-1)!, lead(t.artist), `${titleVariants(t.title).at(-1)} ${lead(t.artist)}`, platform, t);
+      return playbackResult(() => player.playList([t]), "Reproduciendo " + t.title);
+    }
+    case "artist":
+      return playArtist(o.name!, platform);
+    case "album": {
+      const { list, note, title } = await albumSongs(o.album!, platform);
+      if (!list.length) return "No pude abrir el álbum «" + o.album!.title + "»";
+      return playbackResult(() => player.playList(list), "Álbum " + title, note);
+    }
+    case "playlist":
+      return run({ type: "playlist", id: o.playlistId! }, saveTrack);
+  }
+}
+
+/** A song by title and artist on the platform asked for (the other one as a fallback). */
+async function playExact(title: string, artist: string, query: string, platform?: Platform, fallback?: QueueItem): Promise<string> {
+  for (const p of platformOrder(platform)) {
+    const song = bestSong(await songsOn(p, query), title, artist);
+    if (song) return playbackResult(() => player.playList([song]), "Reproduciendo " + song.title, fallbackNote(platform, p));
+  }
+  if (fallback) return playbackResult(() => player.playList([fallback]), "Reproduciendo " + fallback.title, platform ? fallbackNote(platform, fallback.source) : "");
+  return "No encontré esa canción en Spotify ni en YouTube";
+}
+
+/** An album's songs: the saved one, the catalogue's (on the platform asked for first), or the library's songs from it. */
+async function albumSongs(album: NonNullable<Option["album"]>, platform?: Platform): Promise<{ list: QueueItem[]; note: string; title: string }> {
+  if (album.playlistId) {
+    const p = await db.playlists.get(album.playlistId).catch(() => undefined);
+    const list = p ? await playlistTracks(p) : album.tracks ?? [];
+    if (list.length) return { list, note: "", title: album.title };
+  }
+  if (album.result) {
+    const list = await albumTracks(album.result).catch(() => [] as QueueItem[]);
+    if (list.length) return { list, note: fallbackNote(platform, album.result.source), title: album.result.title };
+  }
+  // Known only from the library's songs: the whole album from a catalogue.
+  const { albums } = await searchAlbums(`${album.title} ${lead(album.artist)}`).catch(() => ({ albums: [] as AlbumResult[] }));
+  const title = tokens(album.title);
+  const artist = tokens(lead(album.artist));
+  const ranked = albums
+    .map((a) => ({ a, s: songScore([...title, ...artist], tokens(titleVariants(a.title)[0]), tokens(lead(a.artist))) + (a.source === (platform ?? "spotify") ? 0.02 : 0) }))
+    .filter((x) => x.s >= 0.8)
+    .sort((x, y) => y.s - x.s);
+  for (const { a } of ranked.slice(0, 2)) {
+    const list = await albumTracks(a).catch(() => [] as QueueItem[]);
+    if (list.length) return { list, note: fallbackNote(platform, a.source), title: a.title };
+  }
+  return { list: album.tracks ?? [], note: "", title: album.title };
+}
+
+/**
+ * The artist's name as the library (or Spotify) spells it: "de misfits" → "The Misfits",
+ * "king caesars and the leaser weaser" → "King Gizzard & The Lizard Wizard". `score` says how sure.
+ */
+async function canonicalArtist(sounds: string[], queries = sounds): Promise<{ name: string; score: number; from: string }> {
+  let best: { name: string; score: number; from: string } | undefined;
+  const lib = await loadVoiceLibrary().catch(() => undefined);
+  if (lib)
+    for (const q of sounds) {
+      const hit = matchLibrary(lib, q, "artist", 1)[0];
+      if (hit?.kind === "artist" && (!best || hit.score > best.score)) best = { name: hit.name, score: hit.score, from: "library" };
+    }
+  if (best && best.score >= 0.8) return best;
+  if (isNative) {
+    const found = await Promise.all(queries.slice(0, 2).map((q) =>
+      Auth.spotifyRequest({ path: "/search?type=artist&limit=5&q=" + encodeURIComponent(q) }).then((r) => (r.data?.artists?.items ?? []) as { name?: string }[]).catch(() => [])));
+    found.forEach((items, i) => {
+      for (const a of items) {
+        if (!a?.name) continue;
+        const score = phraseScore(tokens(queries[i]), tokens(a.name), 0.75);
+        if (score >= 0.8 && (!best || score > best.score)) best = { name: a.name, score, from: "spotify" };
+      }
+    });
+    if (best && best.score >= 0.8) return best;
+  }
+  return { name: queries[0] ?? "", score: best?.score ?? 0, from: "said" };
+}
+
+function shuffled<T>(list: T[]) {
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
+  return out;
+}
+
+/**
+ * "Pon X": a mix of the artist's songs (official audio, not concerts or full-album videos), the
+ * owner's favourites by them between the catalogue's; never two versions of the same song.
+ * Spotify's catalogue and YouTube Music's song search, the platform asked for first; without one, both.
+ */
+async function artistMix(name: string, platform?: Platform, another = false): Promise<{ list: QueueItem[]; note: string; single?: boolean }> {
+  const lib = await loadVoiceLibrary().catch(() => undefined);
+  const mine = (lib ? librarySongsBy(lib, name) : []).filter((t) => !longForm(t) && (!platform || t.source === platform));
+  const [fromSpotify, fromYouTube] = await Promise.all([artistSongs(name, "spotify"), artistSongs(name, "youtube")]);
+  const on = { spotify: fromSpotify, youtube: fromYouTube };
+  let catalogue: QueueItem[] = [];
+  let note = "";
+  if (!platform) catalogue = oncePerSong(interleaveTwo(fromSpotify, fromYouTube));
+  else for (const p of platformOrder(platform)) if (oncePerSong(on[p]).length >= 3) { catalogue = oncePerSong(on[p]); note = fallbackNote(platform, p); break; }
+  if (catalogue.length < 3 && !mine.length) {
+    // Maybe it was a song's title, not an artist.
+    for (const p of platformOrder(platform)) {
+      const song = bestSong(await songsOn(p, name), name);
+      if (song) return { list: [song], note: fallbackNote(platform, p), single: true };
+    }
+    catalogue = oncePerSong((await generateArtistMix(name).catch(() => [] as QueueItem[])).filter((t) => !longForm(t) && byArtist(t, name)));
+  }
+  // Favourites (the 15 most played by them) in a new order each time, between the catalogue's songs.
+  let list = oncePerSong(interleaveTwo(shuffled(mine.slice(0, 15)), catalogue));
+  const now = player.current;
+  if (another && now) list = list.filter((t) => t.id !== now.id && songKey(t) !== songKey(now));
+  return { list: list.slice(0, 30), note };
+}
+
+async function playArtist(name: string, platform?: Platform, another = false): Promise<string> {
+  const { list, note, single } = await artistMix(name, platform, another);
+  if (!list.length) return "No encontré ese artista ni esa canción";
+  if (single) return playbackResult(() => player.playList(list), "Reproduciendo " + list[0].title, note);
+  const shown = list.some((t) => byArtist(t, name)) ? name : lead(list[0].artist);
+  return playbackResult(() => player.playList(list), (another ? "Otra de " : "Mix de ") + shown, note);
+}
+
+const songShelf = /^(?:canciones|songs|top songs|populares|lo más popular)/i;
+/** "Las mejores de X": their most popular songs, in order. */
+async function topSongs(name: string, platform?: Platform): Promise<{ list: QueueItem[]; note: string }> {
+  const fromSpotify = async () => (await artistSongs(name, "spotify")).sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0));
+  const fromYouTube = async () => {
+    if (!isNative) return [];
+    const page = await Auth.youtubeArtist({ name }).catch(() => undefined);
+    if (!page || phraseScore(tokens(name), tokens(page.name), 0.75) < 0.8) return [];
+    const shelf = page.shelves.find((s) => songShelf.test(s.title) && s.items.some((i) => i.track));
+    return (shelf?.items ?? []).flatMap((i) => (i.track ? [i.track] : []));
+  };
+  for (const p of platformOrder(platform)) {
+    const list = oncePerSong((await (p === "spotify" ? fromSpotify() : fromYouTube())).filter((t) => !longForm(t)));
+    if (list.length >= 3) return { list: list.slice(0, 20), note: fallbackNote(platform, p) };
+  }
+  // Offline or unknown to the catalogues: the owner's most played by them.
+  const lib = await loadVoiceLibrary().catch(() => undefined);
+  return { list: lib ? librarySongsBy(lib, name).filter((t) => !longForm(t)).slice(0, 20) : [], note: "" };
+}
+async function playTop(name: string, platform?: Platform): Promise<string> {
+  const { list, note } = await topSongs(name, platform);
+  if (!list.length) return playArtist(name, platform);
+  return playbackResult(() => player.playList(list), "Lo mejor de " + name, note);
+}
+
+/** "Lo nuevo de X": their latest album or single (Spotify's release dates, or YouTube Music's artist page). */
+async function latestRelease(name: string, platform?: Platform): Promise<{ title: string; list: QueueItem[]; source: Platform } | undefined> {
+  if (!isNative) return undefined;
+  const fromSpotify = async () => {
+    const found = await Auth.spotifyRequest({ path: "/search?type=artist&limit=3&q=" + encodeURIComponent(name) }).catch(() => undefined);
+    const artist = ((found?.data?.artists?.items ?? []) as { id?: string; name?: string }[]).find((a) => a?.id && a.name && phraseScore(tokens(name), tokens(a.name), 0.75) >= 0.8);
+    if (!artist) return undefined;
+    const albums = await Auth.spotifyRequest({ path: `/artists/${artist.id}/albums?include_groups=album,single&limit=10` }).catch(() => undefined);
+    const latest = ((albums?.data?.items ?? []) as { id?: string; name?: string; release_date?: string }[])
+      .filter((a) => a?.id && a.release_date)
+      .sort((a, b) => b.release_date!.localeCompare(a.release_date!))[0];
+    if (!latest) return undefined;
+    const list = await albumTracks({ feedId: SPOTIFY_ALBUM_PREFIX + latest.id, source: "spotify" }).catch(() => [] as QueueItem[]);
+    return list.length ? { title: latest.name ?? "", list } : undefined;
+  };
+  const fromYouTube = async () => {
+    const page = await Auth.youtubeArtist({ name }).catch(() => undefined);
+    if (!page || phraseScore(tokens(name), tokens(page.name), 0.75) < 0.8) return undefined;
+    const releases = page.shelves.filter((s) => /(?:album|álbum|single|sencillo|\bep\b)/i.test(s.title)).flatMap((s) => s.items).filter((i) => /^MPREb/.test(i.id));
+    const year = (subtitle?: string) => Number(subtitle?.match(/\b(?:19|20)\d{2}\b/)?.[0] ?? 0);
+    const latest = [...releases].sort((a, b) => year(b.subtitle) - year(a.subtitle))[0];
+    if (!latest) return undefined;
+    const list = await albumTracks({ feedId: latest.id, source: "youtube" }).catch(() => [] as QueueItem[]);
+    return list.length ? { title: latest.title, list } : undefined;
+  };
+  for (const p of platformOrder(platform)) {
+    const found = await (p === "spotify" ? fromSpotify() : fromYouTube());
+    if (found) return { ...found, source: p };
+  }
+  return undefined;
+}
+async function playLatest(name: string, platform?: Platform): Promise<string> {
+  const latest = await latestRelease(name, platform);
+  if (!latest) return playTop(name, platform);
+  return playbackResult(() => player.playList(latest.list), `Lo más nuevo de ${name}: «${latest.title}»`, fallbackNote(platform, latest.source));
+}
+
+/** "Mis favoritas": the saved songs, shuffled. */
+async function playSaved(): Promise<string> {
+  const saved = (await db.tracks.toArray()).filter((t) => t.saved && !longForm(t));
+  if (!saved.length) return "Aún no tienes canciones guardadas";
+  return playbackResult(() => player.playList(shuffled(saved).slice(0, 100)), "Tus guardadas en aleatorio");
+}
+
+/** "Lo que escuché ayer": the songs that played then (half a minute or more), in the order they played. */
+async function playHistory(when: "yesterday" | "today" | "recent"): Promise<string> {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const [from, to] = when === "yesterday" ? [today - 86_400_000, today] : when === "today" ? [today, Date.now()] : [Date.now() - 86_400_000, Date.now()];
+  const entries = await db.history.where("at").between(from, to, true, false).toArray().catch(() => []);
+  const ids = [...new Set(entries.filter((e) => e.seconds >= 30).sort((a, b) => a.at - b.at).map((e) => e.trackId))];
+  const found: (QueueItem | undefined)[] = await db.tracks.bulkGet(ids.slice(-60)).catch(() => []);
+  const list = found.filter((t): t is QueueItem => !!t);
+  if (!list.length) return when === "yesterday" ? "No encontré lo que escuchaste ayer" : "No encontré lo que estabas escuchando";
+  return playbackResult(() => player.playList(list), when === "yesterday" ? "Lo que escuchaste ayer" : "Lo que estabas escuchando");
+}
+
+/**
+ * Tells the speech recognizer which names to expect (up to 470): the artists listened to most, the
+ * saved and most played songs, the albums and the playlists.
+ */
 export async function updateVoiceHints() {
   if (!isNative) return;
-  const [tracks, playlists] = await Promise.all([db.tracks.toArray(), db.playlists.toArray()]);
-  const count = new Map<string, number>();
-  for (const t of tracks) { const a = lead(t.artist); if (a) count.set(a, (count.get(a) ?? 0) + (t.saved ? 3 : 1)); }
-  const artists = [...count.entries()].sort((a, b) => b[1] - a[1]).map(([a]) => a).slice(0, 150);
-  const lists = playlists.map((p) => p.title).filter((t) => t && t.length < 50).slice(0, 50);
-  await Voice.setVoiceHints({ hints: [...artists, ...lists] }).catch(() => {});
+  const names = hintNames(await loadVoiceLibrary());
+  const hints = [...new Set([...names.artists, ...names.songs, ...names.albums, ...names.playlists])].slice(0, 470);
+  await Voice.setVoiceHints({ hints }).catch(() => {});
 }
 
 /** Concerts, full albums and hour-long mixes: not what "pon a X" means. */
@@ -385,7 +843,7 @@ async function artistSongs(name: string, platform: Platform): Promise<QueueItem[
     const found = await Auth.spotifyRequest({ path: "/search?type=track&limit=10&q=" + encodeURIComponent(`artist:"${name}"`) }).catch(() => undefined);
     songs = (found?.data?.tracks?.items ?? []).filter(Boolean).map(spotifyTrack);
   } else songs = await songsOn("youtube", name);
-  return songs.filter((t) => !longForm(t) && creditedArtists(t.artist).some((a) => similarity(a, name) > 0.8));
+  return songs.filter((t) => !longForm(t) && (creditedArtists(t.artist).some((a) => similarity(a, name) > 0.8) || byArtist(t, name)));
 }
 
 function interleaveTwo<T>(a: T[], b: T[]) {

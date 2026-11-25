@@ -60,13 +60,18 @@ class LocalIntentPlugin : Plugin() {
     /** Artist and playlist names the speech recognizer should expect (Android 13+ biasing). */
     @PluginMethod fun setVoiceHints(call: PluginCall) {
         val array = call.getArray("hints") ?: JSArray()
-        VoiceHints.save(context, (0 until minOf(array.length(), 200)).mapNotNull { runCatching { array.getString(it).take(60) }.getOrNull() })
+        VoiceHints.save(context, (0 until minOf(array.length(), VoiceHints.MAX_SAVED)).mapNotNull { runCatching { array.getString(it).take(60) }.getOrNull() })
         call.resolve()
     }
     /** "Ok MURMUR": state, and turning it on (needs the microphone; must start while MURMUR is in front). */
     @PluginMethod fun wakeWordStatus(call: PluginCall) {
         call.resolve(JSObject().put("enabled", WakeWordService.enabled(context)).put("running", WakeWordService.running)
-            .put("model", WakeWordModel.available(context)))
+            .put("model", WakeWordModel.available(context)).put("mode", WakeWordService.mode(context)))
+    }
+    /** When «Ok MURMUR» may open the microphone: "music" (on screen or with music) or "screen" (only on screen). */
+    @PluginMethod fun setWakeMode(call: PluginCall) {
+        WakeWordService.setMode(context, call.getString("mode") ?: "music")
+        call.resolve(JSObject().put("mode", WakeWordService.mode(context)))
     }
     @PluginMethod fun setWakeWord(call: PluginCall) { activity.runOnUiThread {
         val enabled = call.getBoolean("enabled") ?: false

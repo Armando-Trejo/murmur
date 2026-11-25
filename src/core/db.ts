@@ -5,7 +5,9 @@ export class HybridDatabase extends Dexie {
   constructor(name = 'HybridSound') { super(name); this.version(1).stores({ tracks: 'id,source,artist,*tags', playlists: 'id,source', playlist_overrides: '++id,spotify_playlist_id,trackId', history: '++id,trackId,at', affinity: 'tag', settings: 'key' }); }
 }
 export const db = new HybridDatabase();
-export async function saveTrack(track: QueueItem) { await db.tracks.put({ ...track, saved: true }); }
+/** "Added" date of a song written to the library: kept when it was already there, `at` when it is new (2.17). */
+export function addedStamp(existing: QueueItem | undefined, at: number) { return existing && existing.saved !== false ? existing.addedAt : at; }
+export async function saveTrack(track: QueueItem) { const existing = await db.tracks.get(track.id); await db.tracks.put({ ...track, saved: true, addedAt: addedStamp(existing, Date.now()) }); }
 export async function addToPlaylist(playlistId: string, track: QueueItem, position?: number) {
   await db.transaction('rw', [db.tracks, db.playlists, db.playlist_overrides], async () => {
     await db.tracks.put(track); const playlist = await db.playlists.get(playlistId); if (!playlist) throw new Error('La playlist ya no existe.');

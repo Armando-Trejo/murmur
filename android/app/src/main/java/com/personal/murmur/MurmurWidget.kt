@@ -214,6 +214,10 @@ object MurmurWidget {
         views.setOnClickPendingIntent(R.id.murmur_widget_previous, broadcast(context, ACTION_PREVIOUS, 4111))
         views.setOnClickPendingIntent(R.id.murmur_widget_play, broadcast(context, ACTION_TOGGLE, 4112))
         views.setOnClickPendingIntent(R.id.murmur_widget_next, broadcast(context, ACTION_NEXT, 4113))
+        // Talk to MURMUR without leaving the microphone on: one tap opens the voice capture.
+        if (!compact) views.setOnClickPendingIntent(R.id.murmur_widget_voice, android.app.PendingIntent.getActivity(context, 4114,
+            VoiceTriggerManager.intent(context, "widget").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT))
         views.setOnClickPendingIntent(android.R.id.background, activity(context, player = true))
         return views
     }

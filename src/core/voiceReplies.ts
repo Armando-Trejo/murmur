@@ -9,6 +9,6 @@ export function spokenReply(answer: string): string | undefined {
   const text = answer.trim();
   if (!text || AUDIBLE.test(text)) return undefined;
   // "Reproduciendo X" / "Mix de X": the music says it; a short confirmation is enough.
-  if (/^(?:Reproduciendo|Mix de|Álbum|Música|Mix por vibra)/.test(text)) return undefined;
+  if (/^(?:Reproduciendo|Mix de|Otra de|Lo mejor de|Lo más nuevo de|Tus guardadas|Lo que escuchaste|Lo que estabas escuchando|Álbum|Música|Mix por vibra)/.test(text)) return undefined;
   return text.replace(/^Error: /, "");
 }

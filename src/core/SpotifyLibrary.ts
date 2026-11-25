@@ -1,5 +1,5 @@
 import { Auth } from "../native";
-import { db } from "./db";
+import { addedStamp, db } from "./db";
 import { spotifyTrack } from "./DiscoveryEngine";
 import type { Playlist, QueueItem } from "./types";
 
@@ -65,13 +65,16 @@ export async function syncSpotifyLibrary(
   };
   const importedIds = new Set<string>();
   async function commit(playlist: Playlist, items: QueueItem[]) {
+    const now = Date.now();
     await db.transaction("rw", [db.tracks, db.playlists], async () => {
-      for (const track of items) {
+      for (const [index, track] of items.entries()) {
         const existing = await db.tracks.get(track.id);
         await db.tracks.put({
           ...existing,
           ...track,
           tags: [...new Set([...(existing?.tags || []), ...track.tags])],
+          // Liked songs arrive newest first: the first one gets the latest "added" date.
+          addedAt: addedStamp(existing, now - index),
         });
         importedIds.add(track.id);
       }

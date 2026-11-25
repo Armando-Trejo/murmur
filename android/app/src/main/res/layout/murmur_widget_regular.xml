@@ -98,6 +98,17 @@
                     android:padding="9dp"
                     android:scaleType="fitCenter"
                     android:src="@drawable/ic_murmur_next" />
+
+                <ImageButton
+                    android:id="@+id/murmur_widget_voice"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/murmur_widget_button_bg"
+                    android:contentDescription="@string/murmur_widget_voice"
+                    android:padding="9dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/murmur_widget_mic" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>
