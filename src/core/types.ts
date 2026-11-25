@@ -46,6 +46,12 @@ export interface QueueItem extends CustomArtwork {
   smart?: boolean;
   /** Added because the queue was about to end, so music never stops; stays when shuffle is turned off. */
   continuation?: boolean;
+  /** The mood this song was picked for, as the presenter says it ("algo triste"). */
+  mood?: string;
+  /** Key of that mood (moods.ts). */
+  moodKey?: string;
+  /** The listener asked for the mood ("pon algo triste"): the endless queue keeps it instead of rotating. */
+  moodAsked?: boolean;
 }
 export interface Playlist extends CustomArtwork {
   kind?: "playlist" | "album";

@@ -33,7 +33,6 @@ import {
   Home,
   Search,
   Library,
-  Link2,
   Play,
   Pause,
   SkipBack,
@@ -146,7 +145,7 @@ import {
   saveRecentSearches,
 } from "./core/recentSearches";
 import { APP_VERSION } from "./config";
-import { BarChart3, Clock3, History, Vibrate } from "lucide-react";
+import { BarChart3, Clock3, History, MoreHorizontal, Vibrate } from "lucide-react";
 import {
   LibraryResults,
   LibrarySearchBox,
@@ -202,7 +201,8 @@ const tabs = [
   { id: "home", label: "Inicio", icon: Home },
   { id: "search", label: "Buscar", icon: Search },
   { id: "library", label: "Tu Biblioteca", icon: Library },
-  { id: "connections", label: "Conexiones", icon: Link2 },
+  // Everything else lives here: accounts, sound, voice. Only the ⋯ icon in the bar.
+  { id: "connections", label: "Opciones", icon: MoreHorizontal, iconOnly: true },
 ];
 const mixNames = {
   daily: "Daily Hybrid Mix",
@@ -2339,12 +2339,15 @@ export default function App() {
           </div>
         )}
         {tab === "connections" && (
-          <div className="page connections">
+          <div className="page connections options">
             <div className="page-title">
-              <h1>Tus dos mundos</h1>
-              <p>Conecta tus cuentas. Conserva el control.</p>
+              <h1>Opciones</h1>
+              <p>Tus cuentas, tu sonido y tu voz.</p>
             </div>
             <AppearanceSettings appearance={appearance} notify={notify} />
+            <div className="section-heading">
+              <h2>Tus cuentas</h2>
+            </div>
             <ConnectionsPanel
               status={status}
               onStatus={setStatus}
@@ -2672,6 +2675,8 @@ export default function App() {
               key={t.id}
               className={tab === t.id ? "selected" : ""}
               aria-current={tab === t.id ? "page" : undefined}
+              aria-label={"iconOnly" in t && t.iconOnly ? t.label : undefined}
+              data-icon-only={"iconOnly" in t && t.iconOnly ? "" : undefined}
               onClick={() => {
                 setTab(t.id);
               }}
@@ -2683,7 +2688,8 @@ export default function App() {
                       transition={{ type: "spring", stiffness: 580, damping: 43, mass: 0.75 }} />)}
                 <t.icon size={22} />
               </span>
-              <span>{t.label}</span>
+              {/* The ⋯ tab keeps the label's room (hidden) so its icon lines up with the others. */}
+              <span className={"iconOnly" in t && t.iconOnly ? "nav-label-ghost" : undefined}>{t.label}</span>
             </button>
           ))}
         </nav>

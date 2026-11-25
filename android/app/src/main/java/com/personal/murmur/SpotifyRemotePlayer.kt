@@ -39,7 +39,7 @@ class SpotifyRemotePlayer(
                 }
                 override fun onFailure(error: Throwable) {
                     pendingCalls.remove(pending)
-                    if (pending.isActive) pending.resumeWithException(ProviderFailure("SPOTIFY_REMOTE_AUTH_REQUIRED",403,"spotify","playback","Spotify no permitió activar su reproductor. Comprueba Android, paquete y huella de firma en Spotify for Developers (datos en Conexiones → Configuración de Spotify). También puedes abrir Spotify y reintentar con Connect."))
+                    if (pending.isActive) pending.resumeWithException(ProviderFailure("SPOTIFY_REMOTE_AUTH_REQUIRED",403,"spotify","playback","Spotify no permitió activar su reproductor. Comprueba Android, paquete y huella de firma en Spotify for Developers (datos en Opciones (⋯) → Configuración de Spotify). También puedes abrir Spotify y reintentar con Connect."))
                 }
             })
         } } } catch (_: TimeoutCancellationException) { throw ProviderFailure("SPOTIFY_REMOTE_TIMEOUT",408,"spotify","playback","Spotify no respondió al iniciar su reproductor. Revisa que tenga sesión iniciada y vuelve a intentarlo.") }

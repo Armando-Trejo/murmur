@@ -200,11 +200,20 @@ class YouTubeAudioPlugin : Plugin() {
             SpokenReplies.speak(context, call.getString("sample") ?: "Hola, así sueno. Ahora suena Afuera, de Caifanes.")
         call.resolve()
     }
+    /** Says a sample with the presenter's woman's or man's voice. */
+    @PluginMethod fun presenterSample(call: PluginCall) {
+        SpokenReplies.sample(context, call.getString("gender") ?: VoiceGender.FEMALE)
+        call.resolve()
+    }
     /** Spoken answers to voice commands (on by default) and the presenter between songs (off by default). */
     @PluginMethod fun voicePrefs(call: PluginCall) {
         call.getBoolean("replies")?.let { SpokenReplies.setReplies(context, it) }
         call.getBoolean("presenter")?.let { SpokenReplies.setPresenter(context, it) }
-        call.resolve(JSObject().put("replies", SpokenReplies.repliesEnabled(context)).put("presenter", SpokenReplies.presenterEnabled(context)))
+        call.getString("host")?.let { SpokenReplies.setHost(context, it) }
+        call.getInt("every")?.let { SpokenReplies.setEvery(context, it) }
+        call.getBoolean("moods")?.let { SpokenReplies.setMoods(context, it) }
+        call.resolve(JSObject().put("replies", SpokenReplies.repliesEnabled(context)).put("presenter", SpokenReplies.presenterEnabled(context))
+            .put("host", SpokenReplies.host(context)).put("every", SpokenReplies.every(context)).put("moods", SpokenReplies.moodsEnabled(context)))
     }
     /** Silent copy of the backup in Descargas/MURMUR (survives uninstalling); no picker, no permission. */
     @PluginMethod fun saveAutoBackup(call: PluginCall) = async(call) {

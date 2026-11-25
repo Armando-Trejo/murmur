@@ -26,6 +26,7 @@ import {
   titleVariants, type LibraryHit, type VoiceLibrary, type Want,
 } from "./voiceLibrary";
 import { offerVoiceChoices } from "./voiceChoices";
+import { moodByKey, type Mood } from "./moods";
 
 async function playbackResult(action: () => Promise<unknown>, message: string, note = "") {
   await action();
@@ -244,7 +245,7 @@ async function run(intent: ReturnType<typeof parseVoiceIntent>, save: (track: Qu
       return (await resolveMusic([{ said: intent.query, intent, index: 0, asked: true }], {})) ?? "No te entendí";
     case "vibe": {
       // The catalogue knows moods far better than the library's few tags; tags are the offline backup.
-      const fromCatalogue = await playVibeFromCatalogue(intent.query);
+      const fromCatalogue = await playVibeFromCatalogue(intent.query, intent.mood, intent.extra);
       if (!fromCatalogue.startsWith("No encontré")) return fromCatalogue;
       const tracks = await db.tracks.toArray();
       if (!tracks.length) return fromCatalogue;
@@ -323,10 +324,50 @@ export async function vibeFromCatalogue(query: string): Promise<{ tracks: QueueI
   return { tracks: ranked, list: lists[0]?.title };
 }
 
-async function playVibeFromCatalogue(query: string) {
-  const { tracks, list } = await vibeFromCatalogue(query);
+/** The chips above the owner's Inicio, read once every few hours. */
+let chipCache: { at: number; chips: { title: string; params: string }[] } | undefined;
+async function moodChip(mood: Mood) {
+  if (!chipCache || Date.now() - chipCache.at > 6 * 3_600_000 || !chipCache.chips.length)
+    chipCache = { at: Date.now(), chips: (await Auth.youtubeHomeChips()).chips ?? [] };
+  return chipCache.chips.find((c) => mood.chip.test(normalize(c.title)));
+}
+
+/**
+ * A mood from the owner's own algorithm: YouTube Music's Inicio filtered by its chip for the mood
+ * ("Triste", "Fiesta"…) is what YouTube picks for this person in that mood — their quick picks and
+ * their mixes, not a generic playlist. Songs from those shelves first, then two of the personal mixes
+ * there; the general catalogue only fills in when that falls short.
+ */
+export async function moodForYou(mood: Mood, extra = ""): Promise<{ tracks: QueueItem[]; list?: string }> {
+  if (!isNative) return { tracks: [] };
+  let mine: QueueItem[] = [];
+  let list: string | undefined;
+  const chip = extra ? undefined : await moodChip(mood).catch(() => undefined);
+  if (chip) {
+    const shelves = (await Auth.youtubeHome({ params: chip.params }).catch(() => undefined))?.shelves ?? [];
+    const direct = shelves.flatMap((s) => s.items.flatMap((i) => (i.track ? [i.track] : [])));
+    const mixes = shelves.flatMap((s) => s.items.filter((i) => !i.track && !i.artistId && i.link)).slice(0, 2);
+    const pools = await Promise.all(mixes.map((m) => Auth.youtubeCollection({ id: m.id, personalized: true }).then((c) => c.tracks ?? []).catch(() => [] as QueueItem[])));
+    mine = oncePerSong([...direct, ...interleaveTwo(pools[0] ?? [], pools[1] ?? [])].filter((t) => !longForm(t)));
+    list = "tu " + chip.title + " de YouTube Music";
+  }
+  if (mine.length >= 15) {
+    // Lightly shuffled so asking twice doesn't give the same order; the shelves' own order mostly kept.
+    const tracks = mine.map((t, i) => ({ t, s: -i + Math.random() * 6 })).sort((a, b) => b.s - a.s).map((x) => x.t).slice(0, 30);
+    return { tracks, list };
+  }
+  const general = await vibeFromCatalogue([mood.query, extra].filter(Boolean).join(" "));
+  const used = new Set(mine.map(songKey));
+  return { tracks: [...mine, ...general.tracks.filter((t) => !used.has(songKey(t)))].slice(0, 30), list: list ?? general.list };
+}
+
+async function playVibeFromCatalogue(query: string, moodKey?: string, extra = "") {
+  const mood = moodByKey(moodKey);
+  const { tracks, list } = mood ? await moodForYou(mood, extra) : await vibeFromCatalogue(query);
   if (!tracks.length) return "No encontré música para «" + query + "»";
-  return playbackResult(() => player.playList(tracks), "Música " + query + (list ? " · " + list : ""));
+  // Songs asked for by mood carry it: the presenter names it and the endless queue keeps it.
+  const tagged = mood ? tracks.map((t) => ({ ...t, mood: mood.spoken, moodKey: mood.key, moodAsked: true })) : tracks;
+  return playbackResult(() => player.playList(tagged), (mood ? "Poniendo " + mood.spoken : "Música " + query) + (list ? " · " + list : ""));
 }
 
 /**
@@ -362,6 +403,14 @@ const distinct = (list: (string | undefined)[]) => [...new Set(list.filter((x): 
 async function resolveMusic(alts: Alt[], trace: Trace, strict = false): Promise<string | undefined> {
   const first = alts[0].intent;
   const platform = platformOf(first);
+  // Said this way before and corrected with a tap («¿No era esta?»): what the owner chose then.
+  if (!strict && ["track", "request", "album", "artist"].includes(first.type)) {
+    const known = await learnedOption(alts).catch(() => undefined);
+    if (known) {
+      Object.assign(trace, { alt: known.alt, pick: `${known.kind}: ${known.label}`, from: "learned", confidence: 1 });
+      return playOption(known, platform);
+    }
+  }
   switch (first.type) {
     case "artist":
     case "top":
@@ -577,7 +626,7 @@ async function songsFor(o: Option, platform?: Platform): Promise<QueueItem[]> {
     }
   }
 }
-function offer(heard: string, options: Option[], played: boolean, platform: Platform | undefined, trace: Trace) {
+function offer(heard: string, options: Option[], played: boolean, platform: Platform | undefined, trace: Trace, alts: Alt[] = []) {
   const picks = options.slice(0, 3);
   if (!picks.length) return;
   trace.choices = picks.length;
@@ -586,7 +635,41 @@ function offer(heard: string, options: Option[], played: boolean, platform: Plat
     choices: picks.map(choiceItem),
     kinds: picks.map((o) => KIND_LABEL[o.kind]),
     expand: (i) => songsFor(picks[i], platform),
+    // The tap teaches MURMUR what these words meant: next time they play it directly.
+    chosen: (i) => void learnChoice(alts.map((a) => musicText(a.intent)), picks[i]).then(() => updateVoiceHints()).catch(() => {}),
   });
+}
+
+/** Words → what the owner picked for them among the choices, so the same words play it next time. */
+const LEARNED_KEY = "voice:learned";
+interface Learned { option: Option; at: number }
+async function learned(): Promise<Record<string, Learned>> {
+  return ((await db.settings.get(LEARNED_KEY).catch(() => undefined))?.value as Record<string, Learned> | undefined) ?? {};
+}
+/** Remembers the choice for every way the recognizer wrote the request (the 120 latest kept). */
+export async function learnChoice(phrases: string[], option: Option) {
+  const keys = distinct(phrases.map(normalize)).filter((k) => k.length >= 2);
+  if (!keys.length) return;
+  const all = await learned();
+  // A plain copy (no functions, no huge album pages) that survives the database.
+  const plain = JSON.parse(JSON.stringify({ ...option, album: option.album ? { ...option.album, result: undefined } : undefined })) as Option;
+  for (const key of keys) all[key] = { option: plain, at: Date.now() };
+  const kept = Object.entries(all).sort((a, b) => b[1].at - a[1].at).slice(0, 120);
+  await db.settings.put({ key: LEARNED_KEY, value: Object.fromEntries(kept) });
+}
+/** The learned choice for what was said, as a sure option of the alternative that said it. */
+async function learnedOption(alts: Alt[]): Promise<Option | undefined> {
+  const all = await learned();
+  for (const a of alts) {
+    const hit = all[normalize(musicText(a.intent))];
+    if (hit) return { ...hit.option, alt: a.index, score: 1, base: 1, boost: 0 };
+  }
+  return undefined;
+}
+/** Names the owner taught by choosing them: the recognizer should expect them first. */
+async function learnedNames() {
+  return Object.values(await learned()).map((l) => l.option.kind === "track" && l.option.track ? l.option.track.title : l.option.kind === "artist" ? l.option.name : l.option.album?.title ?? l.option.label)
+    .filter((n): n is string => !!n);
 }
 
 /** Plays the best option if it is good enough, and offers the close ones («¿No era esta?»). */
@@ -600,14 +683,14 @@ async function decide(options: Option[], ctx: { alts: Alt[]; platform?: Platform
     if (ctx.strict) return undefined;
     // Not sure enough to play anything: the closest options, one tap away.
     const close = options.filter((o) => o.score >= 0.35);
-    offer(ctx.alts[0].said, close, false, ctx.platform, ctx.trace);
+    offer(ctx.alts[0].said, close, false, ctx.platform, ctx.trace, ctx.alts);
     if (top) ctx.trace.pick = "none (" + ctx.trace.pick + ")";
     return close.length ? `No estoy seguro de qué es «${query}». ¿Es alguna de estas?` : `No encontré «${query}» en tu música, Spotify ni YouTube`;
   }
   const answer = await playOption(best, ctx.platform);
   const rest = options.filter((o) => o !== best && o.score >= 0.45);
   const unsure = confidence(best) < (best.from === "library" ? VOICE_CONFIDENCE.library : VOICE_CONFIDENCE.sure);
-  if (rest.length && (unsure || confidence(rest[0]) >= confidence(best) - 0.04)) offer(heardAs(best), rest, true, ctx.platform, ctx.trace);
+  if (rest.length && (unsure || confidence(rest[0]) >= confidence(best) - 0.04)) offer(heardAs(best), rest, true, ctx.platform, ctx.trace, ctx.alts);
   return answer;
 }
 
@@ -827,7 +910,8 @@ async function playHistory(when: "yesterday" | "today" | "recent"): Promise<stri
 export async function updateVoiceHints() {
   if (!isNative) return;
   const names = hintNames(await loadVoiceLibrary());
-  const hints = [...new Set([...names.artists, ...names.songs, ...names.albums, ...names.playlists])].slice(0, 470);
+  const taught = await learnedNames().catch(() => [] as string[]);
+  const hints = [...new Set([...taught, ...names.artists, ...names.songs, ...names.albums, ...names.playlists])].slice(0, 470);
   await Voice.setVoiceHints({ hints }).catch(() => {});
 }
 

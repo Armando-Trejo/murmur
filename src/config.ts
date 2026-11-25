@@ -2,7 +2,7 @@ import pkg from "../package.json";
 
 /**
  * The Spotify app MURMUR signs in with. It comes from `.env.local` (VITE_SPOTIFY_CLIENT_ID, not in
- * the repository) at build time; anyone can still use their own in Conexiones › Opciones avanzadas.
+ * the repository) at build time; anyone can still use their own in Opciones › Opciones avanzadas.
  * A Client ID is a public identifier (PKCE, no secret), but it is kept out of the repository.
  */
 export const SPOTIFY_CLIENT_ID: string = (import.meta.env?.VITE_SPOTIFY_CLIENT_ID as string | undefined)?.trim() ?? "";

@@ -105,7 +105,7 @@ class AuthBridgePlugin : Plugin() {
             .setPackage("com.spotify.music").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         try { activity.startActivity(intent) }
         catch (_: android.content.ActivityNotFoundException) {
-            throw ProviderFailure("SPOTIFY_APP_NOT_INSTALLED", 404, "spotify", "playback", "Instala Spotify o elige otro modo en Conexiones.")
+            throw ProviderFailure("SPOTIFY_APP_NOT_INSTALLED", 404, "spotify", "playback", "Instala Spotify o elige otro modo en Opciones (⋯).")
         }
     }
     @PluginMethod fun spotifyAndroidSetup(call: PluginCall) = async(call) { withContext(Dispatchers.IO) {
@@ -294,7 +294,11 @@ class AuthBridgePlugin : Plugin() {
         }
     }
     @PluginMethod fun youtubeHome(call: PluginCall) = async(call) {
-        withContext(Dispatchers.IO) { JSObject().put("shelves", youtube().home()) }
+        val params = call.getString("params")?.takeIf { it.matches(Regex("[A-Za-z0-9_%=-]{4,400}")) }
+        withContext(Dispatchers.IO) { JSObject().put("shelves", youtube().home(params)) }
+    }
+    @PluginMethod fun youtubeHomeChips(call: PluginCall) = async(call) {
+        withContext(Dispatchers.IO) { JSObject().put("chips", youtube().homeChips()) }
     }
 
     @PluginMethod fun youtubeLibrary(call: PluginCall) = async(call) { withContext(Dispatchers.IO) { val lists=youtube().playlists(); prefs.edit().putBoolean("youtube_verified",true).apply(); JSObject().put("playlists",lists) } }

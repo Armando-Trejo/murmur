@@ -56,6 +56,7 @@ export function VoiceChoices() {
       await player.playList(list);
       const failed = player.getSnapshot().error;
       if (failed) throw new Error(failed);
+      detail.chosen?.(index);
       close();
     } catch (e) {
       setBusy(undefined);

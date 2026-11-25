@@ -315,6 +315,7 @@ class WakeWordService : Service() {
         var hangover = 0
         // Background level (music left after echo cancelling, room noise): speech must rise above it.
         var floor = 300.0
+        var gain = 1.0
         var frames = 0
         var verifyAt = -1
         var quietUntil = 0L
@@ -328,10 +329,14 @@ class WakeWordService : Service() {
                 var sum = 0.0
                 for (i in 0 until read) sum += buffer[i] * buffer[i].toDouble()
                 val rms = kotlin.math.sqrt(sum / read)
-                // ~ -32 dBFS in silence: a voice within arm's reach, not room noise; over music, clearly above it.
-                val loud = rms > maxOf(800.0, floor * 1.8)
+                // A voice from across the room (~ -40 dBFS) in a quiet room; over music, clearly above it.
+                val music = echo || musicPlaying()
+                val loud = rms > maxOf(if (music) 600.0 else 300.0, floor * if (music) 1.4 else 1.6)
                 floor = if (rms < floor) floor * 0.8 + rms * 0.2 else floor * 0.995 + rms * 0.005
-                val chunk = buffer.copyOf(read)
+                // A faraway voice is brought up to a normal level before Vosk hears it (it decodes
+                // quiet speech poorly); eased so one loud frame doesn't pump the level.
+                if (loud) gain = gain * 0.6 + (2_500.0 / rms).coerceIn(1.0, 6.0) * 0.4
+                val chunk = amplified(buffer, read, gain)
                 recent.addLast(chunk); if (recent.size > 25) recent.removeFirst()
                 if (loud) hangover = 12 // keep decoding 1.2 s after the last loud frame
                 var spotted = false
@@ -349,14 +354,20 @@ class WakeWordService : Service() {
                 if (verifyAt in 0..frames) {
                     verifyAt = -1
                     recognizer.reset(); hangover = 0; preroll.clear()
-                    if (confirm(model, recent.toList(), echo)) {
+                    val checkStarted = android.os.SystemClock.elapsedRealtime()
+                    // Over music or from far away the voiceprint comes out blurred: a little more leeway.
+                    val confirmed = confirm(model, recent.toList(), echo || musicPlaying() || gain > 2.5)
+                    if (android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG))
+                        android.util.Log.d(LOG_TAG, "wake timing check=${android.os.SystemClock.elapsedRealtime() - checkStarted}ms")
+                    if (confirmed) {
+                        commandStarted = android.os.SystemClock.elapsedRealtime()
                         lastWake = now
                         handler.post { captureCommand() }
                     } else quietUntil = now + 1_500
                 }
                 // Every 2 s: stop if listening no longer helps; reopen if the music started or stopped.
                 if (frames % 20 == 0) {
-                    if (android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG)) android.util.Log.d(LOG_TAG, "wake mic echo=$echo aec=${effects.size} rms=${rms.toInt()} floor=${floor.toInt()}")
+                    if (android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG)) android.util.Log.d(LOG_TAG, "wake mic echo=$echo aec=${effects.size} rms=${rms.toInt()} floor=${floor.toInt()} gain=${String.format(java.util.Locale.ROOT, "%.1f", gain)}")
                     if (hangover == 0 && verifyAt < 0) {
                         if (!useful()) break
                         if (wantsEchoCancel() != echo) { reopen = true; break }
@@ -374,6 +385,13 @@ class WakeWordService : Service() {
         }
         return reopen
     }
+
+    private fun amplified(buffer: ShortArray, read: Int, gain: Double): ShortArray {
+        if (gain <= 1.05) return buffer.copyOf(read)
+        return ShortArray(read) { i -> (buffer[i] * gain).toInt().coerceIn(-32_768, 32_767).toShort() }
+    }
+
+    private fun musicPlaying() = runCatching { getSystemService(android.media.AudioManager::class.java).isMusicActive }.getOrDefault(false)
 
     /** Feeds the spotter; true when what it has so far contains the phrase. */
     private fun feed(recognizer: Recognizer, samples: ShortArray): Boolean =
@@ -424,6 +442,9 @@ class WakeWordService : Service() {
         worker?.join(400)
     }
 
+    /** When the phrase was confirmed (debug timing only). */
+    @Volatile private var commandStarted = 0L
+
     /** Each capture gets a token so a late callback from an abandoned recognizer is ignored. */
     private var attempt = 0
 
@@ -438,13 +459,13 @@ class WakeWordService : Service() {
             if (held || capturing) return
             capturing = true
             pauseListening()
-            VoiceTriggerManager.beginListening()
+            VoiceTriggerManager.beginListening(this)
             // The app shows "Te escucho…" so the person knows the phrase was understood.
             NativeEvents.emit("onVoiceListening", JSObject().put("listening", true).put("source", "wake"))
             handler.postDelayed({ if (capturing) finishCommand(null, "No escuché un comando después de «Ok MURMUR».") }, 14_000)
         }
         val token = ++attempt
-        val local = !system && Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+        val local = !system && VoiceHints.preferOnDevice(this)
         if (!local && !SpeechRecognizer.isRecognitionAvailable(this)) { localCommand(); return }
         val recognizer = try {
             if (local && Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(this) else SpeechRecognizer.createSpeechRecognizer(this)
@@ -453,6 +474,8 @@ class WakeWordService : Service() {
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onResults(results: Bundle?) {
                 if (token != attempt) return
+                if (android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG))
+                    android.util.Log.d(LOG_TAG, "wake timing command=${android.os.SystemClock.elapsedRealtime() - commandStarted}ms online=${!local}")
                 finishCommand(VoiceHints.join(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)), null)
             }
             override fun onError(error: Int) {

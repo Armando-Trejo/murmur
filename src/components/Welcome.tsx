@@ -60,7 +60,7 @@ export function Welcome({ notify, youtubeConnected, spotifyConnected, onDone }: 
         notify("Acepta en Spotify y vuelve a MURMUR.");
       }
     } catch (error) {
-      notify((error as Error).message || "No se pudo conectar. Puedes hacerlo después en Conexiones.", "error");
+      notify((error as Error).message || "No se pudo conectar. Puedes hacerlo después en Opciones (⋯).", "error");
     } finally {
       setBusy("");
     }

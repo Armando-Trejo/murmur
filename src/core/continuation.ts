@@ -3,6 +3,7 @@ import { magicPicks } from "./magicShuffle";
 import { songKey } from "./blendMixes";
 import { youtubeTwin } from "./spotifyBridge";
 import type { QueueItem } from "./types";
+import type { Mood } from "./moods";
 
 /** When this many songs or fewer remain after the current one, MURMUR adds more. */
 export const CONTINUE_WHEN_LEFT = 2;
@@ -53,4 +54,23 @@ export async function recentlyPlayed(limit = 40): Promise<QueueItem[]> {
   const tracks = (await db.tracks.bulkGet(ids)).filter((t): t is QueueItem => !!t);
   // A light shuffle so the same order doesn't come back every time.
   return tracks.map((t, i) => ({ t, r: i + Math.random() * 8 })).sort((a, b) => a.r - b.r).map((x) => x.t);
+}
+
+/**
+ * A block of songs for a mood, from your own YouTube Music Inicio for it (moodForYou), never one already in the queue. Each song carries the mood, so the presenter can name it.
+ * `asked`: the listener asked for this mood, and the next blocks keep it.
+ */
+export async function moodPicks(mood: Mood, queue: QueueItem[], count: number, asked: boolean): Promise<QueueItem[]> {
+  // Loaded on demand: the voice router depends on the player.
+  const { moodForYou } = await import("./VoiceCommandRouter");
+  const used = new Set(queue.map(songKey));
+  const { tracks } = await moodForYou(mood).catch(() => ({ tracks: [] as QueueItem[] }));
+  const out: QueueItem[] = [];
+  for (const t of tracks) {
+    const key = songKey(t);
+    if (used.has(key) || out.length >= count) continue;
+    used.add(key);
+    out.push({ ...t, mood: mood.spoken, moodKey: mood.key, moodAsked: asked || undefined, continuation: true });
+  }
+  return out;
 }

@@ -131,7 +131,7 @@ export function AlbumResults({
       {variant === "grid" && !!current?.failed?.length && albums.length > 0 && (
         <p className="help-copy album-partial">
           Sin resultados de {current.failed.join(" y ")}
-          {current.failed.includes("Spotify") ? ": conecta tu cuenta en Conexiones." : "."}
+          {current.failed.includes("Spotify") ? ": conecta tu cuenta en Opciones (⋯)." : "."}
         </p>
       )}
     </section>

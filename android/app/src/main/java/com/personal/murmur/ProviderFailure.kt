@@ -8,7 +8,7 @@ object ProviderFailures {
         val spotify = provider == "spotify"
         val pair = when {
             status == 429 -> "RATE_LIMITED" to "${if (spotify) "Spotify" else "YouTube"} limitó las solicitudes. Espera unos minutos y vuelve a intentarlo."
-            spotify && operation == "web_token" && status in listOf(400, 401, 403, 404) -> "SPOTIFY_OAUTH_REQUIRED" to "Spotify bloqueó el acceso por sesión web. Autoriza Spotify con OAuth desde Conexiones; volver a guardar la cookie no concede permisos de biblioteca."
+            spotify && operation == "web_token" && status in listOf(400, 401, 403, 404) -> "SPOTIFY_OAUTH_REQUIRED" to "Spotify bloqueó el acceso por sesión web. Autoriza Spotify con OAuth desde Opciones (⋯); volver a guardar la cookie no concede permisos de biblioteca."
             status == 401 || (status == 400 && operation == "oauth_token") -> "SESSION_EXPIRED" to "La autorización de ${if (spotify) "Spotify" else "YouTube"} caducó. Vuelve a autorizar la cuenta."
             spotify && reason == "PREMIUM_REQUIRED" -> "SPOTIFY_PREMIUM_REQUIRED" to "Spotify exige una cuenta Premium para controlar la reproducción. La búsqueda y el audio de YouTube siguen disponibles."
             spotify && operation == "playback" && status == 404 -> "SPOTIFY_NO_DEVICE" to "No hay un dispositivo Spotify disponible. Abre la app oficial, reproduce una canción y vuelve a MURMUR."

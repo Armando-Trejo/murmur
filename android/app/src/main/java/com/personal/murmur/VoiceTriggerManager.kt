@@ -14,6 +14,6 @@ object VoiceTriggerManager {
         NativeEvents.emit("onVoiceError", JSObject().put("message", "Android bloqueó la apertura en segundo plano. Usa el mosaico de voz o abre MURMUR."))
         false
     }
-    fun beginListening() { HybridMediaService.instance?.setDucking(true); SubBassFeedback.play() }
+    fun beginListening(context: Context) { HybridMediaService.instance?.setDucking(true); ListeningCue.play(context) }
     fun restoreAudio() { HybridMediaService.instance?.setDucking(false) }
 }

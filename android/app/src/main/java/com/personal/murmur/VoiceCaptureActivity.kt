@@ -46,12 +46,12 @@ class VoiceCaptureActivity : Activity(), RecognitionListener {
         else finishResult(null, VoiceRecognitionPolicy.message(9))
     }
     private fun begin(system: Boolean = false) {
-        onDevice = !system && Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+        onDevice = !system && VoiceHints.preferOnDevice(this)
         if (!onDevice && !SpeechRecognizer.isRecognitionAvailable(this)) {
             finishResult(null, "No hay un servicio de reconocimiento activado. Actívalo en los ajustes de voz de Android."); return
         }
         try {
-            VoiceTriggerManager.beginListening()
+            VoiceTriggerManager.beginListening(this)
             recognizer = if (onDevice && Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(this) else SpeechRecognizer.createSpeechRecognizer(this)
             recognizer!!.setRecognitionListener(listener(++attempt))
             val request = VoiceHints.request(this, onDevice)

@@ -61,7 +61,7 @@ class MainActivity : BridgeActivity() {
         if (WakeWordService.enabled(this) && !WakeWordService.running) {
             val started = runCatching { WakeWordService.start(this) }.getOrDefault(false)
             if (!started && !WakeWordService.canListen(this)) NativeEvents.emit("onVoiceError", JSObject().put("message",
-                "«Ok MURMUR» está activado pero falta el permiso del micrófono. Vuelve a activarlo en Conexiones."))
+                "«Ok MURMUR» está activado pero falta el permiso del micrófono. Vuelve a activarlo en Opciones (⋯)."))
         }
     }
     override fun onStop() { visible = false; HybridMediaService.uiVisible = false; WakeWordService.appVisible = false; super.onStop() }

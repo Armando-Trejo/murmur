@@ -43,6 +43,29 @@ object YouTubePlaylistParser {
         return null
     }
 
+    /**
+     * The artist in a home row's subtitle ("Enjambre • 69 M reproducciones", "Canción • Miranda! • Sin
+     * restricciones"): the first part that is not a kind of item, a play count or a year.
+     */
+    fun homeArtist(subtitle: String): String = subtitle.split(" • ", " · ").map { it.trim() }.firstOrNull { part ->
+        part.isNotEmpty() && !part.matches(Regex("(?i)canci[oó]n|video|v[ií]deo|song|sencillo|single|ep|[aá]lbum|album|playlist|episodio")) &&
+            !part.contains(Regex("(?i)reproducci|views|vistas|visualizaci")) && !part.matches(Regex("\\d{4}"))
+    }.orEmpty()
+
+    /** The chips above Inicio: title and the browse params that filter Inicio by them. */
+    fun homeChips(data: JSONObject): JSONArray {
+        val result = JSONArray()
+        val cloud = find(data, setOf("chipCloudRenderer")) ?: return result
+        val chips = cloud.optJSONArray("chips") ?: return result
+        for (i in 0 until chips.length()) {
+            val chip = chips.optJSONObject(i)?.optJSONObject("chipCloudChipRenderer") ?: continue
+            val title = text(chip.optJSONObject("text"))
+            val params = chip.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")?.optString("params").orEmpty()
+            if (title.isNotBlank() && params.isNotBlank()) result.put(JSONObject().put("title", title).put("params", params))
+        }
+        return result
+    }
+
     fun homeShelves(data: JSONObject): JSONArray {
         val result = JSONArray()
         fun walk(value: Any?) {
@@ -102,7 +125,7 @@ object YouTubePlaylistParser {
                         } else if (video.matches(Regex("[A-Za-z0-9_-]{11}")) && seen.add(video)) {
                             val track = JSONObject().put("id", "yt:$video").put("videoId", video)
                                 .put("source", "youtube").put("title", name)
-                                .put("artist", subtitle.ifBlank { "YouTube Music" })
+                                .put("artist", homeArtist(subtitle).ifBlank { "YouTube Music" })
                                 .put("duration", -1).put("artworkUrl", artwork).put("tags", JSONArray())
                             entries.put(JSONObject().put("id", video).put("title", name)
                                 .put("subtitle", subtitle).put("artworkUrl", artwork).put("track", track))

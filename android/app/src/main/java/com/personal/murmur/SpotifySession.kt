@@ -14,7 +14,7 @@ class SpotifySession(private val prefs: SharedPreferences) {
         fun stored(context:android.content.Context)=SpotifySession(SecurePrefs.open(context,"hybrid_sessions"))
     }
     fun webToken(force:Boolean=false):String {
-        check(hasOAuth() && prefs.getString("oauth_scopes","")!!.split(' ').containsAll(listOf("streaming","user-read-email"))){"Renueva Autorizar Spotify desde Conexiones para conceder los permisos del reproductor Web. Habilita Web Playback SDK en tu aplicación de Spotify for Developers."}
+        check(hasOAuth() && prefs.getString("oauth_scopes","")!!.split(' ').containsAll(listOf("streaming","user-read-email"))){"Renueva Autorizar Spotify desde Opciones (⋯) para conceder los permisos del reproductor Web. Habilita Web Playback SDK en tu aplicación de Spotify for Developers."}
         return accessToken(force)
     }
     private var token: String? = null
@@ -49,12 +49,12 @@ class SpotifySession(private val prefs: SharedPreferences) {
         val epoch=prefs.getLong("spotify_epoch",0)
         val data = if (oauth) json(Request.Builder().url("https://accounts.spotify.com/api/token").post(FormBody.Builder().add("grant_type","refresh_token").add("refresh_token",refresh!!).add("client_id",prefs.getString("client_id","")!!).build()).build(),"oauth_token")
         else {
-            val cookie = prefs.getString("spotify_cookie", null) ?: throw ProviderFailure("SPOTIFY_OAUTH_REQUIRED",401,"spotify","authorization","Autoriza Spotify con OAuth desde Conexiones para acceder a tu biblioteca.")
+            val cookie = prefs.getString("spotify_cookie", null) ?: throw ProviderFailure("SPOTIFY_OAUTH_REQUIRED",401,"spotify","authorization","Autoriza Spotify con OAuth desde Opciones (⋯) para acceder a tu biblioteca.")
             json(Request.Builder().url("https://open.spotify.com/get_access_token?reason=transport&productType=web_player").header("Cookie",cookie).header("User-Agent","Mozilla/5.0").build(),"web_token")
         }
         check(epoch==prefs.getLong("spotify_epoch",0) && (!oauth || refresh==prefs.getString("refresh_token",null))){"La sesión de Spotify cambió. Vuelve a elegir la canción."}
         token = data.optString(if (oauth) "access_token" else "accessToken").takeIf { it.isNotBlank() }
-            ?: throw ProviderFailure("SPOTIFY_OAUTH_REQUIRED",403,"spotify","authorization","La sesión web no otorgó acceso a Spotify. Autoriza tu Client ID con OAuth desde Conexiones.")
+            ?: throw ProviderFailure("SPOTIFY_OAUTH_REQUIRED",403,"spotify","authorization","La sesión web no otorgó acceso a Spotify. Autoriza tu Client ID con OAuth desde Opciones (⋯).")
         expires = if (oauth) System.currentTimeMillis()+data.optLong("expires_in",3600)*1000 else data.optLong("accessTokenExpirationTimestampMs",System.currentTimeMillis()+300000)
         if (data.has("refresh_token")) prefs.edit().putString("refresh_token",data.getString("refresh_token")).apply()
         return token!!
@@ -63,7 +63,7 @@ class SpotifySession(private val prefs: SharedPreferences) {
     fun request(path: String, method: String = "GET", body: String = "", checking: Boolean = false): JSONObject {
         require(path.startsWith('/') && !path.startsWith("//") && !path.contains("\\") && !path.contains("..") && !path.contains('\r') && !path.contains('\n')) { "Ruta Spotify inválida" }
         require(method in listOf("GET","PUT","POST","DELETE")) { "Método inválido" }
-        if (!checking && !hasOAuth() && !prefs.getBoolean("spotify_verified",false)) throw ProviderFailure("SPOTIFY_OAUTH_REQUIRED",403,"spotify",operation(path),"La cookie guardada no autoriza la biblioteca de Spotify. Conecta tu Client ID con OAuth desde Conexiones.")
+        if (!checking && !hasOAuth() && !prefs.getBoolean("spotify_verified",false)) throw ProviderFailure("SPOTIFY_OAUTH_REQUIRED",403,"spotify",operation(path),"La cookie guardada no autoriza la biblioteca de Spotify. Conecta tu Client ID con OAuth desde Opciones (⋯).")
         fun make(force: Boolean) = Request.Builder().url("https://api.spotify.com/v1$path").header("Authorization","Bearer "+accessToken(force)).method(method,if(method=="GET") null else body.toRequestBody("application/json".toMediaType())).build()
         try { return try { json(make(false),operation(path)) } catch (error: ProviderFailure) { if(error.status==401 && hasOAuth()) json(make(true),operation(path)) else throw error } }
         catch (error: ProviderFailure) { invalidate(error); throw error }

@@ -12,6 +12,19 @@ import android.speech.RecognizerIntent
  * All alternatives travel to the app joined by new lines; the app keeps the first one it understands.
  */
 object VoiceHints {
+    /**
+     * Online recognition understands song and artist names far better and uses the biasing list;
+     * trying the offline engine first cost a failed attempt (1–2 s) whenever it lacked Spanish.
+     * The phone's own recognizer is only used without internet.
+     */
+    fun preferOnDevice(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < 31 || !android.speech.SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) return false
+        val online = runCatching {
+            val cm = context.getSystemService(android.net.ConnectivityManager::class.java)
+            cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+        }.getOrDefault(true)
+        return !online
+    }
     private const val KEY = "voice_hints"
     /** Names the app may send: top artists, saved and most played songs, albums and playlists. */
     const val MAX_SAVED = 480
@@ -32,8 +45,8 @@ object VoiceHints {
             // Words appear in the voice panel while they are being said.
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             // Let people pause mid-sentence ("ponme… la de… Bailarina") without being cut off.
-            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
-            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
+            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 900L)
+            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 700L)
         if (Build.VERSION.SDK_INT >= 33) intent.putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, ArrayList(biasing(load(context))))
         return intent
     }

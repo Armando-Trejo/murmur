@@ -42,6 +42,8 @@ class SpotifyIntegratedPlayer(private val context: Context, private val onNext: 
     private var focusHeld=false
     private var resumeAfterFocus=false
     private var voiceDucked=false
+    /** Presenter voice over the song (1 = normal). */
+    private var talkLevel=1f
     private var focusDucked=false
     private var fadeLevel=1f
     private var loaded=false
@@ -115,7 +117,7 @@ class SpotifyIntegratedPlayer(private val context: Context, private val onNext: 
             // DRM or playback failure of the official Web player on this device: let the service pick another route.
             if(code in setOf("playback_error","eme_unavailable","initialization_error") && onKeysRefused?.invoke()==true)return@post
             val message=when(code){
-                "authentication_error","http_401","http_403" -> "Spotify Web necesita una autorización válida de tu aplicación. Habilita Web Playback SDK y renueva Autorizar Spotify en Conexiones."
+                "authentication_error","http_401","http_403" -> "Spotify Web necesita una autorización válida de tu aplicación. Habilita Web Playback SDK y renueva Autorizar Spotify en Opciones (⋯)."
                 "eme_unavailable","initialization_error" -> "Este Android System WebView no permite el reproductor protegido de Spotify. Actualiza WebView y Chrome y reintenta."
                 "account_error" -> "Spotify Web no admitió esta cuenta. Comprueba Premium y los usuarios permitidos de tu aplicación de Spotify."
                 else -> "Spotify Web no pudo iniciar el audio ($code). Vuelve a elegir la canción o renueva la autorización."
@@ -131,7 +133,7 @@ class SpotifyIntegratedPlayer(private val context: Context, private val onNext: 
             "position"->positionMs=eventPosition
             "paused","stopped"->{loading=false;playing=false;output.enable(false);output.stop();if(!resumeAfterFocus)abandonFocus()}
             "end_of_track"->{loading=false;playing=false;output.enable(false);output.stop();invalidate();(onEnded?:onNext).invoke();return@post}
-            "key_refused","unavailable"->{if(type=="key_refused" && onKeysRefused?.invoke()==true){loading=true;playing=false;invalidate();return@post};loading=false;playing=false;output.enable(false);output.stop();abandonFocus();error=PlaybackException("Spotify no permitió reproducir esta pista con el motor integrado.",null,PlaybackException.ERROR_CODE_REMOTE_ERROR);NativeEvents.emit("onSpotifyEngineError",JSObject().put("trackId",track?.optString("id")).put("queueId",track?.optString("queueId")).put("message",if(type=="key_refused")"Spotify rechazó las claves del motor librespot. En Conexiones elige Integrado · Web y renueva Autorizar Spotify para usar la alternativa." else "Spotify no pudo abrir esta canción. Prueba otra pista o renueva la autorización del motor."))}
+            "key_refused","unavailable"->{if(type=="key_refused" && onKeysRefused?.invoke()==true){loading=true;playing=false;invalidate();return@post};loading=false;playing=false;output.enable(false);output.stop();abandonFocus();error=PlaybackException("Spotify no permitió reproducir esta pista con el motor integrado.",null,PlaybackException.ERROR_CODE_REMOTE_ERROR);NativeEvents.emit("onSpotifyEngineError",JSObject().put("trackId",track?.optString("id")).put("queueId",track?.optString("queueId")).put("message",if(type=="key_refused")"Spotify rechazó las claves del motor librespot. En Opciones (⋯) elige Integrado · Web y renueva Autorizar Spotify para usar la alternativa." else "Spotify no pudo abrir esta canción. Prueba otra pista o renueva la autorización del motor."))}
         };invalidate()
     } }
     fun pauseIntegrated(releaseFocus:Boolean=true) {wantPlay=false;generation.incrementAndGet();loading=false;playing=false;output.enable(false);output.stop();if(releaseFocus){resumeAfterFocus=false;abandonFocus()};if(started)scope.launch{runCatching{backend.pause()}};invalidate()}
@@ -147,9 +149,10 @@ class SpotifyIntegratedPlayer(private val context: Context, private val onNext: 
         }}};return true
     }
     fun seekIntegrated(ms:Long){positionMs=ms.coerceAtLeast(0);scope.launch{runCatching{backend.seek(positionMs)}};invalidate()}
-    private fun applyGain(){val gain=fadeLevel*(if(voiceDucked) com.personal.murmur.HybridMediaService.DUCK_GAIN else if(focusDucked) .15f else 1f);output.volume(gain);backend.volume(gain)}
+    private fun applyGain(){val gain=fadeLevel*talkLevel*(if(voiceDucked) com.personal.murmur.HybridMediaService.DUCK_GAIN else if(focusDucked) .15f else 1f);output.volume(gain);backend.volume(gain)}
     fun fadeGain(value:Float){fadeLevel=value.coerceIn(0f,1f);applyGain()}
     fun duck(value:Boolean){voiceDucked=value;applyGain()}
+    fun talk(level:Float){talkLevel=level.coerceIn(0f,1f);applyGain()}
     private fun abandonFocus(){if(focusHeld){if(manageFocus)audio.abandonAudioFocusRequest(focus);focusHeld=false}}
     fun shutdown(clearCache:Boolean=false):Job {deactivate();stopWatchingHeadphones();return scope.launch{if(started)runCatching{backend.shutdown()};started=false;output.release();if(clearCache)SpotifyEngineAuthorization.clearRuntimeFiles(context)}}
     override fun handleSetPlayWhenReady(value:Boolean):ListenableFuture<*> {if(value && !resumeIntegrated())return Futures.immediateFailedFuture<Any>(IllegalStateException("Vuelve a cargar la canción desde MURMUR"));if(!value)pauseIntegrated();return Futures.immediateVoidFuture()}

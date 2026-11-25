@@ -6,7 +6,8 @@ import { db } from "./db";
 import { SelectionTimer } from "./PlaybackMetrics";
 import { anotherVersion, bridged, setSpotifyViaYouTube, spotifyViaYouTube, youtubeTwin } from "./spotifyBridge";
 import { interleaveMagic } from "./magicShuffle";
-import { CONTINUE_WHEN_LEFT, continuationPicks } from "./continuation";
+import { CONTINUE_BATCH, CONTINUE_WHEN_LEFT, continuationPicks, moodPicks } from "./continuation";
+import { moodByKey, nextMood } from "./moods";
 export interface PlayerState {
   queue: QueueItem[];
   index: number;
@@ -565,12 +566,34 @@ export class AudioOrchestrator {
     clearTimeout(this.continuationTimer);
     this.continuationTimer = setTimeout(() => void this.ensureContinuation(), 4000);
   }
+  /**
+   * What the endless queue adds next. A mood the listener asked for ("pon algo triste") goes on;
+   * with the presenter talking in blocks and "cambiar de ambiente" on, each block is a new mood;
+   * otherwise songs related to what played.
+   */
+  private async nextBlock(): Promise<QueueItem[]> {
+    const current = this.current;
+    const asked = current?.moodAsked ? moodByKey(current.moodKey) : undefined;
+    if (asked) {
+      const picks = await moodPicks(asked, this.state.queue, CONTINUE_BATCH, true).catch(() => []);
+      if (picks.length) return picks;
+    } else {
+      const prefs = await Audio.voicePrefs().catch(() => undefined);
+      const every = prefs?.every ?? 1;
+      if (prefs?.presenter && every > 1 && prefs.moods !== false) {
+        const last = [...this.state.queue].reverse().find((t) => t.moodKey)?.moodKey;
+        const picks = await moodPicks(nextMood(last), this.state.queue, every, false).catch(() => []);
+        if (picks.length) return picks;
+      }
+    }
+    return continuationPicks(this.state.queue, current);
+  }
   ensureContinuation(): Promise<void> | undefined {
     if (!isNative || !this.continueAutomatically || this.extending || !this.current) return this.extending;
     if (this.state.queue.length - 1 - this.state.index > CONTINUE_WHEN_LEFT) return;
     const context = this.context;
     this.extending = (async () => {
-      const picks = await continuationPicks(this.state.queue, this.current);
+      const picks = await this.nextBlock();
       if (context !== this.context || !picks.length) return;
       this.update({ queue: [...this.state.queue, ...picks.map((t) => ({ ...t, queueId: crypto.randomUUID() }))] });
       this.syncQueue();

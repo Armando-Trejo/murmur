@@ -77,4 +77,20 @@ class YouTubePlaylistParserTest {
         assertTrue(YouTubePlaylistParser.hasSignedInAccount(account))
         assertFalse(YouTubePlaylistParser.hasSignedInAccount(JSONObject("""{"actions":[{"signInRenderer":{}}]}""")))
     }
+
+    @Test fun homeRowArtistLeavesOutPlayCountsAndKinds() {
+        assertEquals("Enjambre", YouTubePlaylistParser.homeArtist("Enjambre • 69 M reproducciones"))
+        assertEquals("Miranda!", YouTubePlaylistParser.homeArtist("Canción • Miranda! • Sin restricciones"))
+        assertEquals("King Gizzard & The Lizard Wizard", YouTubePlaylistParser.homeArtist("King Gizzard & The Lizard Wizard • 143 K reproducciones"))
+    }
+
+    @Test fun homeChipsKeepTitleAndParams() {
+        val data = JSONObject("""{"header":{"chipCloudRenderer":{"chips":[
+            {"chipCloudChipRenderer":{"text":{"runs":[{"text":"Triste"}]},"navigationEndpoint":{"browseEndpoint":{"browseId":"FEmusic_home","params":"ggMPOg1uX1"}}}},
+            {"chipCloudChipRenderer":{"text":{"runs":[{"text":"Sin params"}]}}}]}}}""")
+        val chips = YouTubePlaylistParser.homeChips(data)
+        assertEquals(1, chips.length())
+        assertEquals("Triste", chips.getJSONObject(0).getString("title"))
+        assertEquals("ggMPOg1uX1", chips.getJSONObject(0).getString("params"))
+    }
 }

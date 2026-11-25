@@ -50,6 +50,8 @@ class HybridMediaService : MediaSessionService() {
         @Volatile var uiVisible = true
         /** Music level while the person talks to MURMUR (about -26 dB): low enough for the recognizer, still continuous. */
         const val DUCK_GAIN = 0.05f
+        /** Music level under the presenter's voice: a dip you still hear (about -9 dB), not a mute. */
+        const val TALK_GAIN = 0.35f
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
@@ -437,7 +439,7 @@ class HybridMediaService : MediaSessionService() {
         recoveryPositionMs = null
         fade?.cancel(); fade = null; preparing?.cancel(); secondaryPlayer.stop(); secondaryPlayer.clearMediaItems(); nextTrack = null; pendingTrack = null; chainedTrack = null
         sourceTrackId = data.optString("id"); sourceAttempts = 1; alternatives.clear(); alternatives.addAll(sources.drop(1))
-        track = data; primaryPlayer.volume = if (ducking) DUCK_GAIN else 1f
+        track = data; primaryPlayer.volume = baseGain()
         primaryPlayer.setMediaItem(item(first.uri, data, first.mime), startPosition); primaryPlayer.prepare(); primaryPlayer.play(); configureEnhancer(primaryPlayer.audioSessionId)
         updateMediaButtons()
     }
@@ -462,7 +464,7 @@ class HybridMediaService : MediaSessionService() {
         secondaryPlayer.pause()
         secondaryPlayer.seekTo(0)
         secondaryPlayer.volume = 0f
-        primaryPlayer.volume = if (ducking) DUCK_GAIN else 1f
+        primaryPlayer.volume = baseGain()
     }
 
     /**
@@ -576,9 +578,45 @@ class HybridMediaService : MediaSessionService() {
         primaryPlayer.pause()
         secondaryPlayer.pause()
         secondaryPlayer.seekTo(0)
-        primaryPlayer.volume = if (ducking) DUCK_GAIN else 1f
+        primaryPlayer.volume = baseGain()
         secondaryPlayer.volume = 0f
     }
+    /** Extra level while the presenter or a spoken answer talks (1 = normal), eased in and out. */
+    private var talkGain = 1f
+    private var talkFade: Job? = null
+    /** Level the players sit at when nothing else fades them: listening duck × presenter dip. */
+    private fun baseGain() = (if (ducking) DUCK_GAIN else 1f) * talkGain
+
+    /**
+     * Presenter voice over the music: the song dips to [TALK_GAIN] in 0.3 s and, when the voice
+     * ends, comes back to normal in 0.8 s (like a radio host talking over an intro).
+     */
+    fun setTalkOver(value: Boolean) {
+        val target = if (value) TALK_GAIN else 1f
+        talkFade?.cancel()
+        talkFade = scope.launch {
+            if (!value) delay(250)
+            val from = talkGain
+            val duration = if (value) 300L else 800L
+            val start = android.os.SystemClock.elapsedRealtime()
+            while (isActive) {
+                val p = ((android.os.SystemClock.elapsedRealtime() - start).toFloat() / duration).coerceIn(0f, 1f)
+                val eased = p * p * (3 - 2 * p)
+                talkGain = from + (target - from) * eased
+                // Auto-Mix fades and the sleep fade apply baseGain() themselves on every step.
+                // Both engines follow the same level: the song may switch between Spotify and YouTube
+                // while the presenter talks (it speaks right at the change), and must come back on either.
+                if (fade == null && volumeFade?.isActive != true) primaryPlayer.volume = baseGain()
+                if (integratedDelegate.isInitialized()) nativeIntegrated.talk(talkGain)
+                if (webDelegate.isInitialized()) webIntegrated.talk(talkGain)
+                if (p >= 1f) break
+                delay(30)
+            }
+            if (android.util.Log.isLoggable(DEBUG_TAG, android.util.Log.DEBUG))
+                android.util.Log.d(DEBUG_TAG, "talkover ${if (value) "down" else "up"} gain=$talkGain volume=${primaryPlayer.volume}")
+        }
+    }
+
     fun setDucking(value: Boolean) {
         if(spotifyActive)spotifyIntegrated.duck(value)
         if (value == ducking) return
@@ -587,12 +625,12 @@ class HybridMediaService : MediaSessionService() {
         primaryPlayer.volume = (primaryPlayer.volume * ratio).coerceIn(0f, 1f)
         secondaryPlayer.volume = (secondaryPlayer.volume * ratio).coerceIn(0f, 1f)
     }
-    fun sleep(minutes: Int) { if (minutes == -1) { fadeVolume(5000); return }; if (minutes == SLEEP_AT_TRACK_END) { sleepAt = 0; sleepAtTrackEnd = true; clearChain(); return }; sleepAtTrackEnd = false; if(minutes<=0){volumeFade?.cancel();if(spotifyActive)spotifyIntegrated.fadeGain(1f);if(fade==null)primaryPlayer.volume=if(ducking)DUCK_GAIN else 1f}; sleepAt = if (minutes <= 0) 0 else System.currentTimeMillis() + minutes * 60_000L }
+    fun sleep(minutes: Int) { if (minutes == -1) { fadeVolume(5000); return }; if (minutes == SLEEP_AT_TRACK_END) { sleepAt = 0; sleepAtTrackEnd = true; clearChain(); return }; sleepAtTrackEnd = false; if(minutes<=0){volumeFade?.cancel();if(spotifyActive)spotifyIntegrated.fadeGain(1f);if(fade==null)primaryPlayer.volume=baseGain()}; sleepAt = if (minutes <= 0) 0 else System.currentTimeMillis() + minutes * 60_000L }
     private fun fadeVolume(duration: Long) {
         volumeFade?.cancel();val native=spotifyActive;val id=track?.optString("id")
         volumeFade=scope.launch {val initial=primaryPlayer.volume;val start=android.os.SystemClock.elapsedRealtime()
-            while(isActive && android.os.SystemClock.elapsedRealtime()-start<duration){if(native!=spotifyActive || track?.optString("id")!=id){if(native)spotifyIntegrated.fadeGain(1f)else primaryPlayer.volume=if(ducking)DUCK_GAIN else 1f;return@launch};val p=(android.os.SystemClock.elapsedRealtime()-start).toFloat()/duration;val gain=(1-p).pow(2);if(native)spotifyIntegrated.fadeGain(gain)else primaryPlayer.volume=initial*gain;delay(30)}
-            if(native)spotifyIntegrated.pauseIntegrated()else primaryPlayer.pause();if(native)spotifyIntegrated.fadeGain(1f)else primaryPlayer.volume=if(ducking)DUCK_GAIN else 1f
+            while(isActive && android.os.SystemClock.elapsedRealtime()-start<duration){if(native!=spotifyActive || track?.optString("id")!=id){if(native)spotifyIntegrated.fadeGain(1f)else primaryPlayer.volume=baseGain();return@launch};val p=(android.os.SystemClock.elapsedRealtime()-start).toFloat()/duration;val gain=(1-p).pow(2);if(native)spotifyIntegrated.fadeGain(gain)else primaryPlayer.volume=initial*gain;delay(30)}
+            if(native)spotifyIntegrated.pauseIntegrated()else primaryPlayer.pause();if(native)spotifyIntegrated.fadeGain(1f)else primaryPlayer.volume=baseGain()
         }
     }
     private fun finishSleepAtTrackEnd(): Boolean {
@@ -642,7 +680,7 @@ class HybridMediaService : MediaSessionService() {
         sourceAttempts = 1
         alternatives.clear()
         primaryPlayer.setAudioAttributes(audioAttributes(), true)
-        primaryPlayer.volume = if (ducking) DUCK_GAIN else 1f
+        primaryPlayer.volume = baseGain()
         secondaryPlayer.volume = 0f
         attach(primaryPlayer)
         primaryPlayer.play()
@@ -675,7 +713,7 @@ class HybridMediaService : MediaSessionService() {
                 }
                 val fraction = ((android.os.SystemClock.elapsedRealtime() - started).toDouble() / duration).coerceIn(0.0, 1.0)
                 val gains = AutoMixCurve.gains(fraction)
-                val base = if (ducking) DUCK_GAIN else 1f
+                val base = baseGain()
                 outgoing.volume = gains.first * base
                 incoming.volume = gains.second * base
                 if (fraction >= 1) break

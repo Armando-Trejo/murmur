@@ -18,7 +18,7 @@ class SpokenLinesTest {
 
     @Test fun thePresenterNamesTheSongAndTheLeadArtist() {
         val line = SpokenLines.announcement("Bailarina (Official Video)", "Miranda!, Juliana Gattas", 0)
-        assertEquals("Ahora suena Bailarina, de Miranda!.", line)
+        assertEquals("Ahora suena Bailarina, de Miranda!", line)
     }
 
     @Test fun thePresenterRotatesItsLines() {
@@ -35,5 +35,21 @@ class SpokenLinesTest {
         assertEquals("Afuera", SpokenLines.cleanTitle("Afuera [Remastered 2011]"))
         assertEquals("La Célula Que Explota", SpokenLines.cleanTitle("La Célula Que Explota (Video Oficial)"))
         assertEquals("Cumbia (de los pajaritos)", SpokenLines.cleanTitle("Cumbia (de los pajaritos)"))
+    }
+
+    @Test fun theRadioHostIsFriendlyAndVaried() {
+        val lines = (0 until 10).map { SpokenLines.radio("Afuera", "Caifanes", it, 15, 1) }.toSet()
+        assertEquals(10, lines.size)
+        assertTrue(lines.all { "Afuera" in it && "Caifanes" in it })
+        assertTrue(SpokenLines.radio("Afuera", "Caifanes", 0, 9, 0).startsWith("Buenos días."))
+        assertEquals("", SpokenLines.radio("", "Caifanes", 0, 9, 1))
+    }
+
+    @Test fun aNewMoodIsNamedAndBlocksSoundLikeAHost() {
+        val moods = (0 until 4).map { SpokenLines.mood("Afuera", "Caifanes", "algo alegre", it) }
+        assertTrue(moods.all { "algo alegre" in it && "Afuera" in it && "Caifanes" in it })
+        val blocks = (0 until 4).map { SpokenLines.block("Afuera", "Caifanes", it, 15, 1) }
+        assertTrue(blocks.all { "Afuera" in it && "Caifanes" in it })
+        assertTrue(SpokenLines.block("Afuera", "Caifanes", 0, 21, 0).startsWith("Buenas noches."))
     }
 }

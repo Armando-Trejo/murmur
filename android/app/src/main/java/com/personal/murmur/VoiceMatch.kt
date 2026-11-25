@@ -22,7 +22,7 @@ object VoiceMatch {
     /** Room under the enrollment's own spread for another room, distance or mood. */
     const val MARGIN = 0.15
     /** Over the phone's own music the voice arrives through echo cancelling: a little more leeway. */
-    const val OVER_MUSIC_RELIEF = 0.05
+    const val OVER_MUSIC_RELIEF = 0.15
     /** A take this unlike the previous ones is probably another person or mostly noise. */
     const val MIN_TAKE_SIMILARITY = 0.20
     /** Speech frames (10 ms) a take needs for a vector worth keeping. */

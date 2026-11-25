@@ -39,7 +39,7 @@ class SpotifyEngineAuthorization(context: Context, private val prefs:android.con
             .appendQueryParameter("state",state).appendQueryParameter("scope","streaming app-remote-control user-read-private").build()
     }
     private fun exchange(form: FormBody): JSONObject = tokenRequest?.invoke(form) ?: NativeNetwork.client.newCall(Request.Builder().url("https://accounts.spotify.com/api/token").post(form).build()).execute().use { response ->
-        if (!response.isSuccessful) throw ProviderFailure("SPOTIFY_ENGINE_AUTH_REQUIRED",response.code,"spotify","engine_authorization","Spotify no concedió la autorización al motor local. Vuelve a activar Spotify integrado desde Conexiones.")
+        if (!response.isSuccessful) throw ProviderFailure("SPOTIFY_ENGINE_AUTH_REQUIRED",response.code,"spotify","engine_authorization","Spotify no concedió la autorización al motor local. Vuelve a activar Spotify integrado desde Opciones (⋯).")
         JSONObject(response.body?.string() ?: error("Respuesta vacía de Spotify"))
     }
     fun finish(uri: Uri) {
@@ -58,7 +58,7 @@ class SpotifyEngineAuthorization(context: Context, private val prefs:android.con
     }
     @Synchronized fun token(): String {
         if(authorizing())throw ProviderFailure("SPOTIFY_ENGINE_AUTH_PENDING",401,"spotify","engine_authorization","Completa la autorización del motor de Spotify en el navegador.")
-        if(!authorized())throw ProviderFailure("SPOTIFY_ENGINE_AUTH_REQUIRED",401,"spotify","engine_authorization","Activa Spotify integrado (Premium) desde Conexiones. Es una autorización adicional del motor librespot.")
+        if(!authorized())throw ProviderFailure("SPOTIFY_ENGINE_AUTH_REQUIRED",401,"spotify","engine_authorization","Activa Spotify integrado (Premium) desde Opciones (⋯). Es una autorización adicional del motor librespot.")
         val epoch=prefs.getLong("epoch",0)
         if(System.currentTimeMillis()<prefs.getLong("expires",0)-60000)return prefs.getString("access","")!!
         val data=exchange(FormBody.Builder().add("grant_type","refresh_token").add("client_id",CLIENT_ID).add("refresh_token",prefs.getString("refresh","")!!).build())

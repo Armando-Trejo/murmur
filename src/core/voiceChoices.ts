@@ -14,6 +14,8 @@ export interface VoiceChoicesDetail {
   kinds?: string[];
   /** The songs to play for an option (an artist's mix, a whole album); without it the option plays alone. */
   expand?: (index: number) => Promise<QueueItem[]>;
+  /** Told which option the owner picked, once it plays (MURMUR learns the words from it). */
+  chosen?: (index: number) => void;
 }
 
 export function offerVoiceChoices(detail: VoiceChoicesDetail) {

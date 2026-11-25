@@ -12,6 +12,7 @@ const mock = vi.hoisted(() => ({
   playlists: [] as Playlist[],
   history: [] as HistoryEntry[],
   log: [] as { heard: string; understood: string; answer: string }[],
+  learned: undefined as unknown,
 }));
 vi.mock("./AudioOrchestrator", () => ({
   player: {
@@ -34,8 +35,8 @@ vi.mock("./db", () => ({
       where: () => ({ between: (from: number, to: number) => ({ toArray: async () => mock.history.filter((h) => h.at >= from && h.at < to) }) }),
     },
     settings: {
-      get: async () => ({ value: mock.log }),
-      put: async (row: { value: typeof mock.log }) => { mock.log = row.value; },
+      get: async (key: string) => (key === "voice:log" ? { value: mock.log } : mock.learned ? { value: mock.learned } : undefined),
+      put: async (row: { key: string; value: unknown }) => { if (row.key === "voice:log") mock.log = row.value as typeof mock.log; else mock.learned = row.value; },
     },
   },
   playlistTracks: async (p: Playlist) => p.trackIds.map((id) => mock.tracks.find((t) => t.id === id)).filter(Boolean),
@@ -65,6 +66,7 @@ beforeEach(() => {
   mock.playlists = fixturePlaylists;
   mock.history = fixtureHistory;
   mock.log = [];
+  mock.learned = undefined;
   mock.search.mockResolvedValue([]);
   mock.artist.mockResolvedValue([]);
   offers = [];
@@ -286,5 +288,23 @@ describe("catalogue and the confidence floor", () => {
       mock.artist.mockResolvedValue([yt("noisy1xxxxx", "Loud", "The Noisy Band")]);
       expect((await detail.expand!(index)).every((t) => t.artist === "The Noisy Band")).toBe(true);
     }
+  });
+});
+
+describe("learning from the choice the owner taps", () => {
+  it("«Reproduce los backs»: once Back in Black is picked among the options, the same words play it directly", async () => {
+    mock.search.mockResolvedValue([yt("backsxxxxxx", "Backs", "The Noisy Band"), yt("backinblack", "Back in Black", "AC/DC")]);
+    await routeVoiceCommand("Reproduce los backs\nReproduce los back");
+    expect(mock.playList).not.toHaveBeenCalled();
+    const index = offers[0].choices.findIndex((c) => c.title === "Back in Black");
+    expect(index).toBeGreaterThanOrEqual(0);
+    offers[0].chosen?.(index);
+    await vi.waitFor(() => expect(mock.learned).toBeTruthy());
+    mock.search.mockClear();
+    offers = [];
+    const answer = await routeVoiceCommand("Reproduce los backs");
+    expect(answer).toContain("Back in Black");
+    expect(played().map((t) => t.title)).toEqual(["Back in Black"]);
+    expect(offers).toHaveLength(0);
   });
 });

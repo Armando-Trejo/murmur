@@ -19,11 +19,12 @@ object SpeakerVoices {
             .thenBy { it.name })
 
     /** "Voz 1 · México · natural, en línea": engines do not say the gender, so people listen and choose. */
-    fun label(option: Option, index: Int): String {
+    fun label(option: Option, index: Int, gender: String? = null): String {
         val region = when (option.country.uppercase()) {
             "MX" -> "México"; "US", "419" -> "Latinoamérica"; "ES" -> "España"; else -> option.country.ifBlank { "Español" }
         }
         val quality = if (option.quality >= 400) "natural" else if (option.quality >= 300) "clara" else "básica"
-        return "Voz ${index + 1} · $region · $quality" + if (option.network) ", en línea" else ""
+        val who = when (gender) { VoiceGender.FEMALE -> "Mujer"; VoiceGender.MALE -> "Hombre"; else -> "Voz ${index + 1}" }
+        return "$who · $region · $quality" + if (option.network) ", en línea" else ""
     }
 }

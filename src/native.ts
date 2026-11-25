@@ -82,10 +82,13 @@ interface AudioBridge {
   saveBackup(o: { content: string }): Promise<{ saved: boolean }>;
   saveAutoBackup(o: { content: string }): Promise<{ saved: boolean; file: string }>;
   speak(o: { text: string; force?: boolean }): Promise<void>;
-  ttsVoices(): Promise<{ voices: { name: string; label: string; network: boolean; selected: boolean }[] }>;
+  ttsVoices(): Promise<{ voices: { name: string; label: string; gender?: string; network: boolean; selected: boolean }[] }>;
   setTtsVoice(o: { name?: string; preview?: boolean; sample?: string }): Promise<void>;
   openUpdate(o: { url: string }): Promise<void>;
-  voicePrefs(o?: { replies?: boolean; presenter?: boolean }): Promise<{ replies: boolean; presenter: boolean }>;
+  /** `every`: the presenter talks every song (1), every 3 or every 5; `moods`: in blocks, the endless queue changes mood. */
+  voicePrefs(o?: { replies?: boolean; presenter?: boolean; host?: PresenterHost; every?: number; moods?: boolean }): Promise<{ replies: boolean; presenter: boolean; host?: PresenterHost; every?: number; moods?: boolean }>;
+  /** A sample of the presenter's woman's or man's voice. */
+  presenterSample(o: { gender: "mujer" | "hombre" }): Promise<void>;
   addListener(
     name: string,
     callback: (event: any) => void,
@@ -152,7 +155,10 @@ interface AuthBridge {
   youtubePlaylists(o: { query: string }): Promise<{ playlists: { id: string; title: string; artist?: string; artworkUrl?: string }[] }>;
   /** Plain lyrics as YouTube Music shows them, by video or by a "title artist" query. */
   youtubeLyrics(o: { videoId?: string; query?: string }): Promise<{ found: boolean; text?: string; source?: string }>;
-  youtubeHome(): Promise<{ shelves: FeedShelf[] }>;
+  /** Inicio; with `params` (a chip's), Inicio filtered by that chip ("Triste", "Fiesta"…). */
+  youtubeHome(o?: { params?: string }): Promise<{ shelves: FeedShelf[] }>;
+  /** The mood chips above Inicio. */
+  youtubeHomeChips(): Promise<{ chips: { title: string; params: string }[] }>;
   youtubeLibrary(): Promise<{ playlists: any[] }>;
   youtubePlaylist(o: { id: string }): Promise<{ tracks: QueueItem[] }>;
   oauthLogin(o: { clientId: string }): Promise<void>;
@@ -192,4 +198,6 @@ interface VoiceBridge {
 }
 export const Audio = registerPlugin<AudioBridge>("YouTubeAudio");
 export const Auth = registerPlugin<AuthBridge>("AuthBridge");
+/** Who presents the songs: a woman and a man taking turns, or one of them. */
+export type PresenterHost = "duo" | "mujer" | "hombre";
 export const Voice = registerPlugin<VoiceBridge>("LocalIntent");

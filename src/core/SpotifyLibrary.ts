@@ -55,7 +55,7 @@ export async function syncSpotifyLibrary(
   if (!access.spotify)
     throw new Error(
       access.spotifyMessage ||
-        "Autoriza el acceso de Spotify a tu biblioteca desde Conexiones.",
+        "Autoriza el acceso de Spotify a tu biblioteca desde Opciones (⋯).",
     );
   const result: SyncSummary = {
     tracks: 0,

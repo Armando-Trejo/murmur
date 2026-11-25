@@ -36,7 +36,8 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
     }
     private fun request(browseId: String? = null, continuation: String? = null,
                         home: Boolean = false, accountMenu: Boolean = false,
-                        watch: JSONObject? = null, search: String? = null, searchParams: String? = null): JSONObject {
+                        watch: JSONObject? = null, search: String? = null, searchParams: String? = null,
+                        homeParams: String? = null): JSONObject {
         val pairs=cookie.split(';').map { it.trim() }
         val sapisid=(pairs.firstOrNull { it.startsWith("SAPISID=") } ?: pairs.firstOrNull { it.startsWith("__Secure-3PAPISID=") })?.substringAfter('=')
         val now=System.currentTimeMillis()/1000
@@ -47,6 +48,7 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
         config.optString("pageId").takeIf{it.isNotBlank()}?.let{body.getJSONObject("context").put("user",JSONObject().put("onBehalfOfUser",it))}
         if (watch != null) watch.keys().forEach { body.put(it, watch.get(it)) }
         else if (search != null) { body.put("query", search); searchParams?.let { body.put("params", it) } }
+        else if (home && !accountMenu && continuation == null) { body.put("browseId", "FEmusic_home"); homeParams?.let { body.put("params", it) } }
         else if (home && !accountMenu) body.put("browseId", "FEmusic_home")
         else if (continuation != null) body.put("continuation", continuation)
         else if (browseId != null) body.put("browseId", browseId)
@@ -68,7 +70,11 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
         if(data.has("error") || (!accountMenu && !data.has("contents")&&!data.has("continuationContents")&&!data.has("onResponseReceivedActions")))throw ProviderFailures.response(403,"youtube",operation)
         return data
     }
-    fun home(): JSONArray {
+    /** The mood chips at the top of your Inicio ("Relajarse", "Fiesta", "Triste"…), each a filter of it. */
+    fun homeChips(): JSONArray = YouTubePlaylistParser.homeChips(request(home = true))
+
+    /** Your Inicio, optionally filtered by one of its chips (`params`): YouTube Music's picks for you in that mood. */
+    fun home(params: String? = null): JSONArray {
         check(cookie.split(';').any {
             val name = it.trim().substringBefore('=')
             name == "SAPISID" || name == "__Secure-3PAPISID"
@@ -77,14 +83,14 @@ class YouTubeLibraryReader(private val cookie: String,private val config:JSONObj
         val seenTokens = mutableSetOf<String>()
         var token: String? = null
         repeat(3) { page ->
-            val data = request(continuation = token, home = true)
+            val data = request(continuation = token, home = true, homeParams = params)
             val loggedOut = data.optJSONObject("responseContext")
                 ?.optJSONObject("mainAppWebResponseContext")?.opt("loggedOut")
             check(loggedOut != true) { "YouTube Music cerró tu sesión. Vuelve a conectarla." }
             if (page == 0 && loggedOut != false) {
                 val menu = request(accountMenu = true)
                 check(YouTubePlaylistParser.hasSignedInAccount(menu)) {
-                    "No pudimos confirmar tu cuenta de YouTube Music. Renueva la sesión en Conexiones."
+                    "No pudimos confirmar tu cuenta de YouTube Music. Renueva la sesión en Opciones (⋯)."
                 }
             }
             val rows = YouTubePlaylistParser.homeShelves(data)

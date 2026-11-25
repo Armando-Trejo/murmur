@@ -29,7 +29,7 @@ object SemanticModel {
         } finally { part.delete() }
     }
     @Synchronized fun rank(context: Context, query: String, tags: List<String>): List<Pair<String, Double>> {
-        check(available(context)) { "Descarga el modelo de 6 MB desde Conexiones" }
+        check(available(context)) { "Descarga el modelo de 6 MB desde Opciones (⋯)" }
         val model = embedder ?: TextEmbedder.createFromOptions(context, TextEmbedder.TextEmbedderOptions.builder().setBaseOptions(BaseOptions.builder().setModelAssetPath(file(context).absolutePath).build()).setL2Normalize(true).build()).also { embedder = it }
         fun vector(text: String): Embedding = embeddings.getOrPut(text) { model.embed(text).embeddingResult().embeddings().first() }
         val q = vector(query)

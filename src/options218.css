@@ -1,0 +1,59 @@
+/* 2.18 · «Opciones» (was Conexiones): the same cards, headings and controls as the rest of MURMUR. */
+
+/* Bottom bar: three named tabs and a compact ⋯ for everything else. */
+.bottom-nav { grid-template-columns: 1fr 1fr 1fr 0.72fr; }
+.bottom-nav .nav-label-ghost {
+  visibility: hidden; width: 0; overflow: hidden; white-space: nowrap;
+}
+
+/* Every block is a card, with the section heading above it, like Inicio and Tu Biblioteca. */
+.page.options .appearance-settings {
+  background: var(--surface);
+  border: 0;
+  border-radius: 12px;
+  padding: 4px 18px 10px;
+  margin: 0 0 8px;
+}
+.page.options .appearance-settings .section-heading { margin: 14px 0 0; }
+.page.options .appearance-settings .help-copy { margin-top: 6px; color: #a1a1aa; font-size: 0.85rem; line-height: 1.5; }
+.page.options .accent-presets { gap: 8px; margin: 16px 0 18px; justify-content: space-between; }
+.page.options .accent-swatch { width: 40px; min-width: 40px; height: 40px; }
+.page.options .custom-accent { padding: 4px 0 6px; }
+.page.options .custom-accent input { width: 40px; height: 40px; border-radius: 50%; padding: 3px; }
+.page.options .custom-accent .button { min-height: 40px; padding: 0 18px; }
+.page.options .glow-option { margin-top: 0; padding: 14px 0; border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.page.options .glow-option > svg { color: var(--secondary, #a1a1aa); flex-shrink: 0; }
+.page.options .section-heading h2 { font-size: 1.25rem; }
+
+/* Switches instead of the system's square checkboxes. */
+.page.options input[type="checkbox"],
+.welcome-step input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  position: relative; flex-shrink: 0;
+  width: 46px; height: 28px; margin: 0 2px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.16);
+  transition: background-color 180ms cubic-bezier(.16, 1, .3, 1);
+  cursor: pointer;
+}
+.page.options input[type="checkbox"]::before,
+.welcome-step input[type="checkbox"]::before {
+  content: ""; position: absolute; top: 3px; left: 3px;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition: transform 200ms cubic-bezier(.16, 1, .3, 1);
+}
+.page.options input[type="checkbox"]:checked,
+.welcome-step input[type="checkbox"]:checked { background: var(--brand-readable); }
+.page.options input[type="checkbox"]:checked::before,
+.welcome-step input[type="checkbox"]:checked::before { transform: translateX(18px); }
+.page.options input[type="checkbox"]:focus-visible,
+.welcome-step input[type="checkbox"]:focus-visible { outline: 2px solid var(--brand-readable); outline-offset: 3px; }
+.page.options input[type="checkbox"]:disabled { opacity: 0.4; }
+@media (prefers-reduced-motion: reduce) {
+  .page.options input[type="checkbox"], .page.options input[type="checkbox"]::before { transition: none; }
+}
+
+/* Presenter: "Cada cuánto habla" sits under "Quién presenta" with the same rhythm. */
+.page.options .voice-picker .host-options + .voice-picker-title { margin-top: 16px; }
+.page.options .voice-picker .glow-option { border-top: 0; padding-bottom: 4px; }

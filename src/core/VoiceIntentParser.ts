@@ -1,3 +1,4 @@
+import { moodOf } from "./moods";
 import { normalize } from "./FanUploadParser";
 import { similarity } from "./SourceResolver";
 import { soundsLike } from "./voicePhonetics";
@@ -7,7 +8,8 @@ export type VoiceIntent =
   | { type: "playlist"; id: string }
   /** Sleep timer: minutes from now, "track" (when this song ends) or 0 (cancel). */
   | { type: "sleep"; minutes: number | "track" }
-  | { type: "youtube" | "vibe"; query: string }
+  | { type: "youtube"; query: string }
+  | { type: "vibe"; query: string; mood?: string; extra?: string }
   /** `another`: "otra de X", a song by them other than the one playing. */
   | { type: "artist"; query: string; platform?: Platform; another?: boolean }
   /** "Las mejores de X" (their top songs) and "lo nuevo de X" (their latest release). */
@@ -199,6 +201,9 @@ export function parseVoiceIntent(
     return { type: "unknown" };
   const special = ownMusic(rest);
   if (special) return special;
+  // "Algo triste", "canciones de fiesta", "música para bailar": a mood, played from the catalogue.
+  const mood = moodOf(rest);
+  if (mood) return { type: "vibe", query: [mood.mood.query, mood.extra].filter(Boolean).join(" "), mood: mood.mood.key, ...(mood.extra ? { extra: mood.extra } : {}) };
   // "La canción X", "la de X": a song, not an artist or an album.
   const songWanted = /^(?:(?:la|una|esa|esta) )?(?:cancion(?:cita)?|rola|rolita|tema|song|track)\b/.test(rest) || /^la de \S/.test(rest);
   // "Algo de Miranda", "música de Enjambre", "otra de Misfits": the artist, not one song.
