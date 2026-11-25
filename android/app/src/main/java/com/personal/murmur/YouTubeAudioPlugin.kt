@@ -188,6 +188,18 @@ class YouTubeAudioPlugin : Plugin() {
         if (call.getBoolean("force") == true || SpokenReplies.repliesEnabled(context)) SpokenReplies.speak(context, text)
         call.resolve()
     }
+    /** Spanish voices for MURMUR's speech, most natural first, with the one in use marked. */
+    @PluginMethod fun ttsVoices(call: PluginCall) {
+        SpokenReplies.voices(context) { list -> call.resolve(JSObject().put("voices", JSArray(list))) }
+    }
+    /** Chooses MURMUR's voice (null = automatic) and says a short sample with it. */
+    @PluginMethod fun setTtsVoice(call: PluginCall) {
+        val name = call.getString("name")?.takeIf { it.isNotBlank() }
+        SpokenReplies.setVoice(context, name)
+        if (call.getBoolean("preview") != false)
+            SpokenReplies.speak(context, call.getString("sample") ?: "Hola, así sueno. Ahora suena Afuera, de Caifanes.")
+        call.resolve()
+    }
     /** Spoken answers to voice commands (on by default) and the presenter between songs (off by default). */
     @PluginMethod fun voicePrefs(call: PluginCall) {
         call.getBoolean("replies")?.let { SpokenReplies.setReplies(context, it) }

@@ -27,7 +27,7 @@
             <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="com.personal.murmur" android:host="oauth-return"/></intent-filter>
         </activity>
         <activity android:name=".MusicVisualActivity" android:exported="false" android:showWhenLocked="true" android:theme="@android:style/Theme.Material.NoActionBar"/>
-        <activity android:name=".VoiceCaptureActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" android:theme="@android:style/Theme.Material.NoActionBar" android:excludeFromRecents="true"/>
+        <activity android:name=".VoiceCaptureActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" android:theme="@style/Theme.MurmurVoice" android:excludeFromRecents="true"/>
         <activity android:name=".VideoActivity" android:exported="false" android:supportsPictureInPicture="true" android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"/>
         <activity android:name=".BackupWriter" android:exported="false" android:theme="@android:style/Theme.Material.NoActionBar"/>
         <service android:name=".HybridMediaService" android:exported="true" android:foregroundServiceType="mediaPlayback"><intent-filter><action android:name="androidx.media3.session.MediaSessionService"/></intent-filter></service>

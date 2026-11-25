@@ -20,7 +20,51 @@ object SpokenReplies {
     private const val PREFS = "playback"
     private const val PRESENTER = "presenter"
     private const val REPLIES = "spoken_replies"
+    private const val VOICE = "tts_voice"
+    /** Google's engine has the most natural (neural) Spanish voices; the phone's default is the fallback. */
+    private const val GOOGLE_TTS = "com.google.android.tts"
     private val main = Handler(Looper.getMainLooper())
+    private val pendingVoices = mutableListOf<() -> Unit>()
+
+    fun chosenVoice(context: Context): String? = context.getSharedPreferences(PREFS, 0).getString(VOICE, null)
+    fun setVoice(context: Context, name: String?) {
+        context.getSharedPreferences(PREFS, 0).edit().putString(VOICE, name).apply()
+        main.post { tts?.let { if (ready) applyVoice(context, it) } }
+    }
+
+    /** Spanish voices of the engine in use, best first, for the picker in Ajustes. */
+    fun voices(context: Context, done: (List<JSONObject>) -> Unit) {
+        main.post {
+            val engine = tts ?: create(context.applicationContext)
+            val build = {
+                val chosen = chosenVoice(context) ?: engine.voice?.name
+                SpeakerVoices.rank(options(engine), online(context)).mapIndexed { index, option ->
+                    JSONObject().put("name", option.name).put("label", SpeakerVoices.label(option, index))
+                        .put("network", option.network).put("selected", option.name == chosen)
+                }
+            }
+            if (ready) done(build()) else pendingVoices.add { done(build()) }
+        }
+    }
+
+    private fun options(engine: TextToSpeech) = runCatching { engine.voices.orEmpty() }.getOrDefault(emptySet()).map {
+        SpeakerVoices.Option(it.name, it.locale.language, it.locale.country, it.quality, it.isNetworkConnectionRequired,
+            it.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true)
+    }
+
+    private fun online(context: Context) = runCatching {
+        val cm = context.getSystemService(android.net.ConnectivityManager::class.java)
+        cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+    }.getOrDefault(false)
+
+    /** The person's choice, else the most natural Spanish voice available (neural when online). */
+    private fun applyVoice(context: Context, engine: TextToSpeech) {
+        val all = runCatching { engine.voices.orEmpty() }.getOrDefault(emptySet())
+        val chosen = chosenVoice(context)?.let { name -> all.firstOrNull { it.name == name } }
+        val best = chosen ?: SpeakerVoices.rank(options(engine), online(context)).firstOrNull()
+            ?.let { option -> all.firstOrNull { it.name == option.name } }
+        if (best != null) runCatching { engine.voice = best }
+    }
     private var tts: TextToSpeech? = null
     private var ready = false
     private val waiting = ArrayDeque<String>()
@@ -56,7 +100,8 @@ object SpokenReplies {
     }
 
     private fun create(context: Context): TextToSpeech {
-        val engine = TextToSpeech(context) { status ->
+        val google = runCatching { context.packageManager.getPackageInfo(GOOGLE_TTS, 0); true }.getOrDefault(false)
+        val listener = TextToSpeech.OnInitListener { status ->
             main.post {
                 val current = tts ?: return@post
                 if (status != TextToSpeech.SUCCESS) { tts = null; current.shutdown(); waiting.clear(); return@post }
@@ -64,7 +109,9 @@ object SpokenReplies {
                     .firstOrNull { current.isLanguageAvailable(it) >= TextToSpeech.LANG_AVAILABLE }
                 if (spanish == null) { waiting.clear(); return@post }
                 current.language = spanish
-                current.setSpeechRate(1.04f)
+                applyVoice(context, current)
+                current.setSpeechRate(1.0f)
+                current.setPitch(1.0f)
                 current.setAudioAttributes(AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ASSISTANT)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
@@ -76,8 +123,10 @@ object SpokenReplies {
                 })
                 ready = true
                 while (waiting.isNotEmpty()) say(current, waiting.removeFirst())
+                pendingVoices.toList().forEach { it() }; pendingVoices.clear()
             }
         }
+        val engine = if (google) TextToSpeech(context, listener, GOOGLE_TTS) else TextToSpeech(context, listener)
         tts = engine
         return engine
     }

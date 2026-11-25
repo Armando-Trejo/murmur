@@ -3426,7 +3426,7 @@ export default function App() {
       {/* «¿No era esta?»: the closest options when a voice request was not clear enough. */}
       <VoiceChoices />
       <AnimatePresence mode="wait">
-        {(wakeListening || voiceThinking || voiceBusy) && (
+        {(wakeListening || voiceThinking) && (
           <motion.div
             key={voiceThinking ? "thinking" : "listening"}
             className={"voice-listening" + (voiceThinking ? " thinking" : "")}

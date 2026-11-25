@@ -10,7 +10,10 @@ Léelo primero si continúas MURMUR en otra PC u otra sesión. El detalle técni
 - No escribir contraseñas en formularios. Las sesiones de YouTube Music y Spotify las inicia él en el teléfono.
 - No inventar resultados: lo probado en el teléfono se dice como probado, y lo demás como no verificado.
 
-## Estado actual: 2.17.1 (code 34)
+## Estado actual: 2.18.0 (code 35)
+La 2.18.0 trae el panel de voz con ondas y la elección de una voz más natural para el presentador y las respuestas.
+
+### 2.17.1 (code 34)
 La 2.17.1 agrega el indicador de voz en cada paso: escucha, búsqueda y preparación.
 
 ### 2.17.0 (code 33)

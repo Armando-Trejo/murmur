@@ -82,6 +82,8 @@ interface AudioBridge {
   saveBackup(o: { content: string }): Promise<{ saved: boolean }>;
   saveAutoBackup(o: { content: string }): Promise<{ saved: boolean; file: string }>;
   speak(o: { text: string; force?: boolean }): Promise<void>;
+  ttsVoices(): Promise<{ voices: { name: string; label: string; network: boolean; selected: boolean }[] }>;
+  setTtsVoice(o: { name?: string; preview?: boolean; sample?: string }): Promise<void>;
   openUpdate(o: { url: string }): Promise<void>;
   voicePrefs(o?: { replies?: boolean; presenter?: boolean }): Promise<{ replies: boolean; presenter: boolean }>;
   addListener(

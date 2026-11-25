@@ -391,3 +391,22 @@ La 2.7.1 de la PC RAM nunca llegó a GitHub; la 2.8.0 solo trasladó su precarga
 - Si el indicador ya dice «Preparando música…», no aparece el aviso inferior «Preparando audio…».
 - La píldora abarca toda la barra superior para no tapar a medias el logo ni el micrófono.
 - Verificado en el teléfono con «pon las mejores de caifanes» y «pon algo de enjambre».
+
+## 2.18.0 (code 35) — panel de voz con ondas y voz más natural
+**Panel de voz** (`VoiceCaptureActivity.kt`, `VoiceWaveView.kt`, tema `Theme.MurmurVoice`)
+- El botón de micrófono de la app, el del widget, el mosaico de ajustes rápidos y los audífonos ya no abren una pantalla negra con texto.
+- Ahora sube desde abajo un panel sobre la pantalla oscurecida, con:
+  - un estado («Te escucho…», «Escuchando…», «Entendiendo…», «Entendido»);
+  - las palabras en vivo, con `EXTRA_PARTIAL_RESULTS`;
+  - cuatro ondas de colores de MURMUR que crecen con el volumen de la voz (`onRmsChanged`), respiran en espera y pulsan mientras entiende;
+  - el botón «Cancelar».
+- Tocar fuera del panel cancela la escucha.
+- Si Android tiene las animaciones apagadas, las ondas quedan quietas.
+- La app ya no muestra su propia píldora «Te escucho…» detrás del panel. Después sigue «Buscando «…»».
+- Sin verificar en el teléfono con voz real: el dueño estaba usando el teléfono.
+
+**Voz más natural** (`SpokenReplies.kt`, `SpeakerVoices.kt`)
+- Usa el motor de Google (`com.google.android.tts`) si está instalado; en el HONOR sí está.
+- Elige la voz en español más natural: México primero, luego Latinoamérica y España, por calidad; las neuronales en línea solo cuando hay internet.
+- En Ajustes hay «Voz de MURMUR», con las voces disponibles: al tocar una se escucha una muestra y queda elegida (`tts_voice`).
+- El motor no informa el género de cada voz, así que se elige escuchándolas.

@@ -105,3 +105,17 @@
   background: rgb(18 18 20 / 0.94);
 }
 .voice-listening.thinking { max-width: none; }
+
+/* Voice picker for MURMUR's speech. */
+.voice-picker { display: grid; gap: 8px; margin: 2px 0 14px; padding: 14px; border-radius: 16px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.07); }
+.voice-picker-title { font-weight: 700; font-size: 0.9rem; }
+.voice-picker-hint { color: rgba(255, 255, 255, 0.64); font-size: 0.76rem; line-height: 1.4; }
+.voice-picker-option {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) 20px; align-items: center; gap: 10px;
+  min-height: 48px; padding: 10px 12px; border-radius: 12px; text-align: left; color: #fff;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+.voice-picker-option.on { background: rgba(var(--brand-rgb), 0.18); border-color: rgba(var(--brand-rgb), 0.7); }
+.voice-picker-option > span { font-size: 0.88rem; }
+.voice-picker-more { justify-self: start; }
