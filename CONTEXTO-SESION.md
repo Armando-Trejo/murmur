@@ -10,8 +10,10 @@ Léelo primero si continúas MURMUR en otra PC u otra sesión. El detalle técni
 - No escribir contraseñas en formularios. Las sesiones de YouTube Music y Spotify las inicia él en el teléfono.
 - No inventar resultados: lo probado en el teléfono se dice como probado, y lo demás como no verificado.
 
-## Estado actual: 2.14.0 (code 29), commit 2d24ce1 o posterior
-Primera versión para compartir: firmada para distribución, sin depuración, con bienvenida, Conexiones simplificada y reporte de cierres. Funciones de las últimas entregas:
+## Estado actual: 2.14.1 (code 30)
+La 2.14.1 se hizo en la PC RAM y recupera los arreglos de audio de la 2.7.1 que no habían pasado a la 2.8.0. El detalle está en [CONTINUAR-MURMUR.md](CONTINUAR-MURMUR.md). Es solo de prueba: falta firmarla para compartir.
+
+La 2.14.0 (code 29) fue la primera versión para compartir: firmada para distribución, sin depuración, con bienvenida, Conexiones simplificada y reporte de cierres. Funciones de las últimas entregas:
 - **La música no se detiene:** `src/core/continuation.ts`. Con 2 o menos canciones restantes agrega 12 afines sin repetir ninguna versión. En Buscar, tocar un resultado reproduce solo esa canción.
 - **Respaldo de versiones:** `anotherVersion()` en `spotifyBridge.ts`. Si una plataforma no tiene la canción o está bloqueada, usa la otra o la salta.
 - **Spotify suena con el motor de MURMUR** (su gemela de YouTube Music): no depende de la app de Spotify ni de Premium. Los motores propios de Spotify están en Opciones avanzadas.
@@ -25,10 +27,12 @@ Primera versión para compartir: firmada para distribución, sin depuración, co
 2. **Spotify para otros usuarios:** la app no trae Client ID integrado. El dueño escribe el suyo en Conexiones › Spotify › Opciones avanzadas. Para integrarlo hay que poner `VITE_SPOTIFY_CLIENT_ID=...` en `.env.local` (no se sube al repositorio) y compilar de nuevo. Spotify en modo desarrollo solo admite 25 usuarios dados de alta en su panel.
 3. **Cosas que faltan para usuarios sin conocimientos técnicos:** aviso de actualización (hoy se mandan a mano), y probar la bienvenida en teléfonos con pantalla baja.
 4. **Ideas de IA propuestas, sin implementar:** modelo de textos multilingüe de unos 30 MB en lugar del Universal Sentence Encoder (que está en inglés); un modelo de lenguaje opcional (Gemma de unos 500 MB) para conversación y un DJ que presente las canciones; perfiles por horario.
-5. **GitHub:** la cuenta `ineditodigital-sudo` no tiene permiso de escritura. Sube los cambios el dueño o se agrega como colaborador.
+5. **GitHub:** desde la PC original, la cuenta `ineditodigital-sudo` no tenía permiso de escritura. La PC RAM sí subió versiones antes (la 2.7.0 está en `main`).
+6. **Probar la 2.14.1 en el teléfono:** que una canción tocada en frío empiece más rápido y que reordenar la cola al final de una canción no deje silencio.
 
 ## Compilar
-- **Requisitos:** Node 20+, JDK 17+, Android SDK (en `android/local.properties`, `sdk.dir` con `C\:/...` escapado). La librería nativa de Spotify (`libmurmurspotify.so`) ya viene en el repositorio; se compila con `-x compileSpotifyNative`.
+- **Requisitos:** Node 20+, JDK 17+, Android SDK (en `android/local.properties`, `sdk.dir` con `C\:/...` escapado). La librería nativa de Spotify (`libmurmurspotify.so`) **no** viene en el repositorio: `.gitignore` excluye `android/app/src/main/jniLibs/`. Hay que copiarla de una compilación anterior a `android/app/src/main/jniLibs/<abi>/` y compilar con `-x compileSpotifyNative`, o compilarla con Rust (`scripts/build-spotify-native.mjs`). El código de `native/` no cambia desde la 2.5.1.
+- **Firmas de prueba por PC:** cada PC firma las versiones de prueba con su propio `~/.android/debug.keystore`. Las de la PC RAM llevan `78d2b623…` y las de la PC original `b2c540f0…`. Una versión de una PC no se instala encima de la de otra. Para que ambas PC produzcan la misma firma, hay que copiar el mismo `debug.keystore` a las dos por un medio seguro (USB), nunca por el repositorio.
 - **Web:** `npm.cmd ci`, después `npx.cmd tsc -b` y `npx.cmd vitest run` (214 pruebas).
 - **APK de prueba:** `npm.cmd run android:sync` y, desde `android`:
   `.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug "-Pkotlin.incremental=false" "-Pabi=arm64-v8a" -x compileSpotifyNative --console=plain`

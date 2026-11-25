@@ -245,3 +245,11 @@ Resultado de cierre de 2.5. Pasaron 141 pruebas web, 64 pruebas Android locales,
 - **Bienvenida (`Welcome.tsx`):** 3 pasos en el primer inicio (`murmur.welcomed`). En web se prueba con `?bienvenida`.
 - **Reporte de cierres:** `CrashLog` en `MurmurApplication` guarda `last-crash.txt`. Al siguiente inicio aparece un aviso con el botón «Enviar» (hoja de compartir de Android) que incluye los últimos 10 errores de la interfaz (`murmur.jsErrors`). Nada se envía solo.
 - `APP_VERSION` ya sale de package.json.
+## 2.14.1 (code 30) — audio sin esperas (lo que faltaba de la 2.7.1)
+La 2.7.1 de la PC RAM nunca llegó a GitHub; la 2.8.0 solo trasladó su precarga de enlaces. Se recuperan las otras piezas, adaptadas al código actual:
+- **Cliente denegado en pausa:** `NativeNetwork.resolveUncached` deja de pedir audio al cliente anónimo ANDROID_MUSIC durante 30 min cuando YouTube lo niega (`playability_denied`, 401 o 403). Antes cada toque en frío pagaba esa llamada fallida antes de ir a NewPipe.
+- **Una sola resolución por canción:** `resolveAudio` comparte la petición en curso (`inflight`). Un toque sobre una canción que la precarga ya está resolviendo espera ese resultado en vez de extraerla otra vez.
+- **Cola que cambia durante una transición:** si la canción saliente ya terminó, `switchNative` sigue con la nueva siguiente en lugar de quedarse en silencio.
+- **Enlace roto al precargar:** cuando falla la precarga de la siguiente, se olvida su enlace (`NativeNetwork.forget`) y el reintento resuelve uno nuevo, en vez de reutilizar el roto hasta 3 h.
+- Pruebas: `AudioResolutionTest` (5). La caché de 2.8.0 (3 h y margen de 20 min antes de `expire`) no cambia.
+- No verificado en el teléfono: esta PC no tiene uno conectado por ADB.

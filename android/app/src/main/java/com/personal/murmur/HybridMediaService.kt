@@ -214,8 +214,14 @@ class HybridMediaService : MediaSessionService() {
             try {
                 val sources = if (spotify) emptyList() else withContext(Dispatchers.IO) { sourcesFor(target) }
                 val candidate = if (forward) upcoming.firstOrNull() else played.lastOrNull()
-                if (!PlaybackRequests.isCurrent(ticket) || from != entryIdentity(track) ||
-                    key != entryIdentity(candidate)) return@launch
+                if (!PlaybackRequests.isCurrent(ticket) || from != entryIdentity(track)) return@launch
+                if (key != entryIdentity(candidate)) {
+                    // The queue changed while this track was resolving (an addition, a reorder).
+                    // If the outgoing track already finished, continue with the new next entry
+                    // instead of staying silent.
+                    if (forward && !spotifyActive && primaryPlayer.playbackState == Player.STATE_ENDED) advanceNative()
+                    return@launch
+                }
                 if (forward) upcoming.removeAt(0)
                 else {
                     played.removeLast()
@@ -798,6 +804,8 @@ class HybridMediaService : MediaSessionService() {
                     }
                 }
                 if (nextTrack != null && secondaryPlayer.playerError != null && fade == null) {
+                    // The cached link is what failed; the retry must resolve a fresh one.
+                    nextTrack?.optString("videoId")?.takeIf { it.isNotBlank() }?.let(NativeNetwork::forget)
                     nextTrack = null
                     secondaryPlayer.clearMediaItems()
                     preloadRetryAt = now + 8_000

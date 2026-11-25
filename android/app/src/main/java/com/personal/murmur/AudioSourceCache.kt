@@ -13,4 +13,5 @@ class AudioSourceCache<T>(private val capacity: Int = 12, private val lifetimeMs
         while (entries.size > capacity) entries.remove(entries.keys.first())
     }
     @Synchronized fun remove(key: String) { entries.remove(key) }
+    @Synchronized fun clear() = entries.clear()
 }

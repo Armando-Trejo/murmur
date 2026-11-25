@@ -46,34 +46,77 @@ object NativeNetwork {
     fun downloadableAudio(info: StreamInfo) = audioCandidates(info).firstOrNull { it.deliveryMethod == org.schabi.newpipe.extractor.stream.DeliveryMethod.PROGRESSIVE_HTTP }
         ?: error("Esta emisión no ofrece un archivo de audio descargable. Puedes escucharla en línea.")
     /** Signed links last ~6 h; keep them while they have margin so revisits and skips skip the resolver. */
-    private val resolved = AudioSourceCache<YouTubeMusicResolver.Audio>(capacity = 48, lifetimeMs = 3 * 60 * 60_000L)
+    private val resolved = AudioSourceCache<YouTubeMusicResolver.Audio>(capacity = 48, lifetimeMs = 3 * 60 * 60_000L, now = { clock() })
     private const val EXPIRY_MARGIN_MS = 20 * 60_000L
-    fun linkStillValid(audio: YouTubeMusicResolver.Audio, now: Long = System.currentTimeMillis()): Boolean {
+    /** Swappable for tests: the fast ANDROID_MUSIC path, the NewPipe extractor path and the clock. */
+    private val defaultExtractor: (String) -> YouTubeMusicResolver.Audio = { id ->
+        val info = extract(id)
+        YouTubeMusicResolver.Audio(info.duration, info.description.content, playbackSources(info))
+    }
+    internal var directResolver: (String) -> YouTubeMusicResolver.Audio = YouTubeMusicResolver::resolve
+    internal var extractorResolver: (String) -> YouTubeMusicResolver.Audio = defaultExtractor
+    internal var clock: () -> Long = { System.currentTimeMillis() }
+    /** A request already running (usually a prefetch) is joined instead of extracting the same video twice. */
+    private val inflight = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<YouTubeMusicResolver.Audio>>()
+    /** YouTube denies the anonymous ANDROID_MUSIC client (LOGIN_REQUIRED); after a denial, skip it instead of paying for it on every tap. */
+    @Volatile private var directBlockedUntil = 0L
+    private const val DIRECT_BLOCK_MS = 30 * 60_000L
+    fun linkStillValid(audio: YouTubeMusicResolver.Audio, now: Long = clock()): Boolean {
         val expire = audio.sources.firstOrNull()?.uri?.let { Regex("[?&]expire=(\\d+)").find(it)?.groupValues?.get(1)?.toLongOrNull() }
             ?: return true
         return expire * 1000 - now > EXPIRY_MARGIN_MS
     }
+    fun cachedAudio(videoId: String) = resolved.get(videoId)?.takeIf { linkStillValid(it) }
+    /** Drops a link that failed to play so the next attempt resolves a fresh one. */
+    fun forget(videoId: String) = resolved.remove(videoId)
+    internal fun resetForTests() { resolved.clear(); inflight.clear(); directBlockedUntil = 0 }
+    internal fun restoreForTests() {
+        resetForTests()
+        directResolver = YouTubeMusicResolver::resolve
+        extractorResolver = defaultExtractor
+        clock = { System.currentTimeMillis() }
+    }
     fun resolveAudio(videoId:String,preferNewPipe:Boolean=false,forceRefresh:Boolean=false):YouTubeMusicResolver.Audio {
-        if (!preferNewPipe && !forceRefresh) resolved.get(videoId)?.takeIf { linkStillValid(it) }?.let { return it }
+        if (preferNewPipe || forceRefresh) {
+            resolved.remove(videoId)
+            return resolveUncached(videoId, preferNewPipe).also { resolved.put(videoId, it) }
+        }
+        cachedAudio(videoId)?.let { return it }
         resolved.remove(videoId)
-        val result = resolveUncached(videoId, preferNewPipe)
-        resolved.put(videoId, result)
-        return result
+        val mine = java.util.concurrent.CompletableFuture<YouTubeMusicResolver.Audio>()
+        val running = inflight.putIfAbsent(videoId, mine)
+        if (running != null) {
+            return try { running.get(45, TimeUnit.SECONDS) }
+            catch (failure: java.util.concurrent.ExecutionException) { throw (failure.cause as? Exception) ?: failure }
+        }
+        try {
+            val result = resolveUncached(videoId, false)
+            resolved.put(videoId, result)
+            mine.complete(result)
+            return result
+        } catch (failure: Exception) {
+            mine.completeExceptionally(failure)
+            throw failure
+        } finally {
+            inflight.remove(videoId, mine)
+        }
     }
     private fun resolveUncached(videoId:String,preferNewPipe:Boolean):YouTubeMusicResolver.Audio {
         val extractorFailure = if (preferNewPipe) try {
-            val info = extract(videoId)
-            return YouTubeMusicResolver.Audio(info.duration, info.description.content, playbackSources(info))
+            return extractorResolver(videoId)
         } catch (failure: Exception) { failure } else null
-        val directFailure = try {
-            return YouTubeMusicResolver.resolve(videoId)
-        } catch (failure: Exception) { failure }
-        if (extractorFailure != null) throw sourceFailure(directFailure, extractorFailure)
-        try {
-            val info = extract(videoId)
-            return YouTubeMusicResolver.Audio(info.duration, info.description.content, playbackSources(info))
+        val directFailure = if (clock() < directBlockedUntil) null else try {
+            return directResolver(videoId)
         } catch (failure: Exception) {
-            throw sourceFailure(directFailure, failure)
+            if (failure is YoutubeSourceFailure && (failure.reason == "playability_denied" || failure.httpStatus in setOf(401, 403)))
+                directBlockedUntil = clock() + DIRECT_BLOCK_MS
+            failure
+        }
+        if (extractorFailure != null) throw sourceFailure(*listOfNotNull(directFailure, extractorFailure).toTypedArray())
+        try {
+            return extractorResolver(videoId)
+        } catch (failure: Exception) {
+            throw sourceFailure(*listOfNotNull(directFailure, failure).toTypedArray())
         }
     }
 
