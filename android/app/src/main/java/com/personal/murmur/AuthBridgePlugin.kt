@@ -337,7 +337,7 @@ class AuthBridgePlugin : Plugin() {
     fun oauthCallback(uri: android.net.Uri) { scope.launch {
         try {
             check(OAuthCallbackRequest.validState(prefs.getString("oauth_state",null),uri.getQueryParameter("state"),prefs.getLong("oauth_started_at",0),System.currentTimeMillis())) { "La autorización caducó o su respuesta no es válida. Inicia OAuth de nuevo." }
-            if(uri.getQueryParameter("error") != null) throw ProviderFailure("SPOTIFY_AUTHORIZATION_DENIED",403,"spotify","authorization","Spotify no concedió la autorización. Comprueba la cuenta y los usuarios permitidos de tu aplicación en Spotify for Developers y vuelve a autorizar.")
+            if(uri.getQueryParameter("error") != null) throw ProviderFailure("SPOTIFY_AUTHORIZATION_DENIED",403,"spotify","authorization","Spotify no concedió el acceso. Si aceptaste y aun así falla, tu cuenta todavía no está dada de alta en MURMUR: pide acceso; mientras tanto puedes usar YouTube Music.")
             val code = uri.getQueryParameter("code") ?: error("Autorización cancelada en Spotify")
             val client = prefs.getString("pending_client_id",null) ?: error("Falta Client ID de la autorización")
             val result = withContext(Dispatchers.IO) { requestJson(Request.Builder().url("https://accounts.spotify.com/api/token").post(FormBody.Builder().add("grant_type","authorization_code").add("code",code).add("redirect_uri",LoopbackOAuthServer.REDIRECT).add("client_id",client).add("code_verifier",prefs.getString("pkce","")!!).build()).build(),"spotify","oauth_token") }

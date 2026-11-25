@@ -125,6 +125,7 @@ import { runSmartDownloads } from "./core/smartDownloads";
 import type { CustomArtwork } from "./core/types";
 import { useHeaderScroll } from "./core/useHeaderScroll";
 import { WakeWordSetting } from "./components/WakeWordSetting";
+import { Welcome, needsWelcome } from "./components/Welcome";
 import {
   loadRecentSearches,
   pushRecent,
@@ -245,6 +246,9 @@ export default function App() {
     value ? nav.patch({ player: true }) : nav.close("player");
   const [toast, setToast] = useState("");
   const [toastKind, setToastKind] = useState<NoticeKind>("info");
+  const [welcome, setWelcome] = useState(needsWelcome);
+  /** Optional button on the notice (e.g. "Enviar" for a crash report). */
+  const [toastAction, setToastAction] = useState<{ label: string; run: () => void }>();
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const [provider, setProvider] = useState("all");
@@ -493,8 +497,9 @@ export default function App() {
     document.addEventListener("pointerdown", ripple, { passive: true });
     return () => document.removeEventListener("pointerdown", ripple);
   }, [reduced]);
-  const notify = (message: string, kind: NoticeKind = "info") => {
+  const notify = (message: string, kind: NoticeKind = "info", action?: { label: string; run: () => void }) => {
     setToastKind(kind);
+    setToastAction(action ? () => action : undefined);
     setToast(message);
   };
   const guard = async (fn: () => Promise<unknown>) => {
@@ -659,6 +664,16 @@ export default function App() {
     void loadRecentSearches().then(setRecentSearches).catch(() => {});
     // A few seconds after start, so it never competes with the first screen.
     const hints = setTimeout(() => void updateVoiceHints().catch(() => {}), 8000);
+    // MURMUR closed unexpectedly last time: offer to share what happened (the person chooses where).
+    if (isNative)
+      void Voice.lastCrash().then(({ report, version }) => {
+        if (!report) return;
+        const recent = localStorage.getItem("murmur.jsErrors") || "";
+        notify("MURMUR se cerró inesperadamente la última vez. ¿Envías el reporte para corregirlo?", "error", {
+          label: "Enviar",
+          run: () => void Voice.shareText({ title: "Reporte de MURMUR " + version, text: report + (recent ? "\n\nErrores recientes:\n" + recent : "") }).catch(() => {}),
+        });
+      }).catch(() => {});
     const on = () => setOnline(navigator.onLine);
     window.addEventListener("online", on);
     window.addEventListener("offline", on);
@@ -672,7 +687,7 @@ export default function App() {
     if (!toast) return;
     const t = setTimeout(
       () => setToast(""),
-      toastKind === "error" ? 10000 : 6500,
+      toastAction ? 15000 : toastKind === "error" ? 10000 : 6500,
     );
     return () => clearTimeout(t);
   }, [toast]);
@@ -3087,6 +3102,12 @@ export default function App() {
         )}
       </AnimatePresence>
       <AnimatePresence>
+        {welcome && (
+          <Welcome notify={notify} youtubeConnected={!!status.youtubeSession} spotifyConnected={!!status.spotify}
+            onDone={() => { setWelcome(false); setTab("home"); }} />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
         {toast && (
           <motion.div
             role={toastKind === "error" ? "alert" : "status"}
@@ -3107,6 +3128,11 @@ export default function App() {
               )}
             </span>
             <span>{toast}</span>
+            {toastAction && (
+              <button className="snackbar-action" onClick={() => { toastAction.run(); setToast(""); }}>
+                {toastAction.label}
+              </button>
+            )}
             <button aria-label="Cerrar aviso" onClick={() => setToast("")}>
               <X size={17} />
             </button>

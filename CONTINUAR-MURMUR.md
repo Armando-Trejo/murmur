@@ -236,3 +236,12 @@ Resultado de cierre de 2.5. Pasaron 141 pruebas web, 64 pruebas Android locales,
 - Nuevos comandos: «¿qué canción es?», «más como esta», «aleatorio».
 - Recordar sesión: `murmur.session` en localStorage (cola, índice y segundo; se guarda cada 4 s y al ocultar la app). Al iniciar sin servicio nativo se restaura en pausa y, al reproducir, arranca con `startAtMs`, que el plugin nativo respeta.
 - Prueba sin hablar: el script `voz.ps1` de la carpeta temporal envía `voice_text` y lee `voice:log`.
+## 2.14.0 (code 29) — primera versión para compartir
+- **Firma:** la versión para compartir (release) se firma con la llave `murmur-release.jks`, guardada en `%LOCALAPPDATA%\Inedito-Boveda`, cuya contraseña es el acceso `murmur-firma` de la bóveda. La llave se crea una sola vez con `scripts/crear-llave-release.ps1` y se compila con `scripts/compilar-release.ps1` (genera `MURMUR-<versión>.apk`). La versión release no se puede depurar: no admite `run-as` ni CDP. **Respaldar el .jks:** si se pierde, los usuarios tendrán que desinstalar para actualizar.
+- **Instalaciones de depuración anteriores:** usan otra firma. Para pasar a release hay que exportar el respaldo (Ajustes › Avanzado), desinstalar, instalar la release e importar el respaldo. La sesión de YouTube Music se vuelve a iniciar.
+- **Spotify:** el Client ID integrado sale de `VITE_SPOTIFY_CLIENT_ID` en `.env.local`, que no se sube al repositorio. Sin él, la tarjeta de Spotify dice «Disponible pronto» y se oculta «Conectar». Cualquiera puede escribir su propio Client ID en Opciones avanzadas. En modo desarrollo, Spotify solo admite a 25 usuarios dados de alta; a los demás les aparece `SPOTIFY_USER_NOT_ALLOWED`, con un mensaje claro.
+- **Spotify suena por MURMUR de forma predeterminada:** `spotifyViaYouTube()` es verdadero salvo que se elija un motor de Spotify en Opciones avanzadas (`murmur.spotifyVia = "spotify"`).
+- **Conexiones:** YouTube Music aparece primero («Funciona sin cuenta»). Lo técnico (motores, Client ID, Redirect URI, huella Android) quedó en «Opciones avanzadas».
+- **Bienvenida (`Welcome.tsx`):** 3 pasos en el primer inicio (`murmur.welcomed`). En web se prueba con `?bienvenida`.
+- **Reporte de cierres:** `CrashLog` en `MurmurApplication` guarda `last-crash.txt`. Al siguiente inicio aparece un aviso con el botón «Enviar» (hoja de compartir de Android) que incluye los últimos 10 errores de la interfaz (`murmur.jsErrors`). Nada se envía solo.
+- `APP_VERSION` ya sale de package.json.

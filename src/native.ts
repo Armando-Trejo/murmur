@@ -163,6 +163,10 @@ interface VoiceBridge {
   downloadModel(): Promise<{ available: boolean; message: string }>;
   /** "Ok MURMUR" wake phrase (offline listener in a microphone foreground service). */
   wakeWordStatus(): Promise<{ enabled: boolean; running: boolean; model: boolean }>;
+  /** Report of the last unexpected close, once (null when there was none). */
+  lastCrash(): Promise<{ report: string | null; version: string }>;
+  /** Android's share sheet with a text. */
+  shareText(o: { text: string; title?: string }): Promise<void>;
   /** Names the speech recognizer should expect (artists, playlists). */
   setVoiceHints(o: { hints: string[] }): Promise<void>;
   setWakeWord(o: { enabled: boolean }): Promise<{ enabled: boolean; model?: boolean }>;

@@ -81,6 +81,7 @@ describe("AudioOrchestrator", () => {
     expect(p.getSnapshot().error).toBe("");
   });
   it("keeps integrated Spotify buffering truthful and forwards full metadata", async () => {
+    vi.stubGlobal("localStorage", { getItem: (key: string) => (key === "murmur.spotifyVia" ? "spotify" : null), setItem: () => {}, removeItem: () => {} });
     const local = {
       deviceName: "MURMUR · Integrado",
       transport: "integrated",

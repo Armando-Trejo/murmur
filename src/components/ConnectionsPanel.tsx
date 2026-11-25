@@ -12,6 +12,7 @@ import { Auth, isNative, type ConnectionStatus } from "../native";
 import { syncSpotifyLibrary } from "../core/SpotifyLibrary";
 import { importYouTubeLibrary } from "../core/YouTubeLibrary";
 import { SPOTIFY_CLIENT_ID, SPOTIFY_REDIRECT_URI } from "../config";
+import { setSpotifyViaYouTube, spotifyViaYouTube } from "../core/spotifyBridge";
 
 export type NoticeKind = "info" | "success" | "error";
 const redirect = SPOTIFY_REDIRECT_URI;
@@ -30,12 +31,9 @@ export function ConnectionsPanel({
     () => localStorage.getItem("murmur.spotify.clientId") || SPOTIFY_CLIENT_ID,
   );
   const [busy, setBusy] = useState("");
-  const [configurationOpen, setConfigurationOpen] = useState(
-    () =>
-      !/^[a-f0-9]{32}$/i.test(
-        localStorage.getItem("murmur.spotify.clientId") || SPOTIFY_CLIENT_ID,
-      ),
-  );
+  const [viaMurmur, setViaMurmur] = useState(spotifyViaYouTube);
+  const [configurationOpen, setConfigurationOpen] = useState(false);
+  const clientReady = /^[a-f0-9]{32}$/i.test(clientId);
   const [progress, setProgress] = useState("");
   const [returnUrl, setReturnUrl] = useState("");
   useEffect(() => {
@@ -76,7 +74,7 @@ export function ConnectionsPanel({
     );
   }
   return (
-    <>
+    <div className="connections-cards">
       <section className="connection-card" aria-labelledby="spotify-title">
         <div className="connection-header">
           <span className="service-logo spotify">
@@ -91,7 +89,7 @@ export function ConnectionsPanel({
                   ? "Biblioteca autorizada"
                   : status.spotifySession
                     ? "Sesión guardada · autorización pendiente"
-                    : "Autoriza tu biblioteca"}
+                    : clientReady ? "Sin conectar" : "Disponible pronto"}
             </p>
           </div>
           <span
@@ -102,9 +100,8 @@ export function ConnectionsPanel({
           />
         </div>
         <p className="connection-copy">
-          Importa tus Me Gusta y playlists con OAuth. Elige el motor integrado
-          para reproducir dentro de MURMUR o Connect para un reproductor
-          externo.
+          Trae tus Me gusta y tus playlists de Spotify. MURMUR las reproduce
+          por su cuenta: no necesitas abrir la app de Spotify.
         </p>
         {!status.spotify && status.spotifySession && (
           <p className="connection-notice">
@@ -112,16 +109,125 @@ export function ConnectionsPanel({
               "Guardar la sesión web no concede permisos para sincronizar tu biblioteca. Completa la autorización OAuth."}
           </p>
         )}
+        {!clientReady && (
+          <p className="connection-notice">
+            La conexión con Spotify todavía no está habilitada en esta versión. Mientras tanto
+            puedes buscar y escuchar cualquier canción, también las de Spotify.
+          </p>
+        )}
+        <div className="oauth-form">
+          <button
+            className="button primary full"
+            hidden={!clientReady}
+            disabled={!!busy || !clientReady}
+            onClick={() =>
+              void run("oauth", async () => {
+                await Auth.oauthLogin({ clientId });
+                notify(
+                  "Completa el permiso en Spotify y vuelve a MURMUR. El acceso se comprobará al terminar.",
+                );
+              })
+            }
+          >
+            {busy === "oauth"
+              ? "Abriendo autorización…"
+              : status.spotify
+                ? "Volver a conectar Spotify"
+                : "Conectar Spotify"}
+            <ArrowUpRight size={18} />
+          </button>
+        </div>
+        {(status.spotifySession ||
+          status.oauth ||
+          status.spotify ||
+          status.spotifyEngineAuthorized ||
+          status.spotifyEngineAuthorizing) && (
+          <div className="connection-actions">
+            <button
+              disabled={!!busy}
+              onClick={() =>
+                void run("check", async () => {
+                  const value = await Auth.verifySpotify();
+                  onStatus(value);
+                  if (!value.spotify)
+                    throw new Error(
+                      value.spotifyMessage ||
+                        "Spotify no confirmó permisos de biblioteca. Autoriza la cuenta de nuevo.",
+                    );
+                  notify(
+                    "Spotify autorizado. Ya puedes sincronizar tu biblioteca.",
+                    "success",
+                  );
+                })
+              }
+            >
+              <RefreshCw size={17} className={busy === "check" ? "spin" : ""} />
+              Comprobar acceso
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Cerrar sesión Spotify"
+              disabled={!!busy}
+              onClick={() =>
+                void run("logout", async () => {
+                  await Auth.logout({ provider: "spotify" });
+                  notify(
+                    "Sesión de Spotify cerrada. Tu biblioteca local se conserva.",
+                    "success",
+                  );
+                })
+              }
+            >
+              <LogOut size={18} />
+            </button>
+          </div>
+        )}
+        <div className="sync-actions" hidden={!clientReady}>
+          <button
+            className="button secondary full"
+            disabled={!!busy || !status.spotify}
+            onClick={() =>
+              void run("sync", async () => {
+                const summary = await syncSpotifyLibrary(setProgress);
+                notify(
+                  `${summary.tracks} canciones y ${summary.playlists} playlists sincronizadas.${summary.unavailable.length ? ` ${summary.unavailable.length} listas no permitieron acceso; sus datos locales se conservan.` : ""}${summary.topUnavailable ? " Spotify no permitió consultar tus favoritos de escucha." : ""}`,
+                  summary.unavailable.length ? "info" : "success",
+                );
+              })
+            }
+          >
+            <RefreshCw size={18} className={busy === "sync" ? "spin" : ""} />
+            {busy === "sync"
+              ? "Sincronizando biblioteca…"
+              : "Sincronizar biblioteca"}
+          </button>
+          {progress && busy === "sync" && (
+            <p className="help-copy" role="status">
+              {progress}
+            </p>
+          )}
+        </div>
+        <details
+          className="oauth-configuration spotify-advanced"
+          open={configurationOpen}
+          onToggle={(e) => setConfigurationOpen(e.currentTarget.open)}
+        >
+          <summary>Opciones avanzadas</summary>
+          <p className="help-copy">Solo si quieres usar los motores propios de Spotify o tu propia aplicación de Spotify for Developers. No hace falta para escuchar.</p>
         <div className="spotify-engine">
           <label htmlFor="spotify-playback-mode">Reproducción de Spotify</label>
           <select
             id="spotify-playback-mode"
-            value={status.spotifyPlaybackMode || "integrated"}
+            value={viaMurmur ? "murmur" : status.spotifyPlaybackMode || "integrated"}
             disabled={!!busy}
             onChange={(event) =>
               void run("playback-mode", async () => {
                 if (!isNative)
                   throw new Error("Selecciona el motor desde el APK Android.");
+                const murmur = event.target.value === "murmur";
+                setSpotifyViaYouTube(murmur);
+                setViaMurmur(murmur);
+                if (murmur) { notify("Spotify sonará con el motor de MURMUR.", "success"); return; }
                 onStatus(
                   await Auth.setSpotifyPlaybackMode({
                     mode: event.target.value as
@@ -132,11 +238,17 @@ export function ConnectionsPanel({
               })
             }
           >
+            <option value="murmur">MURMUR (recomendado)</option>
             <option value="integrated">Integrado · Premium</option>
             <option value="web">Integrado · Web</option>
             <option value="connect">Spotify Connect</option>
           </select>
-          {(status.spotifyPlaybackMode || "integrated") === "integrated" ? (
+          {viaMurmur ? (
+            <p className="help-copy">
+              Cada canción de Spotify suena con su misma grabación desde el motor
+              de MURMUR. No necesita Premium ni la app de Spotify.
+            </p>
+          ) : (status.spotifyPlaybackMode || "integrated") === "integrated" ? (
             <>
               <p className="help-copy">
                 El motor librespot reproduce dentro de MURMUR. No requiere abrir
@@ -239,13 +351,8 @@ export function ConnectionsPanel({
             </p>
           )}
         </div>
-        <div className="oauth-form">
-          <details
-            className="oauth-configuration"
-            open={configurationOpen}
-            onToggle={(e) => setConfigurationOpen(e.currentTarget.open)}
-          >
-            <summary>Configuración de Spotify</summary>
+          <h3 className="advanced-title">Aplicación de Spotify</h3>
+
             <label htmlFor="spotify-client">Client ID de Spotify</label>
             <input
               id="spotify-client"
@@ -322,98 +429,7 @@ export function ConnectionsPanel({
               Estos datos solo se utilizan para Connect/App Remote. El motor
               integrado no necesita registrar el paquete ni la huella Android.
             </p>
-          </details>
-          <button
-            className="button primary full"
-            disabled={!!busy || !/^[a-f0-9]{32}$/i.test(clientId)}
-            onClick={() =>
-              void run("oauth", async () => {
-                await Auth.oauthLogin({ clientId });
-                notify(
-                  "Completa el permiso en Spotify y vuelve a MURMUR. El acceso se comprobará al terminar.",
-                );
-              })
-            }
-          >
-            {busy === "oauth"
-              ? "Abriendo autorización…"
-              : status.spotify
-                ? "Renovar autorización"
-                : "Autorizar Spotify"}
-            <ArrowUpRight size={18} />
-          </button>
-        </div>
-        {(status.spotifySession ||
-          status.oauth ||
-          status.spotify ||
-          status.spotifyEngineAuthorized ||
-          status.spotifyEngineAuthorizing) && (
-          <div className="connection-actions">
-            <button
-              disabled={!!busy}
-              onClick={() =>
-                void run("check", async () => {
-                  const value = await Auth.verifySpotify();
-                  onStatus(value);
-                  if (!value.spotify)
-                    throw new Error(
-                      value.spotifyMessage ||
-                        "Spotify no confirmó permisos de biblioteca. Autoriza la cuenta de nuevo.",
-                    );
-                  notify(
-                    "Spotify autorizado. Ya puedes sincronizar tu biblioteca.",
-                    "success",
-                  );
-                })
-              }
-            >
-              <RefreshCw size={17} className={busy === "check" ? "spin" : ""} />
-              Comprobar acceso
-            </button>
-            <button
-              className="icon-button"
-              aria-label="Cerrar sesión Spotify"
-              disabled={!!busy}
-              onClick={() =>
-                void run("logout", async () => {
-                  await Auth.logout({ provider: "spotify" });
-                  notify(
-                    "Sesión de Spotify cerrada. Tu biblioteca local se conserva.",
-                    "success",
-                  );
-                })
-              }
-            >
-              <LogOut size={18} />
-            </button>
-          </div>
-        )}
-        <div className="sync-actions">
-          <button
-            className="button secondary full"
-            disabled={!!busy || !status.spotify}
-            onClick={() =>
-              void run("sync", async () => {
-                const summary = await syncSpotifyLibrary(setProgress);
-                notify(
-                  `${summary.tracks} canciones y ${summary.playlists} playlists sincronizadas.${summary.unavailable.length ? ` ${summary.unavailable.length} listas no permitieron acceso; sus datos locales se conservan.` : ""}${summary.topUnavailable ? " Spotify no permitió consultar tus favoritos de escucha." : ""}`,
-                  summary.unavailable.length ? "info" : "success",
-                );
-              })
-            }
-          >
-            <RefreshCw size={18} className={busy === "sync" ? "spin" : ""} />
-            {busy === "sync"
-              ? "Sincronizando biblioteca…"
-              : "Sincronizar biblioteca"}
-          </button>
-          {progress && busy === "sync" && (
-            <p className="help-copy" role="status">
-              {progress}
-            </p>
-          )}
-        </div>
-        <button
+                  <button
           className="text-button"
           onClick={() =>
             void run("open", async () => {
@@ -424,6 +440,7 @@ export function ConnectionsPanel({
           Abrir app de Spotify
           <ArrowUpRight size={16} />
         </button>
+        </details>
       </section>
       <section className="connection-card" aria-labelledby="youtube-title">
         <div className="connection-header">
@@ -431,22 +448,21 @@ export function ConnectionsPanel({
             <Play size={25} fill="currentColor" />
           </span>
           <div>
-            <h2 id="youtube-title">YouTube</h2>
-            <p>Audio público disponible sin cuenta</p>
+            <h2 id="youtube-title">YouTube Music</h2>
+            <p>{status.youtubeSession ? "Cuenta conectada" : "Funciona sin cuenta"}</p>
           </div>
           <Headphones size={22} />
         </div>
         <p className="connection-copy">
-          La búsqueda y el audio de YouTube funcionan por separado de Spotify.
-          La sesión solo se utiliza para intentar importar tu biblioteca
-          privada.
+          Busca y escucha cualquier canción sin iniciar sesión. Si entras con tu
+          cuenta, MURMUR trae tu Inicio, tus Me gusta y tus playlists.
         </p>
-        <button className="button primary full" onClick={onSearch}>
-          Buscar audio de YouTube
+        <button className="button secondary full" onClick={onSearch}>
+          Buscar música
           <ArrowUpRight size={18} />
         </button>
         <button
-          className="button secondary full private-login"
+          className={"button full private-login " + (status.youtubeSession ? "secondary" : "primary")}
           disabled={!!busy}
           onClick={() =>
             void run("youtube-login", async () => {
@@ -459,8 +475,8 @@ export function ConnectionsPanel({
           }
         >
           {status.youtubeSession
-            ? "Renovar sesión privada de YouTube"
-            : "Conectar biblioteca privada"}
+            ? "Volver a entrar a YouTube Music"
+            : "Entrar con mi cuenta de YouTube Music"}
         </button>
         {status.youtubeSession && (
           <div className="connection-actions">
@@ -498,6 +514,6 @@ export function ConnectionsPanel({
           </p>
         )}
       </section>
-    </>
+    </div>
   );
 }

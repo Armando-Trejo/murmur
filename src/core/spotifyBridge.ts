@@ -21,11 +21,14 @@ export interface YouTubeSong {
 }
 
 const VIA_KEY = "murmur.spotifyVia";
-/** "youtube" once Spotify refused playback here; cleared to try Spotify's own engines again. */
-export const spotifyViaYouTube = () => typeof localStorage !== "undefined" && localStorage.getItem(VIA_KEY) === "youtube";
+/**
+ * Spotify songs play through MURMUR's own engine (their YouTube Music twin) unless the user chose
+ * a Spotify engine in Opciones avanzadas ("spotify"). New installs never depend on the Spotify app.
+ */
+export const spotifyViaYouTube = () => typeof localStorage === "undefined" || localStorage.getItem(VIA_KEY) !== "spotify";
 export function setSpotifyViaYouTube(value: boolean) {
-  if (value) localStorage.setItem(VIA_KEY, "youtube");
-  else localStorage.removeItem(VIA_KEY);
+  if (value) localStorage.removeItem(VIA_KEY);
+  else localStorage.setItem(VIA_KEY, "spotify");
 }
 
 const cleanTitle = (title: string) =>

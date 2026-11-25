@@ -9,8 +9,8 @@ android {
         applicationId "com.personal.murmur"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 28
-        versionName "2.13.0"
+        versionCode 29
+        versionName "2.14.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Optional single-ABI build for direct phone downloads, e.g. -Pabi=arm64-v8a.
         if (project.hasProperty('abi')) {
@@ -22,10 +22,26 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Release signing comes from the environment (scripts/compilar-release.ps1 reads it from the
+    // local vault); without it, assembleRelease produces an unsigned APK.
+    signingConfigs {
+        release {
+            def store = System.getenv('MURMUR_KEYSTORE')
+            if (store) {
+                storeFile file(store)
+                storeType 'PKCS12'
+                storePassword System.getenv('MURMUR_KEYSTORE_PASSWORD')
+                keyAlias 'murmur'
+                keyPassword System.getenv('MURMUR_KEYSTORE_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
+            debuggable false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (System.getenv('MURMUR_KEYSTORE')) signingConfig signingConfigs.release
         }
     }
     compileOptions {

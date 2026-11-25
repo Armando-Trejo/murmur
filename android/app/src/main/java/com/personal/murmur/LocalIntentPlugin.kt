@@ -13,6 +13,19 @@ import kotlinx.coroutines.*
 class LocalIntentPlugin : Plugin() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var listening = false
+    /** Report of the last unexpected close (returned once), plus the app version. */
+    @PluginMethod fun lastCrash(call: PluginCall) {
+        val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: ""
+        call.resolve(JSObject().put("report", CrashLog.take(context)).put("version", version))
+    }
+    /** Android's share sheet with a text (WhatsApp, correo…): the person chooses where it goes. */
+    @PluginMethod fun shareText(call: PluginCall) { activity.runOnUiThread {
+        val text = call.getString("text")?.take(20_000) ?: return@runOnUiThread call.reject("Nada que compartir")
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+            .putExtra(Intent.EXTRA_SUBJECT, call.getString("title") ?: "Reporte de MURMUR")
+        activity.startActivity(Intent.createChooser(send, call.getString("title") ?: "Compartir"))
+        call.resolve()
+    } }
     @PluginMethod fun status(call: PluginCall) { activity.runOnUiThread {
         val local = android.os.Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
         call.resolve(JSObject().put("available", local || SpeechRecognizer.isRecognitionAvailable(context)).put("onDevice", local)

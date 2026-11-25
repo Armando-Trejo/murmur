@@ -7,7 +7,7 @@ afterEach(() => vi.unstubAllGlobals());
 it.each(["spotifyEngineAuthorized", "spotifyEngineAuthorizing"])(
   "offers logout for %s without a library session",
   (state) => {
-    vi.stubGlobal("localStorage", { getItem: () => null });
+    vi.stubGlobal("localStorage", { getItem: (key: string) => (key === "murmur.spotifyVia" ? "spotify" : null) });
     const html = renderToStaticMarkup(
       <ConnectionsPanel
         status={{ spotify: false, youtube: false, oauth: false, [state]: true }}
@@ -20,7 +20,7 @@ it.each(["spotifyEngineAuthorized", "spotifyEngineAuthorizing"])(
   },
 );
 it("explains the Web alternative using the app owner's OAuth instead of native engine consent", () => {
-  vi.stubGlobal("localStorage", { getItem: () => null });
+  vi.stubGlobal("localStorage", { getItem: (key: string) => (key === "murmur.spotifyVia" ? "spotify" : null) });
   const html = renderToStaticMarkup(
     <ConnectionsPanel
       status={{

@@ -534,3 +534,66 @@ body:has(input:not([type="checkbox"]):not([type="range"]):not([type="color"]):fo
 .cover-editor-zoom input { flex: 1; accent-color: var(--brand-accent); height: 32px; }
 .cover-editor-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .cover-editor-actions .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+
+/* ---------- Notice with an action ("Enviar" a crash report) ---------- */
+.snackbar:has(.snackbar-action) { grid-template-columns: 22px minmax(0, 1fr) auto 44px; }
+.snackbar > button.snackbar-action {
+  width: auto; min-width: 0; height: 40px; padding: 0 14px;
+  border-radius: 999px; border: 0;
+  background: var(--brand-accent, #b69aff); color: var(--brand-ink, #000);
+  font-weight: 700; font-size: 0.85rem;
+}
+.snackbar > button.snackbar-action:active { transform: scale(0.97); }
+
+/* ---------- Welcome: first start, three steps ---------- */
+.welcome-sheet {
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; flex-direction: column;
+  padding: calc(64px + env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+  background: #07070a; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+}
+.welcome-glow {
+  position: absolute; inset: -30% -20% auto; height: 70%;
+  background: radial-gradient(closest-side, rgba(var(--brand-rgb, 182, 154, 255), 0.28), transparent 70%);
+  pointer-events: none;
+}
+.welcome-skip { position: fixed; top: max(18px, env(safe-area-inset-top)); right: 18px; z-index: 2; }
+.welcome-step {
+  position: relative; z-index: 1; width: 100%; max-width: 440px; margin: auto;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.welcome-step h1 { font-size: clamp(2.1rem, 10vw, 2.7rem); font-weight: 800; line-height: 1.02; letter-spacing: -0.04em; margin: 8px 0 0; text-wrap: balance; }
+.welcome-step > p { color: rgba(255, 255, 255, 0.72); font-size: 1.02rem; line-height: 1.5; margin: 0 0 8px; }
+.welcome-mark {
+  width: 64px; height: 64px; border-radius: 20px; display: grid; place-items: center;
+  color: var(--brand-ink, #000); background: var(--brand-accent, #b69aff);
+  box-shadow: 0 12px 40px rgba(var(--brand-rgb, 182, 154, 255), 0.35);
+}
+.welcome-step .button { min-height: 52px; }
+.welcome-next { align-self: center; margin-top: 4px; }
+.welcome-examples { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.welcome-examples li {
+  padding: 12px 14px; border-radius: 14px; background: #131218;
+  border: 1px solid rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.86); font-size: 0.95rem;
+}
+.welcome-step .glow-option { margin: 4px 0; }
+.welcome-dots { position: relative; z-index: 1; display: flex; gap: 8px; justify-content: center; margin: 24px 0 0; flex: none; }
+@media (max-height: 700px) {
+  .welcome-step { gap: 10px; }
+  .welcome-mark { width: 52px; height: 52px; border-radius: 16px; }
+  .welcome-examples li { padding: 9px 12px; font-size: 0.9rem; }
+}
+.welcome-dots span { width: 8px; height: 8px; border-radius: 99px; background: rgba(255, 255, 255, 0.2); transition: width 0.25s, background 0.25s; }
+.welcome-dots span.on { width: 22px; background: var(--brand-accent, #b69aff); }
+.spotify-advanced { margin-top: 12px; }
+.spotify-advanced .advanced-title { font-size: 0.95rem; margin: 18px 0 6px; }
+.spotify-advanced label { display: block; font-size: 0.85rem; margin: 0 0 8px; }
+.spotify-advanced input {
+  display: block; width: 100%; min-height: 48px; border: 1px solid #242424; border-radius: 6px;
+  background: #000; padding: 12px; color: #fff; font-size: 16px;
+}
+.connection-card .button[hidden] { display: none; }
+/* YouTube Music first: it works for anyone, with or without an account. */
+.connections-cards { display: flex; flex-direction: column; }
+.connections-cards > .connection-card[aria-labelledby="youtube-title"] { order: -1; }
+.sync-actions[hidden] { display: none; }
