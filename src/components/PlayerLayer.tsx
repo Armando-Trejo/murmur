@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import {
   animate,
   motion,
@@ -7,9 +7,18 @@ import {
   useTransform,
   type AnimationPlaybackControls,
 } from "framer-motion";
-import { motionMs, settleCss } from "../core/motion";
-import { dismissCommit, intentAxis, trackVelocity, type Axis, type Sample } from "../core/gestures";
+import { motionMs, release, settle, settleCss } from "../core/motion";
+import {
+  dismissCommit,
+  intentAxis,
+  riseCommit,
+  riseOpacity,
+  trackVelocity,
+  type Axis,
+  type Sample,
+} from "../core/gestures";
 import { haptic } from "../core/haptics";
+import { fitCover } from "../core/useFitCover";
 
 const center = (rect: DOMRect) => ({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
 const visible = (rect: DOMRect) => rect.width > 0 && rect.top >= 0 && rect.bottom <= window.innerHeight + 1;
@@ -21,16 +30,38 @@ const miniCover = () =>
   document.querySelector<HTMLElement>(".mini-info .cover");
 
 /**
+ * Swipe up on the mini player (useMiniRise): the player rises with the finger, its top edge where the
+ * mini player's top edge was grabbed. The mirror of pulling it down to close.
+ */
+export type PlayerRiseHandle = {
+  /**
+   * The finger started lifting the player from the mini player, whose top edge is at `top` (px). False when
+   * the player cannot follow (reduced motion, or still leaving): the caller then only opens it on release.
+   */
+  begin(top: number): boolean;
+  /** Where the player's top edge is now (px from the top of the screen). */
+  move(top: number): void;
+  /** Finger lifted at `velocity` px/ms upward. True when the player opens: the caller then opens it. */
+  release(velocity: number): boolean;
+  /** The gesture was taken away (pointercancel): the player sinks back into the mini player. */
+  cancel(): void;
+};
+
+/**
  * Keep the player exit bounded independently from queue reorder animations.
  * Pulling down from the header, or from anywhere while the player is scrolled to the top, carries the
  * whole panel with the finger; a long enough pull or a downward flick closes it, anything else springs back.
  */
-export function PlayerLayer({ open, onDismiss, children }: {
+export function PlayerLayer({ open, onDismiss, riseRef, children }: {
   open: boolean;
   onDismiss?: () => void;
+  /** Lets the mini player lift this layer with the finger (swipe up to open). */
+  riseRef?: Ref<PlayerRiseHandle>;
   children: ReactNode;
 }) {
   const [present, setPresent] = useState(open);
+  const presentNow = useRef(present);
+  presentNow.current = present;
   const reduced = useReducedMotion();
   const element = useRef<HTMLDivElement>(null);
   const panelAnimation = useRef<Animation>();
@@ -48,6 +79,94 @@ export function PlayerLayer({ open, onDismiss, children }: {
   latestOpen.current = open;
   const stuck = useRef<number>();
   const clickBlock = useRef(0);
+  /** Opacity while the finger lifts the player from the mini player (1 the rest of the time). */
+  const fade = useMotionValue(1);
+  const fadeTravel = useRef<AnimationPlaybackControls>();
+  /** Lifted from the mini player: following the finger, on its way up, or sinking back (to `from`). */
+  const rise = useRef<{ phase: "follow" | "opening" | "dropping"; from: number } | null>(null);
+  /** Until this time (just after rising open) the panel stays at its top. */
+  const riseGuard = useRef(0);
+  /** Sends the lifted player the rest of the way up with the finger's momentum (px/ms upward). */
+  const riseOpen = (velocity: number) => {
+    const lifted = rise.current;
+    if (!lifted) return;
+    lifted.phase = "opening";
+    travel.current?.stop();
+    fadeTravel.current?.stop();
+    const from = y.get();
+    // Capped so even a hard flick lands on the top edge without overshooting past it.
+    travel.current = animate(y, 0, {
+      type: "spring", stiffness: 400, damping: 44, restDelta: 0.5,
+      velocity: -Math.min(Math.max(velocity, 0) * 1000, from * 18),
+      onComplete: () => {
+        if (element.current) delete element.current.dataset.pulling;
+      },
+    });
+    fadeTravel.current = animate(fade, 1, { duration: motionMs.feedback / 1000, ease: settle });
+  };
+  /** Not lifted far enough: back down into the mini player, fading, then gone. */
+  const riseDrop = (velocity = 0) => {
+    const lifted = rise.current;
+    if (!lifted) return;
+    lifted.phase = "dropping";
+    travel.current?.stop();
+    fadeTravel.current?.stop();
+    clearTimeout(stuck.current);
+    const finish = () => {
+      if (rise.current !== lifted) return;
+      rise.current = null;
+      setPresent(false);
+      y.jump(0);
+      fade.jump(1);
+    };
+    if (reduced) {
+      finish();
+      return;
+    }
+    travel.current = animate(y, lifted.from, {
+      type: "spring", stiffness: 480, damping: 42, restDelta: 1, velocity: -velocity * 1000, onComplete: finish,
+    });
+    fadeTravel.current = animate(fade, 0, { duration: motionMs.playerOut / 1000, ease: release });
+  };
+  useImperativeHandle(riseRef, () => ({
+    begin(top) {
+      if (reduced || latestOpen.current) return false;
+      // Still leaving after a close: let it finish rather than catch it.
+      if (presentNow.current && !rise.current) return false;
+      travel.current?.stop();
+      fadeTravel.current?.stop();
+      clearTimeout(stuck.current);
+      rise.current = { phase: "follow", from: top };
+      y.jump(top);
+      fade.jump(riseOpacity(0));
+      if (!presentNow.current) setPresent(true);
+      return true;
+    },
+    move(top) {
+      const lifted = rise.current;
+      if (lifted?.phase !== "follow") return;
+      y.set(top);
+      fade.set(riseOpacity(lifted.from - top));
+    },
+    release(velocity) {
+      const lifted = rise.current;
+      if (lifted?.phase !== "follow") return false;
+      if (!riseCommit(lifted.from - y.get(), velocity, window.innerHeight)) {
+        riseDrop(velocity);
+        return false;
+      }
+      riseOpen(velocity);
+      // If navigation is busy and the player does not open, never leave it hanging half-way up.
+      clearTimeout(stuck.current);
+      stuck.current = window.setTimeout(() => {
+        if (!latestOpen.current && rise.current === lifted) riseDrop();
+      }, 450);
+      return true;
+    },
+    cancel() {
+      if (rise.current?.phase === "follow") riseDrop();
+    },
+  }));
   const settleBack = (velocity = 0) => {
     const panel = element.current;
     travel.current?.stop();
@@ -69,6 +188,27 @@ export function PlayerLayer({ open, onDismiss, children }: {
     const panel = element.current;
     if (!panel) return;
     panel.inert = !open;
+    const lifted = rise.current;
+    if (lifted) {
+      if (!open) {
+        // Mounted for the finger lifting it from the mini player: the gesture moves it. The cover takes its
+        // fitted size now (useFitCover only runs once open), so nothing resizes on the way up.
+        panel.dataset.pulling = "true";
+        if (lifted.phase === "follow") fitCover(panel);
+        return;
+      }
+      // Opened by the finger: already on its way up, no fade-in or cover flight. (Opened some other way
+      // while still held: it goes up from where it is.)
+      if (lifted.phase === "follow") riseOpen(0);
+      rise.current = null;
+      clearTimeout(stuck.current);
+      // The upward swipe that opened it would carry on as a scroll; the player opens at its top, so a
+      // pull down right away closes it instead of only scrolling back.
+      riseGuard.current = performance.now() + 700;
+      panel.scrollTop = 0;
+      panel.dataset.atTop = "true";
+      return;
+    }
     const flung = open ? null : thrown.current;
     thrown.current = null;
     clearTimeout(stuck.current);
@@ -97,6 +237,14 @@ export function PlayerLayer({ open, onDismiss, children }: {
         y.jump(0);
       }, duration);
       return () => clearTimeout(timeout);
+    }
+    if (!open && (y.get() !== 0 || fade.get() !== 1)) {
+      // Closed while still rising from the mini player: leave from the resting place, so the cover flight
+      // measures the real spots.
+      travel.current?.stop();
+      fadeTravel.current?.stop();
+      y.jump(0);
+      fade.jump(1);
     }
     const cover = panel.querySelector<HTMLElement>(".ambient-cover");
     const inFlight = cover && artAnimation.current?.playState === "running"
@@ -142,6 +290,7 @@ export function PlayerLayer({ open, onDismiss, children }: {
     panelAnimation.current?.cancel();
     artAnimation.current?.cancel();
     travel.current?.stop();
+    fadeTravel.current?.stop();
     clearTimeout(stuck.current);
   }, []);
   return present ? (
@@ -154,8 +303,9 @@ export function PlayerLayer({ open, onDismiss, children }: {
       className="expanded-player"
       layoutScroll
       layoutRoot
-      style={{ pointerEvents: open ? "auto" : "none", y, scale, originY: 0 }}
+      style={{ pointerEvents: open ? "auto" : "none", y, scale, originY: 0, opacity: fade }}
       onScroll={(event) => {
+        if (performance.now() < riseGuard.current && event.currentTarget.scrollTop > 0) event.currentTarget.scrollTop = 0;
         // At the top a downward drag belongs to the pull (touch-action: pan-down), elsewhere to the scroll.
         event.currentTarget.dataset.atTop = String(event.currentTarget.scrollTop <= 0);
       }}

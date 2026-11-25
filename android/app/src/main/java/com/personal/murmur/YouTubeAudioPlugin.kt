@@ -172,6 +172,28 @@ class YouTubeAudioPlugin : Plugin() {
         BackupWriter.completion = { saved, error -> if(error != null) call.reject(error) else call.resolve(JSObject().put("saved",saved)) }
         try { activity.startActivity(Intent(context,BackupWriter::class.java)) } catch(e: Exception) { BackupWriter.pending = null; BackupWriter.completion = null; call.reject("No se pudo abrir el selector de archivos") }
     }
+    /** Opens a new MURMUR version from the project's GitHub releases in the browser (download, then install). */
+    @PluginMethod fun openUpdate(call: PluginCall) {
+        val url = call.getString("url") ?: return call.reject("Sin enlace")
+        val uri = android.net.Uri.parse(url)
+        val allowed = uri.scheme == "https" && uri.host in setOf("github.com", "objects.githubusercontent.com") &&
+            (uri.path ?: "").startsWith("/Armando-Trejo/murmur/")
+        if (!allowed) return call.reject("Enlace de actualización no permitido")
+        try { activity.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); call.resolve() }
+        catch (e: Exception) { call.reject("No se encontró un navegador para descargar la actualización") }
+    }
+    /** MURMUR speaks a short answer or line (text-to-speech in Spanish; the music dips meanwhile). */
+    @PluginMethod fun speak(call: PluginCall) {
+        val text = call.getString("text") ?: return call.reject("Sin texto")
+        if (call.getBoolean("force") == true || SpokenReplies.repliesEnabled(context)) SpokenReplies.speak(context, text)
+        call.resolve()
+    }
+    /** Spoken answers to voice commands (on by default) and the presenter between songs (off by default). */
+    @PluginMethod fun voicePrefs(call: PluginCall) {
+        call.getBoolean("replies")?.let { SpokenReplies.setReplies(context, it) }
+        call.getBoolean("presenter")?.let { SpokenReplies.setPresenter(context, it) }
+        call.resolve(JSObject().put("replies", SpokenReplies.repliesEnabled(context)).put("presenter", SpokenReplies.presenterEnabled(context)))
+    }
     /** Silent copy of the backup in Descargas/MURMUR (survives uninstalling); no picker, no permission. */
     @PluginMethod fun saveAutoBackup(call: PluginCall) = async(call) {
         val content = call.getString("content") ?: error("Respaldo vacío")

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AudioLines } from "lucide-react";
 import { Audio, Voice, isNative } from "../native";
+import { VoiceMatchSetting } from "./VoiceEnrollment";
 
 /** Switch for the "Ok MURMUR" wake phrase; the first activation downloads the ~39 MB voice model. */
 export function WakeWordSetting({ notify }: { notify: (message: string, kind?: "info" | "success" | "error") => void }) {
@@ -35,17 +36,20 @@ export function WakeWordSetting({ notify }: { notify: (message: string, kind?: "
     }
   };
   return (
-    <label className="glow-option wake-option">
-      <AudioLines size={20} />
-      <span>
-        {busy ? "Preparando «Ok MURMUR»…" : "Decir «Ok MURMUR»"}
-        <small>
-          Escucha local sin enviar audio y comprueba dos veces la frase para no activarse con canciones
-          ni pláticas. El micrófono solo se abre con MURMUR en pantalla, con música sonando o hasta
-          10 minutos después de pausar. Para pedir música di «pon…».
-        </small>
-      </span>
-      <input type="checkbox" checked={enabled} disabled={busy} onChange={(e) => void change(e.target.checked)} />
-    </label>
+    <>
+      <label className="glow-option wake-option">
+        <AudioLines size={20} />
+        <span>
+          {busy ? "Preparando «Ok MURMUR»…" : "Decir «Ok MURMUR»"}
+          <small>
+            Escucha local sin enviar audio y comprueba dos veces la frase para no activarse con canciones
+            ni pláticas. El micrófono solo se abre con MURMUR en pantalla, con música sonando o hasta
+            10 minutos después de pausar. Para pedir música di «pon…».
+          </small>
+        </span>
+        <input type="checkbox" checked={enabled} disabled={busy} onChange={(e) => void change(e.target.checked)} />
+      </label>
+      {isNative && enabled && <VoiceMatchSetting notify={notify} />}
+    </>
   );
 }

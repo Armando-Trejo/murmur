@@ -81,6 +81,9 @@ interface AudioBridge {
   showVideo(o: { videoId: string }): Promise<void>;
   saveBackup(o: { content: string }): Promise<{ saved: boolean }>;
   saveAutoBackup(o: { content: string }): Promise<{ saved: boolean; file: string }>;
+  speak(o: { text: string; force?: boolean }): Promise<void>;
+  openUpdate(o: { url: string }): Promise<void>;
+  voicePrefs(o?: { replies?: boolean; presenter?: boolean }): Promise<{ replies: boolean; presenter: boolean }>;
   addListener(
     name: string,
     callback: (event: any) => void,
@@ -171,6 +174,14 @@ interface VoiceBridge {
   /** Names the speech recognizer should expect (artists, playlists). */
   setVoiceHints(o: { hints: string[] }): Promise<void>;
   setWakeWord(o: { enabled: boolean }): Promise<{ enabled: boolean; model?: boolean }>;
+  /** "Solo mi voz": speaker check for "Ok MURMUR"; the enrolled voice stays on the phone. */
+  voiceMatchStatus(): Promise<{ enabled: boolean; enrolled: boolean; model: boolean }>;
+  /** Downloads (first time, ~13 MB) and loads what "Entrena tu voz" needs. */
+  prepareVoiceMatch(): Promise<{ model: boolean }>;
+  /** One take (1-3) of "Ok MURMUR"; ok:false with a message when it was not usable. Events: "onVoiceEnrollment". */
+  enrollVoiceTake(o: { take: number }): Promise<{ ok: boolean; take: number; done: boolean; restart?: boolean; message?: string }>;
+  setVoiceMatch(o: { enabled: boolean }): Promise<{ enabled: boolean }>;
+  clearVoiceProfile(): Promise<{ enabled: boolean; enrolled: boolean }>;
   rankTags(o: {
     query: string;
     tags: string[];

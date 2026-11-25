@@ -11,6 +11,7 @@ import {
 } from "../core/gestures";
 import { haptic } from "../core/haptics";
 import { release } from "../core/motion";
+import { useLongPress } from "./useLongPress";
 
 /** Distance, in finger pixels, at which a release commits the swipe (mirrors swipeAction). */
 const COMMIT = 80;
@@ -26,6 +27,7 @@ export function SwipeSurface({
   onSwipe,
   reveal,
   fling,
+  onLongPress,
   children,
   ...props
 }: HTMLAttributes<HTMLDivElement> & {
@@ -41,6 +43,8 @@ export function SwipeSurface({
    * it back. Grabbing it while it settles continues from where it is.
    */
   fling?: string;
+  /** Holding the row still (~450 ms) opens its menu instead of tapping or swiping it (useLongPress). */
+  onLongPress?: () => void;
 }) {
   const active = useRef<{
     id: number;
@@ -58,6 +62,11 @@ export function SwipeSurface({
   const blocked = useRef(0);
   const surface = useRef<HTMLDivElement>(null);
   const moving = useRef<Moving>();
+  const press = useLongPress(surface, onLongPress && (() => {
+    // The hold won: whatever the finger does next is not a swipe.
+    active.current = null;
+    onLongPress();
+  }));
   useEffect(() => () => {
     moving.current?.controls?.stop();
     clearTimeout(moving.current?.timer);
@@ -184,8 +193,10 @@ export function SwipeSurface({
           base: 0,
           target: fling ? event.currentTarget.querySelector<HTMLElement>(fling) : null,
         };
+        press.start(event);
       }}
       onPointerMove={(event) => {
+        press.move(event);
         const start = active.current;
         if (!start || start.id !== event.pointerId) return;
         const dx = event.clientX - start.x,
@@ -224,6 +235,7 @@ export function SwipeSurface({
         setOffset(Math.max(-112, Math.min(112, eased)), allowed);
       }}
       onPointerUp={(event) => {
+        press.end();
         const start = active.current;
         if (!start || start.id !== event.pointerId || start.lock !== axis) {
           end();
@@ -266,14 +278,25 @@ export function SwipeSurface({
       }}
       onLostPointerCapture={(event) => {
         if (event.target !== event.currentTarget) return;
+        press.end();
         if (active.current) end();
       }}
       onPointerCancel={() => {
+        press.end();
         if (active.current?.lock === axis)
           blocked.current = performance.now() + 450;
         end();
       }}
+      onContextMenu={onLongPress ? (event) => {
+        // The hold opens MURMUR's own menu; no text selection or system menu on top of it.
+        event.preventDefault();
+      } : props.onContextMenu}
       onClickCapture={(event) => {
+        if (press.swallowClick()) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         if (
           event.detail > 0 &&
           performance.now() < blocked.current &&

@@ -25,48 +25,60 @@ import org.vosk.Recognizer
 import java.io.File
 import java.util.zip.ZipInputStream
 
-/** Spanish Vosk model kept in app storage; downloaded once, on the user's opt-in. */
-object WakeWordModel {
-    private const val URL = "https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"
-    private const val MAX_BYTES = 80L * 1024 * 1024
-    fun directory(context: Context) = File(context.filesDir, "models/vosk-es")
-    fun available(context: Context) = File(directory(context), "am/final.mdl").isFile && File(directory(context), "conf/model.conf").isFile
-
-    /** Downloads over HTTPS, unzips with path checks into a temp folder, then swaps it in. */
-    @Synchronized fun download(context: Context) {
-        if (available(context)) return
-        val target = directory(context)
-        val staging = File(target.parentFile, "vosk-es.part").apply { deleteRecursively(); mkdirs() }
+/** Vosk models arrive as one zip with a top folder; this installs one safely into app storage. */
+object ModelArchive {
+    /**
+     * Downloads over HTTPS (declared size up to [maxBytes]), unzips with path checks into a staging
+     * folder, checks the [required] files and only then swaps it in. [label] names it in errors.
+     */
+    fun install(url: String, maxBytes: Long, target: File, required: List<String>, label: String) {
+        val name = label.replaceFirstChar { it.uppercase() }
+        val staging = File(target.parentFile, target.name + ".part").apply { deleteRecursively(); mkdirs() }
         try {
-            NativeNetwork.client.newCall(okhttp3.Request.Builder().url(URL).build()).execute().use { response ->
-                check(response.isSuccessful) { "No se pudo descargar el modelo de voz (${response.code})" }
-                val body = response.body ?: error("Modelo vacío")
-                check(body.contentLength() in 1..MAX_BYTES) { "Tamaño del modelo de voz inesperado" }
+            NativeNetwork.client.newCall(okhttp3.Request.Builder().url(url).build()).execute().use { response ->
+                check(response.isSuccessful) { "No se pudo descargar $label (${response.code})" }
+                val body = response.body ?: error("$name llegó vacío")
+                check(body.contentLength() in 1..maxBytes) { "$name tiene un tamaño inesperado" }
                 var total = 0L
                 ZipInputStream(body.byteStream()).use { zip ->
                     while (true) {
                         val entry = zip.nextEntry ?: break
-                        // Strip the top folder ("vosk-model-small-es-0.42/…") and refuse paths leaving staging.
+                        // Strip the top folder ("vosk-model-…/…") and refuse paths leaving staging.
                         val relative = entry.name.substringAfter('/', "").takeIf { it.isNotBlank() } ?: continue
                         val out = File(staging, relative).canonicalFile
-                        check(out.path.startsWith(staging.canonicalPath + File.separator)) { "Ruta inválida en el modelo" }
+                        check(out.path.startsWith(staging.canonicalPath + File.separator)) { "$name trae una ruta inválida" }
                         if (entry.isDirectory) { out.mkdirs(); continue }
                         out.parentFile?.mkdirs()
                         out.outputStream().use { output ->
                             val buffer = ByteArray(65536)
                             while (true) {
                                 val n = zip.read(buffer); if (n < 0) break
-                                total += n; check(total <= MAX_BYTES * 2) { "El modelo de voz excede el tamaño esperado" }
+                                total += n; check(total <= maxBytes * 2) { "$name excede el tamaño esperado" }
                                 output.write(buffer, 0, n)
                             }
                         }
                     }
                 }
             }
-            check(File(staging, "am/final.mdl").isFile && File(staging, "conf/model.conf").isFile) { "El modelo de voz llegó incompleto" }
+            check(required.all { File(staging, it).isFile }) { "$name llegó incompleto" }
             target.deleteRecursively()
-            check(staging.renameTo(target)) { "No se pudo guardar el modelo de voz" }
+            check(staging.renameTo(target)) { "No se pudo guardar $label" }
         } finally { staging.deleteRecursively() }
+    }
+}
+
+/** Spanish Vosk model kept in app storage; downloaded once, on the user's opt-in. */
+object WakeWordModel {
+    private const val URL = "https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"
+    private const val MAX_BYTES = 80L * 1024 * 1024
+    private val REQUIRED = listOf("am/final.mdl", "conf/model.conf")
+    fun directory(context: Context) = File(context.filesDir, "models/vosk-es")
+    fun available(context: Context) = REQUIRED.all { File(directory(context), it).isFile }
+
+    /** Downloads over HTTPS, unzips with path checks into a temp folder, then swaps it in. */
+    @Synchronized fun download(context: Context) {
+        if (available(context)) return
+        ModelArchive.install(URL, MAX_BYTES, directory(context), REQUIRED, "el modelo de voz")
     }
 }
 
@@ -92,16 +104,49 @@ class WakeWordService : Service() {
         fun heard(text: String) = WakePhrase.heard(text)
         /** After music stops, keep listening this long so "Ok MURMUR, continúa" still works. */
         const val IDLE_GRACE_MS = 10 * 60_000L
+
+        @Volatile private var instance: WakeWordService? = null
+        /** True while "Entrena tu voz" has the microphone: the listener stays closed. */
+        @Volatile var held = false; private set
+
+        /**
+         * "Entrena tu voz" needs the microphone: the listener lets go of it (waits up to 1.5 s for its
+         * capture to close) and stays closed until [releaseMicrophone]. False while the request after
+         * "Ok MURMUR" is being captured. Call off the main thread.
+         */
+        fun holdMicrophone(): Boolean {
+            held = true
+            val service = instance ?: return true
+            if (service.capturing) { held = false; return false }
+            val worker = service.loop
+            service.loop = null
+            if (worker != null && worker !== Thread.currentThread()) worker.join(1_500)
+            return true
+        }
+
+        /** Gives the microphone back to the listener, which reopens it if listening is useful. */
+        fun releaseMicrophone() {
+            held = false
+            instance?.let { service -> service.handler.post { if (running) service.listen() } }
+        }
+
+        /** The Spanish model the listener already has in memory, so the enrollment need not load another. */
+        fun sharedModel(): Model? = instance?.model
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private var model: Model? = null
+    @Volatile private var model: Model? = null
     private var command: SpeechRecognizer? = null
-    private var capturing = false
+    @Volatile private var capturing = false
     @Volatile private var loading = false
     private var lastWake = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
@@ -160,7 +205,7 @@ class WakeWordService : Service() {
     private val watch = object : Runnable {
         override fun run() {
             if (!running) return
-            if (!capturing && loop == null && model != null) {
+            if (!capturing && loop == null && model != null && !held) {
                 if (useful()) listen() else showListening(false)
             }
             handler.postDelayed(this, 3_000)
@@ -171,6 +216,8 @@ class WakeWordService : Service() {
         try {
             if (!WakeWordModel.available(this)) WakeWordModel.download(this)
             val loaded = Model(WakeWordModel.directory(this).absolutePath)
+            // "Solo mi voz" on: have the speaker model ready before the first wake, not during it.
+            if (VoiceProfile.active(this) != null) SpeakerModelStore.shared(this)
             handler.post {
                 if (!running) { loaded.close(); return@post }
                 model = loaded; loading = false
@@ -194,7 +241,7 @@ class WakeWordService : Service() {
      */
     private fun listen() {
         val current = model ?: return
-        if (capturing || loop != null) return
+        if (capturing || loop != null || held) return
         if (!useful()) { showListening(false); return }
         showListening(true)
         val grammar = org.json.JSONArray(WakePhrase.grammar).toString()
@@ -281,7 +328,7 @@ class WakeWordService : Service() {
                 if (verifyAt in 0..frames) {
                     verifyAt = -1
                     recognizer.reset(); hangover = 0; preroll.clear()
-                    if (confirm(model, recent.toList())) {
+                    if (confirm(model, recent.toList(), echo)) {
                         lastWake = now
                         handler.post { captureCommand() }
                     } else quietUntil = now + 1_500
@@ -319,17 +366,33 @@ class WakeWordService : Service() {
 
     /**
      * Second check, on the capture thread (~0.3 s): the same seconds transcribed without the phrase
-     * grammar. Only word counts reach the debug log, never what was said.
+     * grammar. With "Solo mi voz" on, the same pass also yields the speaker's x-vector, which must
+     * resemble the enrolled voice. If the speaker model is missing or fails, the phrase check alone
+     * decides, as before. Only counts and similarities reach the debug log, never what was said.
      */
-    private fun confirm(model: Model, audio: List<ShortArray>): Boolean {
-        val open = try { Recognizer(model, 16000f) } catch (_: Exception) { return false }
+    private fun confirm(model: Model, audio: List<ShortArray>, overMusic: Boolean): Boolean {
+        val profile = VoiceProfile.active(this)
+        val speaker = if (profile != null) SpeakerModelStore.shared(this) else null
+        val verifying = speaker?.let { runCatching { Recognizer(model, 16000f, it) }.getOrNull() }
+        val open = verifying ?: try { Recognizer(model, 16000f) } catch (_: Exception) { return false }
         return try {
-            val parts = mutableListOf<String>()
-            for (samples in audio) if (open.acceptWaveForm(samples, samples.size)) parts += JSONObject(open.result).optString("text")
-            parts += JSONObject(open.finalResult).optString("text")
-            WakePhrase.confirmed(parts).also { ok ->
-                if (android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG))
-                    android.util.Log.d(LOG_TAG, "wake check ${if (ok) "confirmed" else "rejected"} words=${parts.joinToString(" ").split(' ').count { it.isNotBlank() }}")
+            val segments = mutableListOf<VoiceMatch.Segment>()
+            for (samples in audio) if (open.acceptWaveForm(samples, samples.size)) segments += VoiceMatch.segment(open.result)
+            segments += VoiceMatch.segment(open.finalResult)
+            val parts = segments.map { it.text }
+            val heard = WakePhrase.confirmed(parts)
+            val debug = android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG)
+            val words = parts.joinToString(" ").split(' ').count { it.isNotBlank() }
+            if (!heard || verifying == null || profile == null) {
+                if (debug) android.util.Log.d(LOG_TAG, "wake check ${if (heard) "confirmed" else "rejected"} words=$words voice=${if (profile == null) "off" else "unavailable"}")
+                return heard
+            }
+            val sample = VoiceMatch.sample(segments)
+            val similarity = sample?.let { VoiceMatch.similarity(profile.vectors, it.first) }
+            VoiceMatch.accepts(similarity, profile.threshold, overMusic).also { ok ->
+                if (debug) android.util.Log.d(LOG_TAG, String.format(java.util.Locale.ROOT,
+                    "wake voice %s words=%d similarity=%.3f threshold=%.3f music=%b frames=%d",
+                    if (ok) "accepted" else "rejected", words, similarity ?: Double.NaN, profile.threshold, overMusic, sample?.second ?: 0))
             }
         } catch (_: Exception) { false } finally { open.close() }
     }
@@ -350,6 +413,8 @@ class WakeWordService : Service() {
      */
     private fun captureCommand(system: Boolean = false) {
         if (!system) {
+            // "Entrena tu voz" took the microphone between the check and this moment.
+            if (held || capturing) return
             capturing = true
             pauseListening()
             VoiceTriggerManager.beginListening()
@@ -434,6 +499,7 @@ class WakeWordService : Service() {
 
     override fun onDestroy() {
         running = false
+        if (instance === this) instance = null
         handler.removeCallbacksAndMessages(null)
         command?.destroy(); command = null
         pauseListening()

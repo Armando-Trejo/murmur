@@ -147,6 +147,16 @@ async function run(intent: ReturnType<typeof parseVoiceIntent>, save: (track: Qu
         return "Canción guardada";
       }
       return "Primero reproduce una canción";
+    case "sleep": {
+      // The app owns the timer (native call + the moon in the player); it listens for this event.
+      if (typeof window !== "undefined")
+        window.dispatchEvent(new CustomEvent("murmur:sleep", { detail: intent.minutes === "track" ? "track" : intent.minutes }));
+      if (intent.minutes === "track") return "La música se apagará al terminar esta canción";
+      if (intent.minutes === 0) return "Temporizador cancelado";
+      const m = intent.minutes;
+      const when = m % 60 === 0 ? (m === 60 ? "una hora" : `${m / 60} horas`) : m > 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} minutos`;
+      return `La música se apagará en ${when}`;
+    }
     case "pause":
       if (!player.current) return "No hay una canción en reproducción";
       await player.pause();

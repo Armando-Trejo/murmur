@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Two rows or taller. XML defaults are the empty state; MurmurWidget fills in the rest. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/murmur_widget_background"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/murmur_widget_cover"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:adjustViewBounds="true"
+            android:contentDescription="@string/murmur_widget_open"
+            android:maxWidth="160dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/murmur_widget_cover_placeholder" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/murmur_widget_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="18dp"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="@string/app_name"
+                android:textColor="@color/murmur_widget_text"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/murmur_widget_artist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:layout_marginEnd="18dp"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="@string/murmur_widget_empty_subtitle"
+                android:textColor="@color/murmur_widget_text_secondary"
+                android:textSize="13sp" />
+
+            <LinearLayout
+                android:id="@+id/murmur_widget_controls"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="-8dp"
+                android:layout_marginTop="8dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <ImageButton
+                    android:id="@+id/murmur_widget_previous"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/murmur_widget_button_bg"
+                    android:contentDescription="@string/murmur_widget_previous"
+                    android:padding="9dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_murmur_previous" />
+
+                <ImageButton
+                    android:id="@+id/murmur_widget_play"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_marginEnd="8dp"
+                    android:background="@drawable/murmur_widget_play_bg"
+                    android:contentDescription="@string/murmur_widget_play"
+                    android:padding="11dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/murmur_widget_play" />
+
+                <ImageButton
+                    android:id="@+id/murmur_widget_next"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/murmur_widget_button_bg"
+                    android:contentDescription="@string/murmur_widget_next"
+                    android:padding="9dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_murmur_next" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/murmur_widget_brand"
+        android:layout_width="14dp"
+        android:layout_height="14dp"
+        android:layout_gravity="top|end"
+        android:contentDescription="@null"
+        android:importantForAccessibility="no"
+        android:src="@drawable/murmur_widget_brand"
+        android:visibility="gone" />
+</FrameLayout>

@@ -153,3 +153,21 @@ describe("asksToPlay: music only with an explicit ask", () => {
     ["algo tranquilo para trabajar", false],
   ])("%s → %s", (text, expected) => expect(asksToPlay(text)).toBe(expected));
 });
+
+describe("sleep timer by voice (2.16)", () => {
+  it.each([
+    ["apaga la música en 20 minutos", 20],
+    ["para en media hora", 30],
+    ["duérmete en una hora y media", 90],
+    ["pon un temporizador de 45 minutos", 45],
+    ["temporizador de una hora", 60],
+    ["Ok MURMUR apaga la música en diez minutos", 10],
+    ["para la música en 2 horas", 120],
+  ])("%s → %s min", (text, minutes) => expect(parseVoiceIntent(text)).toEqual({ type: "sleep", minutes }));
+  it("when this song ends", () =>
+    expect(parseVoiceIntent("apaga la música al terminar esta canción")).toEqual({ type: "sleep", minutes: "track" }));
+  it("cancel", () => expect(parseVoiceIntent("cancela el temporizador")).toEqual({ type: "sleep", minutes: 0 }));
+  it("a plain stop is still a pause", () => expect(parseVoiceIntent("para la música").type).toBe("pause"));
+  it("a song title with numbers is not a timer", () =>
+    expect(parseVoiceIntent("pon 20 minutos de los caifanes").type).not.toBe("sleep"));
+});

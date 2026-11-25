@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="murmur_widget_label">Reproductor</string>
+    <string name="murmur_widget_description">Portada, canción y controles de MURMUR siempre a mano en tu pantalla de inicio.</string>
+    <string name="murmur_widget_empty_subtitle">Toca para elegir música</string>
+    <string name="murmur_widget_untitled">Canción sin título</string>
+    <string name="murmur_widget_play">Reproducir</string>
+    <string name="murmur_widget_pause">Pausar</string>
+    <string name="murmur_widget_previous">Anterior</string>
+    <string name="murmur_widget_next">Siguiente</string>
+    <string name="murmur_widget_open">Abrir MURMUR</string>
+    <string name="murmur_widget_open_player">Abrir el reproductor de MURMUR</string>
+    <string name="murmur_widget_preview_title">Tu música, a un toque</string>
+
+    <color name="murmur_widget_text">#FFFFFFFF</color>
+    <color name="murmur_widget_text_secondary">#A6FFFFFF</color>
+    <color name="murmur_widget_accent">#FFB39DFA</color>
+    <color name="murmur_widget_accent_deep">#FF8F74F0</color>
+    <color name="murmur_widget_on_accent">#FF0C0A14</color>
+</resources>

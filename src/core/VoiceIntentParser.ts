@@ -4,6 +4,8 @@ export type Platform = "spotify" | "youtube";
 export type VoiceIntent =
   | { type: "mix" | "next" | "previous" | "save" | "pause" | "resume" | "nowPlaying" | "moreLikeThis" | "shuffle" }
   | { type: "playlist"; id: string }
+  /** Sleep timer: minutes from now, "track" (when this song ends) or 0 (cancel). */
+  | { type: "sleep"; minutes: number | "track" }
   | { type: "youtube" | "vibe"; query: string }
   | { type: "artist"; query: string; platform?: Platform }
   | { type: "album"; query: string; title: string; artist?: string; platform?: Platform }
@@ -90,6 +92,37 @@ export function asksToPlay(text: string) {
   return PLAY.test(rest + " ") || splitPlatform(rest).platform !== undefined;
 }
 
+const NUMBERS: Record<string, number> = {
+  un: 1, una: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10,
+  doce: 12, quince: 15, veinte: 20, veinticinco: 25, treinta: 30, cuarenta: 40, "cuarenta y cinco": 45, cincuenta: 50,
+  sesenta: 60, noventa: 90, cien: 100, "ciento veinte": 120,
+};
+const STOP_VERB = "(?:apaga(?:la|lo|r)?|para(?:la|lo|r)?|detente|deten(?:la|er)?|pausa(?:la|r)?|duermete|quita(?:la)?|corta(?:la)?|termina)";
+/**
+ * "Apaga la música en 20 minutos", "para en media hora", "duérmete en una hora y media",
+ * "pon un temporizador de 45 minutos", "al terminar esta canción", "cancela el temporizador".
+ */
+export function parseSleep(n: string): number | "track" | undefined {
+  if (/^(?:cancela(?:r)?|quita(?:r)?|apaga(?:r)?|desactiva(?:r)?|sin) (?:el )?(?:temporizador|timer|apagado automatico)$/.test(n)) return 0;
+  if (new RegExp(`^(?:${STOP_VERB} )?(?:(?:la )?musica |todo )?(?:al|cuando) (?:terminar|acabar|termine|acabe) (?:esta|la|esa) (?:cancion|rola|tema)$`).test(n))
+    return "track";
+  const timed = n.match(new RegExp(
+    `^(?:(?:${STOP_VERB})(?: (?:la musica|todo|la reproduccion))? (?:en|dentro de|despues de|en unos?)|(?:pon(?:me|le)? |activa |programa )?(?:un |el )?(?:temporizador|timer|apagado automatico)(?: de| en| para)?) (.+)$`));
+  if (!timed) return undefined;
+  return minutesIn(timed[1]);
+}
+function minutesIn(text: string): number | undefined {
+  const t = text.replace(/^(?:unos|unas) /, "").trim();
+  if (/^media hora$/.test(t)) return 30;
+  if (/^(?:un|una) cuarto de hora$/.test(t)) return 15;
+  const m = t.match(/^(\d{1,3}|[a-z]+(?: y cinco| veinte)?) (minutos?|mins?|horas?)(?: y media)?$/);
+  if (!m) return undefined;
+  const value = /^\d+$/.test(m[1]) ? Number(m[1]) : NUMBERS[m[1]];
+  if (!value) return undefined;
+  const minutes = m[2].startsWith("hora") ? value * 60 + (/ y media$/.test(t) ? 30 : 0) : value;
+  return minutes > 0 && minutes <= 600 ? minutes : undefined;
+}
+
 /** What is left of a request once the verbs and the filler are gone: the music itself. */
 export function musicQuery(text: string) {
   return text
@@ -109,6 +142,9 @@ export function parseVoiceIntent(
     .replace(ASK, "")
     .replace(/\s+(?:por favor|porfa|please)$/, "")
     .trim();
+  // Before the controls: "para la música en 20 minutos" is a timer, not a pause.
+  const sleep = parseSleep(n);
+  if (sleep !== undefined) return { type: "sleep", minutes: sleep };
   for (const [pattern, type] of TRANSPORT)
     if (pattern.test(n)) return { type } as VoiceIntent;
   // Colloquial control: short sentences that mention the action anywhere

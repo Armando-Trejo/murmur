@@ -303,3 +303,42 @@ La 2.7.1 de la PC RAM nunca llegó a GitHub; la 2.8.0 solo trasladó su precarga
 - Gestos: deslizar hacia abajo cerró el reproductor y el deslizamiento rápido en el minirreproductor cambió de canción.
 - El respaldo `Download/MURMUR/murmur-respaldo.json` (1.7 MB) se creó solo.
 - **Falta probar con voz real:** la doble comprobación de «Ok MURMUR» con música sonando. El permiso de micrófono se perdió al reinstalar en la 2.14.1: hay que volver a activar «Ok MURMUR» en Ajustes.
+
+## 2.16.0 (code 32) — tu voz, widget, gestos nuevos, presentador y mix del momento
+- **Solo mi voz** (`VoiceMatch.kt`, `VoiceEnrollment.kt`, `src/components/VoiceEnrollment.tsx`):
+  - Al activarla descarga un modelo de hablante de Vosk (`vosk-model-spk-0.4`, 13 MB) y pide decir «Ok MURMUR» 3 veces.
+  - `confirm()` además compara la huella de voz (coseno). El umbral se ajusta con el propio entrenamiento: entre 0.25 y 0.50, con 0.05 menos si hay música.
+  - Si el modelo o la huella fallan, decide solo la frase: nunca deja fuera al dueño.
+  - Sin probar con voz real; los valores para afinar salen de `adb logcat -s MURMUR`, en las líneas `wake voice … similarity=… threshold=…`.
+- **Respuestas habladas y presentador** (`SpokenReplies.kt`, `src/core/voiceReplies.ts`, `VoiceExtrasSetting.tsx`):
+  - Usa el TTS del teléfono en es-MX y baja la música mientras habla.
+  - Tras «Ok MURMUR» dice la respuesta, salvo cuando la música ya la da (empieza o salta una canción).
+  - El presentador (apagado por defecto) anuncia cada canción nueva al empezar a sonar, también con transiciones sin pausa y con fundido: llamadas en `onIsPlayingChanged` y `emitNativeTrack`.
+- **Temporizador por voz** (`parseSleep`): «apaga la música en 20 minutos», «para en media hora», «al terminar esta canción», «cancela el temporizador». El router emite `murmur:sleep` y la app usa el mismo `chooseSleep` que el botón.
+- **Widget** (`MurmurWidget.kt`, `MurmurWidgetModel.kt`, `res/layout/murmur_widget_*`):
+  - Muestra portada, título, artista y anterior/reproducir/siguiente.
+  - `MurmurWidget.sync` desde `HybridMediaService`, solo cuando algo cambia.
+  - Sin servicio activo, abre MURMUR.
+- **Gestos nuevos** (`gestures216.css`, `CoverDoubleTap.tsx`, `QueueRowGestures.tsx`, `useLongPress.ts`):
+  - Deslizar hacia arriba en el minirreproductor abre el reproductor siguiendo el dedo. Abre siempre arriba (`riseGuard`): antes, el impulso lo dejaba desplazado y el primer jalón hacia abajo solo regresaba el scroll.
+  - Doble toque en la portada guarda la canción, con un corazón animado.
+  - Deslizar a la izquierda una fila de la cola la quita, con «Deshacer». Usa `player.reorder`; la canción actual no se puede quitar.
+  - Mantener presionada una canción abre su menú.
+- **Mix del momento** (`MomentMix.tsx`): una tarjeta en Inicio según la hora y el día, de mañana, concentrarte, fin de semana, noche o madrugada. Usa el mismo motor que «pon algo tranquilo…».
+- **Aviso de actualización** (`src/core/updates.ts`, `openUpdate`):
+  - Cada 12 h consulta `releases/latest` de GitHub y ofrece «Actualizar» con el APK arm64 de la release.
+  - **Necesita publicar releases en GitHub**: la etiqueta es `vX.Y.Z` y el APK debe llevar la misma firma que el teléfono.
+
+**Verificado en el teléfono** (25 nov 2026, adb inalámbrico):
+- Temporizador por voz y su cancelación.
+- Preferencias de voz.
+- El widget quedó registrado como proveedor.
+- La tarjeta del mix del momento en Inicio.
+- Deslizar hacia arriba abre y, un segundo después, deslizar hacia abajo cierra.
+- Mantener presionada una fila abre «Acciones de canción».
+
+**Falta en el teléfono:**
+- Probar «Solo mi voz» con voz real.
+- Escuchar las respuestas habladas y el presentador: el volumen estaba en 0.
+- Poner el widget en la pantalla de inicio: lo hace el dueño.
+- Pendiente conocido: con la hoja de entrenamiento abierta, el gesto atrás de Android también afecta a la pantalla de atrás.

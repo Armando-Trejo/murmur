@@ -91,3 +91,93 @@ export function settleReorder(dragged: readonly string[], live: readonly string[
   });
   return kept;
 }
+
+/* ---------- MURMUR 2.16: opening, saving, removing and holding by touch ---------- */
+
+/**
+ * Swipe up on the mini player: the mirror of pulling the player down to close. It opens past about a
+ * fifth of the screen, or on an upward flick after a short lift; thrown back down it stays closed.
+ * `lift` is how far the player rose (px), `velocity` the upward release speed (px/ms, positive up).
+ */
+export function riseCommit(lift: number, velocity: number, height: number): boolean {
+  return dismissCommit(lift, velocity, height);
+}
+
+/** The player lifted from the mini player materialises over its first few dozen pixels. */
+export function riseOpacity(lift: number): number {
+  return Math.min(1, Math.max(0.2, 0.2 + lift / 70));
+}
+
+/** Where and when a finger touched down or lifted (pointer event time in ms). */
+export type Touch = { t: number; x: number; y: number };
+
+/** A finger that lifted quickly near where it landed: a tap, not a swipe or a hold. */
+export function isTap(down: Touch, up: Touch): boolean {
+  return up.t - down.t <= 300 && Math.hypot(up.x - down.x, up.y - down.y) <= 10;
+}
+
+/** The second tap lands soon after the first one lifted, and near it. */
+export function isDoubleTap(firstUp: Touch | undefined, secondDown: Touch): boolean {
+  if (!firstUp) return false;
+  const gap = secondDown.t - firstUp.t;
+  return gap >= 0 && gap <= 300 && Math.hypot(secondDown.x - firstUp.x, secondDown.y - firstUp.y) <= 40;
+}
+
+/** A held row opens its menu after this long (ms). */
+export const LONG_PRESS_MS = 450;
+
+/** A hold is abandoned once the finger travels more than 8 px, or the list under it scrolls. */
+export function holdBroken(dx: number, dy: number, scrolled = false): boolean {
+  return scrolled || Math.hypot(dx, dy) > 8;
+}
+
+/** Finger travel at which a queue row swiped left is removed: about 40 % of the row (96–150 px). */
+export function removeDistance(width: number): number {
+  return Math.min(150, Math.max(96, width * 0.4));
+}
+
+/**
+ * A queue row swiped left is removed past the distance, or on a quick flick left after 48 px (more travel
+ * than a song change asks, since it removes something). Diagonal drags and a throw back right keep it.
+ */
+export function removeCommit(dx: number, dy: number, velocity: number, width: number): boolean {
+  if (dx >= 0 || -dx < Math.abs(dy) * 1.6 || velocity >= FLICK_BACK) return false;
+  if (-dx >= removeDistance(width)) return true;
+  return velocity <= -FLICK_SPEED && -dx >= 48;
+}
+
+type QueueEntry = { id: string; queueId?: string };
+
+/**
+ * The queue without one upcoming song, plus what is needed to put it back. Null for the song playing,
+ * one already played, or one no longer in the queue (it started playing mid-gesture).
+ */
+export function withoutUpcoming<T extends QueueEntry>(
+  queue: readonly T[],
+  index: number,
+  queueId: string,
+): { queue: T[]; item: T; after?: string } | null {
+  const at = queue.findIndex((track) => track.queueId === queueId);
+  if (at < 0 || at <= index) return null;
+  return {
+    queue: [...queue.slice(0, at), ...queue.slice(at + 1)],
+    item: queue[at],
+    after: queue[at - 1]?.queueId,
+  };
+}
+
+/**
+ * Undo a removal: the song goes back after the one that preceded it, or right after the song playing when
+ * that one has played meanwhile. Null when it is already back or there is no queue to return to.
+ */
+export function restoreUpcoming<T extends QueueEntry>(
+  queue: readonly T[],
+  index: number,
+  item: T,
+  after?: string,
+): T[] | null {
+  if (!queue.length || queue.some((track) => track.queueId === item.queueId)) return null;
+  const anchor = after ? queue.findIndex((track) => track.queueId === after) : -1;
+  const at = anchor >= index ? anchor + 1 : index + 1;
+  return [...queue.slice(0, at), item, ...queue.slice(at)];
+}

@@ -12,6 +12,9 @@ import "./v27.css";
 import "./v28.css";
 import "./v215.css";
 import "./motion215.css";
+import "./gestures216.css";
+import "./voice216.css";
+import "./v216.css";
 /** Last 10 interface errors, kept on the phone and attached only to a report the person chooses to send. */
 function rememberError(message: string) {
   try {

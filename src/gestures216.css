@@ -1,0 +1,130 @@
+/* MURMUR 2.16 · Gestures: swipe up the mini player, double-tap the cover to save, swipe a queue row away,
+   hold a row for its menu. Moves only transform-like properties and opacity; reduced motion at the end. */
+
+/* ---------- Mini player: swipe up to open ---------- */
+/* Both directions belong to the mini player's own gestures (sideways: song, up: open the player), so the
+   page behind never scrolls from it. The bar inside keeps pan-y inline; the intersection is none. */
+.mini-slot {
+  touch-action: none;
+}
+
+/* ---------- Full player: double-tap the cover ---------- */
+.cover-tap {
+  position: relative;
+}
+.cover-heart {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  pointer-events: none;
+  opacity: 0;
+  filter: drop-shadow(0 8px 22px rgba(0, 0, 0, 0.45)) drop-shadow(0 0 24px rgba(var(--brand-rgb), 0.55));
+  animation: cover-heart 860ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.cover-heart > svg {
+  display: block;
+}
+/* Pops past full size, settles, holds, then lifts a little as it fades. */
+@keyframes cover-heart {
+  0% { opacity: 0; transform: scale(0.35); }
+  16% { opacity: 1; transform: scale(1.16); }
+  30% { transform: scale(0.95); }
+  42% { transform: scale(1); }
+  68% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: translateY(-14px) scale(1.06); }
+}
+
+/* ---------- Queue: swipe a row left to remove it ---------- */
+.queue .queue-item {
+  position: relative;
+  -webkit-touch-callout: none;
+}
+/* The row's content slides with the finger; the red layer fills exactly the space it leaves. */
+.queue .queue-item[data-swiping] > :not(.queue-remove-reveal) {
+  translate: var(--swipe, 0px) 0;
+}
+.queue-remove-reveal {
+  display: none;
+}
+.queue .queue-item[data-swiping] > .queue-remove-reveal {
+  position: absolute;
+  top: 4px;
+  right: 0;
+  bottom: 4px;
+  width: max(0px, calc(var(--swipe, 0px) * -1 - 6px));
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-right: 16px;
+  overflow: hidden;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  background: rgba(229, 72, 77, calc(0.38 + var(--swipe-p, 0) * 0.42));
+  pointer-events: none;
+}
+.queue-remove-reveal > svg {
+  flex: none;
+  scale: calc(0.7 + var(--swipe-p, 0) * 0.3);
+  transition: scale 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.queue .queue-item[data-armed="true"] > .queue-remove-reveal {
+  background: rgb(229, 72, 77);
+}
+.queue .queue-item[data-armed="true"] > .queue-remove-reveal > svg {
+  scale: 1.14;
+}
+/* Folding away (QueueRowGestures exit): nothing spills out of the shrinking row. */
+.queue .queue-item[data-leaving] {
+  overflow: clip;
+  pointer-events: none;
+}
+
+/* ---------- Hold a song row for its menu ---------- */
+.song-row,
+.queue .queue-item {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* Once a press outlasts a tap, the row gives a little more under the finger until the menu opens. */
+.song-row[data-pressing] > .song-main,
+.queue .queue-item[data-pressing] > .queue-track,
+.queue .queue-item[data-pressing] > .cover {
+  scale: 0.975;
+  background-color: rgba(255, 255, 255, 0.04);
+  transition: scale 340ms cubic-bezier(0.2, 0.9, 0.3, 1), background-color 200ms ease;
+}
+.queue .queue-item > .cover {
+  transition: scale 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The heart only fades in and out where it is. */
+  .cover-heart {
+    animation-name: cover-heart-fade;
+    animation-duration: 700ms;
+  }
+  @keyframes cover-heart-fade {
+    0%, 100% { opacity: 0; }
+    15%, 70% { opacity: 1; }
+  }
+  .queue-remove-reveal > svg {
+    transition: none;
+  }
+  /* A hold shows as a tint, not a squeeze. */
+  .song-row[data-pressing] > .song-main,
+  .queue .queue-item[data-pressing] > .queue-track,
+  .queue .queue-item[data-pressing] > .cover {
+    scale: 1;
+    transition: none;
+    background-color: rgba(255, 255, 255, 0.07);
+  }
+}

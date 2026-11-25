@@ -88,7 +88,7 @@ class HybridMediaService : MediaSessionService() {
         override fun seekToNextMediaItem()=advanceNative()
 
     }
-    private fun sessionPlayer(player:Player){val wrapper=TransportPlayer(player);transportPlayer=wrapper;session?.setPlayer(wrapper)}
+    private fun sessionPlayer(player:Player){val wrapper=TransportPlayer(player);transportPlayer=wrapper;session?.setPlayer(wrapper);MurmurWidget.sync(this)}
     private fun updateMediaButtons(){transportPlayer?.let{sessionPlayer(it.engine)}}
     private fun emitNativeTrack(data:JSONObject, prepared: Boolean = true){
         val local=if(spotifyActive)spotifyIntegrated.webState()else null
@@ -96,6 +96,8 @@ class HybridMediaService : MediaSessionService() {
             // Where the new song already is (a crossfade starts it seconds in) and its real length.
             .put("positionMs", if (spotifyActive) spotifyIntegrated.positionMs else youtubePositionMs.coerceAtLeast(0))
             .put("durationMs", if (spotifyActive) 0L else primaryPlayer.duration.takeIf { it > 0 } ?: 0L))
+        // Gapless and crossfaded changes never stop playing, so the presenter also listens here.
+        if (prepared) SpokenReplies.announce(this, data)
     }
     fun previousNative() {
         val position = if (spotifyActive) spotifyIntegrated.positionMs else youtubePositionMs
@@ -323,7 +325,9 @@ class HybridMediaService : MediaSessionService() {
     }
     private val headset = Runnable { if (presses >= 2) { VoiceTriggerManager.launch(this, "headset") } else if(spotifyActive){if(spotifyIntegrated.playing)spotifyIntegrated.pauseIntegrated()else spotifyIntegrated.resumeIntegrated()}else if (primaryPlayer.isPlaying) primaryPlayer.pause() else primaryPlayer.play(); presses = 0 }
     private val listener = object : Player.Listener {
-        override fun onIsPlayingChanged(isPlaying: Boolean) { if(spotifyActive)return; if (!isPlaying && fade != null && !primaryPlayer.playWhenReady) pausePlayback(); NativeEvents.emit("onPlaybackStateChanged", JSObject().put("trackId",track?.optString("id")).put("queueId",track?.optString("queueId")).put("playing", isPlaying).put("loading", youtubeLoading)) }
+        override fun onIsPlayingChanged(isPlaying: Boolean) { if(spotifyActive)return; if (!isPlaying && fade != null && !primaryPlayer.playWhenReady) pausePlayback(); NativeEvents.emit("onPlaybackStateChanged", JSObject().put("trackId",track?.optString("id")).put("queueId",track?.optString("queueId")).put("playing", isPlaying).put("loading", youtubeLoading)); MurmurWidget.sync(this@HybridMediaService)
+            // Presenter (off by default): names a song once, when it actually starts sounding.
+            if (isPlaying) SpokenReplies.announce(this@HybridMediaService, track) }
         override fun onPlaybackStateChanged(state: Int) {
             if(spotifyActive)return
             NativeEvents.emit("onPlaybackStateChanged", JSObject().put("trackId",track?.optString("id")).put("queueId",track?.optString("queueId")).put("playing", primaryPlayer.isPlaying).put("loading", youtubeLoading))
@@ -831,11 +835,13 @@ class HybridMediaService : MediaSessionService() {
                 else if (mixing && beatFade == null && remaining in 1..fadeMs) startOverlap(fadeMs)
                 watchTail(duration, remaining, now)
                 if (sleepAt > 0 && System.currentTimeMillis() >= sleepAt - 15_000) { sleepAt = 0; fadeVolume(15_000); NativeEvents.emit("onSleepTimerFinished", JSObject().put("reason", "timer")) }
+                // Home-screen widget: compares a small key, redraws only when song or play state changed.
+                MurmurWidget.sync(this@HybridMediaService)
             }
             handler.postDelayed(this, if (!::primaryPlayer.isInitialized || busy || sleepAt > 0) 500 else 2_000)
         }
     }
     override fun onTaskRemoved(rootIntent: Intent?) { PlaybackRequests.next();pausePlayback();preparing?.cancel();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();super.onTaskRemoved(rootIntent) }
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
-    override fun onDestroy() { if(integratedDelegate.isInitialized())nativeIntegrated.shutdown();if(webDelegate.isInitialized())webIntegrated.shutdown();handler.removeCallbacksAndMessages(null); scope.cancel(); enhancer?.release(); session?.release(); primaryPlayer.release(); secondaryPlayer.release(); instance = null; super.onDestroy() }
+    override fun onDestroy() { if(integratedDelegate.isInitialized())nativeIntegrated.shutdown();if(webDelegate.isInitialized())webIntegrated.shutdown();handler.removeCallbacksAndMessages(null); scope.cancel(); enhancer?.release(); session?.release(); primaryPlayer.release(); secondaryPlayer.release(); instance = null; MurmurWidget.sync(this); super.onDestroy() }
 }

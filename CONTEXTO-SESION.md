@@ -10,7 +10,10 @@ Léelo primero si continúas MURMUR en otra PC u otra sesión. El detalle técni
 - No escribir contraseñas en formularios. Las sesiones de YouTube Music y Spotify las inicia él en el teléfono.
 - No inventar resultados: lo probado en el teléfono se dice como probado, y lo demás como no verificado.
 
-## Estado actual: 2.15.0 (code 31)
+## Estado actual: 2.16.0 (code 32)
+La 2.16.0 trae «Solo mi voz», respuestas habladas, presentador, temporizador por voz, widget, gestos nuevos, mix del momento y aviso de actualización. Detalle y lo que falta probar en [CONTINUAR-MURMUR.md](CONTINUAR-MURMUR.md). Lo de abajo describe la 2.15.0, que sigue vigente.
+
+### 2.15.0 (code 31)
 Hecha en la PC RAM e instalada en el teléfono del dueño por depuración inalámbrica (`adb connect <ip>:<puerto>`; el cable USB de esa PC falla). Trae:
 - voz con doble comprobación de «Ok MURMUR» y comandos de control;
 - nada de adivinar canciones;

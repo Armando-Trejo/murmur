@@ -5,11 +5,14 @@ import { importCollectionLink, readCollectionLink, saveCollection } from "./core
 import { MusicDirectory } from "./components/MusicDirectory";
 import { CollectionLinkImport } from "./components/CollectionLinkImport";
 import { MarqueeTitle } from "./components/MarqueeTitle";
-import { PlayerLayer } from "./components/PlayerLayer";
+import { PlayerLayer, type PlayerRiseHandle } from "./components/PlayerLayer";
 import { MiniTrackSwap } from "./components/MiniTrackSwap";
 import { Unfold } from "./components/Unfold";
 import { navTransitionRunning } from "./core/viewTransition";
-import { settleReorder } from "./core/gestures";
+import { restoreUpcoming, settleReorder, withoutUpcoming } from "./core/gestures";
+import { useMiniRise } from "./components/useMiniRise";
+import { CoverDoubleTap } from "./components/CoverDoubleTap";
+import { QueueRemoveReveal, useQueueRowGestures } from "./components/QueueRowGestures";
 import { MiniProgress, SeekBar } from "./components/SeekBar";
 import {
   useEffect,
@@ -129,6 +132,10 @@ import { runSmartDownloads } from "./core/smartDownloads";
 import type { CustomArtwork } from "./core/types";
 import { useHeaderScroll } from "./core/useHeaderScroll";
 import { WakeWordSetting } from "./components/WakeWordSetting";
+import { VoiceExtrasSetting } from "./components/VoiceExtrasSetting";
+import { MomentMix } from "./components/MomentMix";
+import { spokenReply } from "./core/voiceReplies";
+import { checkForUpdate, dismissUpdate } from "./core/updates";
 import { Welcome, needsWelcome } from "./components/Welcome";
 import {
   loadRecentSearches,
@@ -469,6 +476,9 @@ export default function App() {
   const coverDirection = lastCoverDirection.current;
   /** When a finger last threw the mini player's song out (it then leaves with that momentum). */
   const miniFlungAt = useRef(-Infinity);
+  /** Swipe up on the mini player: the player rises with the finger (PlayerLayer) and opens past a point. */
+  const playerRise = useRef<PlayerRiseHandle>(null);
+  const miniRise = useMiniRise(playerRise, () => setExpanded(true));
   useFitCover(expanded, current?.queueId ?? current?.id ?? "");
   useHeaderScroll();
   // Smart downloads: on start, every hour and when the connection returns (Wi-Fi only, inside).
@@ -609,6 +619,26 @@ export default function App() {
       }
     }
   };
+  /**
+   * A queue row swiped away. Never the song playing (false: the row springs back); "Deshacer" puts it
+   * back where it was, or right after the current song if its neighbour has played meanwhile.
+   */
+  const removeFromQueue = (track: QueueItem) => {
+    const live = player.getSnapshot();
+    const removal = track.queueId ? withoutUpcoming(live.queue, live.index, track.queueId) : null;
+    if (!removal) return false;
+    player.reorder(removal.queue);
+    haptic("confirm");
+    notify("Quitada de la cola", "info", {
+      label: "Deshacer",
+      run: () => {
+        const now = player.getSnapshot();
+        const back = restoreUpcoming(now.queue, now.index, removal.item, removal.after);
+        if (back) player.reorder(back);
+      },
+    });
+    return true;
+  };
   const storeRecent = (next: string[]) => {
     setRecentSearches(next);
     void saveRecentSearches(next).catch(() => {});
@@ -661,8 +691,49 @@ export default function App() {
     if(!p)throw new Error("Esta canción no tiene datos de álbum. Puedes etiquetar su colección como Álbum.");
     nav.push({view:"library",playlistId:p.id});
   };
-  const voiceCommand = async (text: string) => {
-    notify(await routeVoiceCommand(text, save));
+  // «Apaga la música en 20 minutos»: the voice router asks; the same handler as the moon button runs it.
+  const latestSleep = useRef(chooseSleep);
+  latestSleep.current = chooseSleep;
+  useEffect(() => {
+    const onSleep = (event: Event) => {
+      const choice = (event as CustomEvent<number | "track">).detail;
+      void latestSleep.current(choice);
+    };
+    window.addEventListener("murmur:sleep", onSleep);
+    return () => window.removeEventListener("murmur:sleep", onSleep);
+  }, []);
+  // A newer MURMUR on GitHub: offered once per version, a while after opening (never on the first screen).
+  useEffect(() => {
+    if (!isNative) return;
+    const t = setTimeout(() => void checkForUpdate().then((release) => {
+      if (!release) return;
+      notify(`Hay una versión nueva de MURMUR (${release.version}).`, "info", {
+        label: "Actualizar",
+        run: () => { dismissUpdate(release.version); void Audio.openUpdate({ url: release.url }).catch((e) => notify((e as Error).message, "error")); },
+      });
+    }), 25000);
+    return () => clearTimeout(t);
+  }, []);
+  const [momentBusy, setMomentBusy] = useState(false);
+  const playMoment = (request: string) => {
+    if (momentBusy) return;
+    setMomentBusy(true);
+    void guard(() => voiceCommand(request)).finally(() => setMomentBusy(false));
+  };
+  const voiceCommand = async (text: string, source?: string) => {
+    let answer: string;
+    try {
+      answer = await routeVoiceCommand(text, save);
+    } catch (error) {
+      // Hands-free: what went wrong is also said out loud.
+      const reply = source === "wake" ? spokenReply((error as Error).message) : undefined;
+      if (reply) void Audio.speak({ text: reply }).catch(() => {});
+      throw error;
+    }
+    notify(answer);
+    // After «Ok MURMUR» the phone may be in a pocket: answer out loud (unless the music already does).
+    const reply = source === "wake" ? spokenReply(answer) : undefined;
+    if (reply && isNative) void Audio.speak({ text: reply }).catch(() => {});
   };
   const listen = async () => {
     if (voiceBusy) return;
@@ -749,7 +820,7 @@ export default function App() {
       });
       void add(
         "onVoiceCommandCaptured",
-        (e) => void guard(() => latestNative.current.voiceCommand(e.text)),
+        (e) => void guard(() => latestNative.current.voiceCommand(e.text, e.source)),
       );
       void CapacitorApp.addListener(
         "resume",
@@ -1003,6 +1074,7 @@ export default function App() {
         haptic("confirm");
         notify("Añadida a la cola");
       }}
+      onLongPress={() => setActionTrack(track)}
     >
       <button
         className="song-main"
@@ -1371,6 +1443,7 @@ export default function App() {
           </div>
         )}
         <div hidden={tab !== "home"} className="home-provider-region">
+          {isNative && !status.preview && <MomentMix onPlay={playMoment} busy={momentBusy} />}
           <MadeForYou
             enabled={tab === "home" && isNative && !status.preview}
             onOpen={(playlistId) => nav.push({ view: "library", playlistId })}
@@ -2174,6 +2247,7 @@ export default function App() {
                 <ArrowUpRight size={18} />
               </button>
               <WakeWordSetting notify={notify} />
+              <VoiceExtrasSetting notify={notify} />
               <SmartDownloadsSetting notify={notify} />
               <button
                 className="setting-label setting-button"
@@ -2330,6 +2404,7 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: reduced ? 0 : 14, transition: { duration: (reduced ? motionMs.reduced : motionMs.swapOut) / 1000, ease: release } }}
             transition={{ duration: (reduced ? motionMs.reduced : motionMs.playerIn) / 1000, ease: settle }}
+            {...miniRise}
           >
           <SwipeSurface
             className={"mini-player" + (tone ? " toned" : "")}
@@ -2430,7 +2505,7 @@ export default function App() {
           ))}
         </nav>
       </div>
-      <PlayerLayer open={expanded && !!current} onDismiss={() => setExpanded(false)}>
+      <PlayerLayer open={expanded && !!current} onDismiss={() => setExpanded(false)} riseRef={playerRise}>
         {current && (
           <>
             <PlayerBackdrop url={currentArtwork} />
@@ -2490,7 +2565,15 @@ export default function App() {
                   void guard(() => (distance < 0 ? player.next() : player.previous()));
                 }}
               >
-                <AmbientCover track={current} direction={coverDirection} />
+                {/* Double-tap saves (the same save as "Guardar canción actual"); saved already: only the heart. */}
+                <CoverDoubleTap
+                  onDoubleTap={() => {
+                    if (!allTracks.some((t) => t.id === current.id && t.saved !== false))
+                      void guard(() => save(current));
+                  }}
+                >
+                  <AmbientCover track={current} direction={coverDirection} />
+                </CoverDoubleTap>
               </motion.div>
               <div className="now-title">
                 <motion.div
@@ -2751,6 +2834,8 @@ export default function App() {
                       track={t}
                       key={t.queueId || t.id + queueIndex}
                       {...handlers}
+                      onRemove={() => removeFromQueue(t)}
+                      onMenu={() => setActionTrack(t)}
                     >
                       <div className="queue-move">
                         <button
@@ -3247,14 +3332,21 @@ function QueueRow({
   children,
   onDragStart,
   onDragEnd,
+  onRemove,
+  onMenu,
 }: {
   onDragStart: () => void;
   onDragEnd: () => void;
   track: QueueItem;
   children: React.ReactNode;
+  /** Swipe left: removes it from the queue (false when it may not, e.g. it is now playing). */
+  onRemove?: () => boolean;
+  /** Hold: the song's menu. */
+  onMenu?: () => void;
 }) {
   const controls = useDragControls();
   const reduced = useReducedMotion();
+  const gestures = useQueueRowGestures({ onRemove, onMenu });
   /** Picked up: the row rises on a spring and its card and shadow fade in under it (motion215.css). */
   const [lifted, setLifted] = useState(false);
   const scrollFrame = useRef(0);
@@ -3272,13 +3364,16 @@ function QueueRow({
   };
   return (
     <Reorder.Item
+      ref={gestures.ref}
       value={track.queueId!}
       className="queue-item"
       layout="position"
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, x: -24, transition: { duration: 0.16 } }}
+      exit={gestures.leaving ? gestures.leaveExit : { opacity: 0, x: -24, transition: { duration: 0.16 } }}
       data-lifted={lifted ? "true" : undefined}
+      data-leaving={gestures.leaving ? "true" : undefined}
+      {...gestures.handlers}
       whileDrag={reduced ? undefined : { scale: 1.03 }}
       onDragStart={() => {
         setLifted(true);
@@ -3306,6 +3401,7 @@ function QueueRow({
       dragListener={false}
       dragControls={controls}
     >
+      {onRemove && <QueueRemoveReveal />}
       <button
         className="drag-handle"
         aria-label={"Reordenar " + track.title}

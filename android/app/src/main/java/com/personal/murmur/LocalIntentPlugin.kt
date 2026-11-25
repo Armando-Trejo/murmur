@@ -87,6 +87,53 @@ class LocalIntentPlugin : Plugin() {
             call.reject("Android no permitió iniciar la escucha. Vuelve a intentarlo con MURMUR abierto.")
         }
     }
+    /** "Solo mi voz": whether a voice is enrolled, the switch, and whether its model is on the phone. */
+    @PluginMethod fun voiceMatchStatus(call: PluginCall) {
+        val profile = VoiceProfile.load(context)
+        call.resolve(JSObject().put("enabled", profile?.enabled == true).put("enrolled", profile != null)
+            .put("model", SpeakerModelStore.available(context)))
+    }
+    /** Downloads (the first time, ~13 MB) and loads what "Entrena tu voz" needs. */
+    @PluginMethod fun prepareVoiceMatch(call: PluginCall) { scope.launch {
+        try { withContext(Dispatchers.IO) { VoiceEnrollment.prepare(context) }; call.resolve(JSObject().put("model", true)) }
+        catch (e: Exception) { call.reject(e.message ?: "No se pudo preparar «Solo mi voz». Revisa tu conexión e inténtalo de nuevo.") }
+    } }
+    /** One take of "Entrena tu voz" (1 to 3): records up to 4 s; ok=false with a message when it was not usable. */
+    @PluginMethod fun enrollVoiceTake(call: PluginCall) { activity.runOnUiThread {
+        if (getPermissionState("microphone") != PermissionState.GRANTED) { requestPermissionForAlias("microphone", call, "enrollMicrophoneResult"); return@runOnUiThread }
+        enrollTake(call)
+    } }
+    @PermissionCallback private fun enrollMicrophoneResult(call: PluginCall) {
+        if (getPermissionState("microphone") == PermissionState.GRANTED) enrollTake(call)
+        else call.reject(VoiceRecognitionPolicy.message(9), "MICROPHONE_DENIED")
+    }
+    private fun enrollTake(call: PluginCall) {
+        val take = call.getInt("take") ?: 1
+        scope.launch {
+            try {
+                val outcome = withContext(Dispatchers.IO) { VoiceEnrollment.take(context, take) }
+                val result = JSObject().put("ok", outcome.ok).put("take", take).put("done", outcome.done).put("restart", outcome.restart)
+                outcome.message?.let { result.put("message", it) }
+                call.resolve(result)
+            } catch (e: Exception) { call.reject(e.message ?: "No se pudo preparar «Solo mi voz».") }
+        }
+    }
+    /** Switches "Solo mi voz" on or off; turning it on needs an enrolled voice (which is kept when off). */
+    @PluginMethod fun setVoiceMatch(call: PluginCall) {
+        val enabled = call.getBoolean("enabled") ?: false
+        val profile = VoiceProfile.load(context)
+        if (enabled && profile == null) { call.reject("Primero entrena tu voz.", "NOT_ENROLLED"); return }
+        try {
+            profile?.let { VoiceProfile.save(context, it.withEnabled(enabled)) }
+            call.resolve(JSObject().put("enabled", enabled && profile != null))
+        } catch (e: Exception) { call.reject(e.message ?: "No se pudo guardar el ajuste.") }
+    }
+    /** "Borrar mi voz": removes the enrolled voice from the phone; "Ok MURMUR" answers any voice again. */
+    @PluginMethod fun clearVoiceProfile(call: PluginCall) {
+        VoiceEnrollment.discard()
+        VoiceProfile.clear(context)
+        call.resolve(JSObject().put("enabled", false).put("enrolled", false))
+    }
     @PluginMethod fun downloadModel(call: PluginCall) { scope.launch { try { withContext(Dispatchers.IO) { SemanticModel.download(context) }; call.resolve(JSObject().put("available", true).put("message", "Modelo local listo · 6 MB · integridad verificada")) } catch (e: Exception) { call.reject(e.message ?: "No se pudo descargar el modelo", e) } } }
     @PluginMethod fun rankTags(call: PluginCall) { scope.launch { try { val query = call.getString("query")?.take(500) ?: error("Falta consulta"); val array = call.getArray("tags") ?: JSArray(); val tags = (0 until minOf(array.length(), 256)).map { array.getString(it).take(100) }; val ranked = withContext(Dispatchers.IO) { SemanticModel.rank(context, query, tags) }; val result = JSArray(); ranked.forEach { (text, score) -> result.put(JSObject().put("text", text).put("score", score)) }; call.resolve(JSObject().put("ranked", result)) } catch (e: LinkageError) { call.reject("El modelo no es compatible con esta arquitectura. Se usará el parser local de etiquetas.") } catch (e: Exception) { call.reject(e.message ?: "No se pudo calcular afinidad", e) } } }
     override fun handleOnDestroy() { scope.cancel(); super.handleOnDestroy() }
