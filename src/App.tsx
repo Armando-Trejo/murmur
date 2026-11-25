@@ -1,12 +1,16 @@
 import { MotionGlyph } from "./components/MotionGlyph";
-import { motionMs, release, settle, settleCss } from "./core/motion";
+import { motionMs, release, settle, settleCss, songStep } from "./core/motion";
 import { HomeFeed } from "./components/HomeFeed";
 import { importCollectionLink, readCollectionLink, saveCollection } from "./core/CollectionImport";
 import { MusicDirectory } from "./components/MusicDirectory";
 import { CollectionLinkImport } from "./components/CollectionLinkImport";
 import { MarqueeTitle } from "./components/MarqueeTitle";
 import { PlayerLayer } from "./components/PlayerLayer";
-import { SeekBar } from "./components/SeekBar";
+import { MiniTrackSwap } from "./components/MiniTrackSwap";
+import { Unfold } from "./components/Unfold";
+import { navTransitionRunning } from "./core/viewTransition";
+import { settleReorder } from "./core/gestures";
+import { MiniProgress, SeekBar } from "./components/SeekBar";
 import {
   useEffect,
   useRef,
@@ -227,6 +231,8 @@ function Equalizer() {
 export default function App() {
   const state = useSyncExternalStore(player.subscribe, player.getSnapshot);
   const current = state.queue[state.index];
+  // The engine's real length wins over the catalogue's (a YouTube twin of a Spotify song differs).
+  const length = state.duration > 0 ? state.duration : current?.duration > 0 ? current.duration : 0;
   const currentArtwork = artworkFor(current);
   const tone = useArtworkTone(currentArtwork);
   const nav = useInterfaceNavigation();
@@ -306,11 +312,24 @@ export default function App() {
   const [online, setOnline] = useState(navigator.onLine);
 
   const [voiceBusy, setVoiceBusy] = useState(false);
+  const [wakeListening, setWakeListening] = useState(false);
+  // Safety net: the native side always ends the capture within 14 s; never leave the pill stuck.
+  useEffect(() => {
+    if (!wakeListening) return;
+    const t = setTimeout(() => setWakeListening(false), 16000);
+    return () => clearTimeout(t);
+  }, [wakeListening]);
   const [sleep, setSleep] = useState<SleepState>({ mode: "off" });
   const [haptics, setHaptics] = useState(hapticsEnabled);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [importOpen, setImportOpen] = useState(false);
   const sheetDrag = useDragControls();
+  /** The open sheet was thrown down by the finger (its exit keeps going down instead of a short drop). */
+  const sheetThrown = useRef(false);
+  const sheetOpen = !!(actionTrack || playlistPicker || newPlaylist || shared || sleepSheet);
+  useEffect(() => {
+    if (sheetOpen) sheetThrown.current = false;
+  }, [sheetOpen]);
   const allTracks = useLiveQuery(() => db.tracks.toArray(), [], []);
   const weekSeconds = useLiveQuery(async () => {
     const since = new Date();
@@ -437,14 +456,19 @@ export default function App() {
     return () => observer.disconnect();
   }, []);
   const seq = useRef(0);
-  // Which way the cover moves on a song change: forward (next) or back (previous).
-  const lastCoverIndex = useRef(-1);
+  // Which way the cover moves on a song change: back only for Anterior, forward for everything else
+  // (a tap on a later song in the queue trims the queue, which must not read as going back).
+  const currentKey = current ? current.queueId || current.id : "";
+  const lastCoverKey = useRef("");
   const lastCoverDirection = useRef(1);
-  if (state.index !== lastCoverIndex.current) {
-    if (lastCoverIndex.current >= 0) lastCoverDirection.current = state.index > lastCoverIndex.current ? 1 : -1;
-    lastCoverIndex.current = state.index;
+  if (currentKey !== lastCoverKey.current) {
+    if (lastCoverKey.current && currentKey)
+      lastCoverDirection.current = songStep(state.queue, state.index, lastCoverKey.current);
+    lastCoverKey.current = currentKey;
   }
   const coverDirection = lastCoverDirection.current;
+  /** When a finger last threw the mini player's song out (it then leaves with that momentum). */
+  const miniFlungAt = useRef(-Infinity);
   useFitCover(expanded, current?.queueId ?? current?.id ?? "");
   useHeaderScroll();
   // Smart downloads: on start, every hour and when the connection returns (Wi-Fi only, inside).
@@ -466,7 +490,8 @@ export default function App() {
     const detail = !!(nav.route.playlistId || nav.route.artist || nav.route.directory);
     const previous = priorView.current;
     priorView.current = tab;
-    if (!previous) return;
+    // A View Transition is already moving the pages; this slide is only the fallback.
+    if (!previous || navTransitionRunning()) return;
     const direction = previous === tab
       ? detail ? 1 : -1
       : Math.sign(tabs.findIndex(item => item.id === tab) - tabs.findIndex(item => item.id === previous));
@@ -758,6 +783,8 @@ export default function App() {
       });
       void add("onSleepTimerFinished", () => setSleep({ mode: "off" }));
       void add("onVoiceError", (e) => notify(e.message, "error"));
+      // "Ok MURMUR" was confirmed and the phone is listening for the request.
+      void add("onVoiceListening", (e) => setWakeListening(!!e.listening));
       void add("onPlaybackNotice", (e) => notify(e.message, "error"));
       void add("onShortcutReceived", (e) => {
         if (e.target === "mix")
@@ -2294,15 +2321,32 @@ export default function App() {
         </div>
       </main>
       <div className="bottom-shell">
+        <AnimatePresence>
         {current && (
+          <motion.div
+            key="mini"
+            className="mini-slot"
+            initial={{ opacity: 0, y: reduced ? 0 : 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: reduced ? 0 : 14, transition: { duration: (reduced ? motionMs.reduced : motionMs.swapOut) / 1000, ease: release } }}
+            transition={{ duration: (reduced ? motionMs.reduced : motionMs.playerIn) / 1000, ease: settle }}
+          >
           <SwipeSurface
             className={"mini-player" + (tone ? " toned" : "")}
             style={tone ? ({ "--tone": tone } as React.CSSProperties) : undefined}
+            fling=".mini-track:not([data-leaving])"
             onSwipe={(direction) => {
               haptic();
+              // Anterior past the first seconds restarts the song: then the cover springs back instead.
+              const live = player.getSnapshot();
+              const changes = direction < 0
+                ? !!player.nextTrack
+                : live.index > 0 && !(live.position > 3 && !live.loading);
+              if (changes) miniFlungAt.current = performance.now();
               void guard(() =>
                 direction < 0 ? player.next() : player.previous(),
               );
+              return changes;
             }}
           >
             <button
@@ -2310,16 +2354,21 @@ export default function App() {
               aria-label="Abrir reproductor"
               onClick={() => setExpanded(true)}
             >
-              <Cover track={current} size="small" />
-              <span className="mini-copy" key={current.queueId || current.id}>
-                <strong><MarqueeTitle text={current.title} /></strong>
-                <small>
-                  {current.artist}{" "}
-                  <span className="mini-source">
-                    {current.source === "spotify" ? "SPOTIFY" : "YT AUDIO"}
-                  </span>
-                </small>
-              </span>
+              <MiniTrackSwap
+                swapKey={current.queueId || current.id}
+                swap={{ dir: -coverDirection, flung: performance.now() - miniFlungAt.current < 600 }}
+              >
+                <Cover track={current} size="small" />
+                <span className="mini-copy">
+                  <strong><MarqueeTitle text={current.title} /></strong>
+                  <small>
+                    {current.artist}{" "}
+                    <span className="mini-source">
+                      {current.source === "spotify" ? "SPOTIFY" : "YT AUDIO"}
+                    </span>
+                  </small>
+                </span>
+              </MiniTrackSwap>
             </button>
             <button
               className="icon-button"
@@ -2353,15 +2402,12 @@ export default function App() {
               )}
               </MotionGlyph>
             </button>
-            <div className="mini-progress">
-              <i key={current.queueId || current.id}
-                style={{
-                  transform: `scaleX(${Math.min(1, state.position / (current.duration || 1))})`,
-                }}
-              />
-            </div>
+            <MiniProgress key={current.queueId || current.id} position={state.position} duration={length}
+              playing={state.playing && !state.loading} />
           </SwipeSurface>
+          </motion.div>
         )}
+        </AnimatePresence>
         <nav className="bottom-nav" aria-label="Navegación principal">
           {tabs.map((t) => (
             <button
@@ -2384,7 +2430,7 @@ export default function App() {
           ))}
         </nav>
       </div>
-      <PlayerLayer open={expanded && !!current}>
+      <PlayerLayer open={expanded && !!current} onDismiss={() => setExpanded(false)}>
         {current && (
           <>
             <PlayerBackdrop url={currentArtwork} />
@@ -2396,12 +2442,8 @@ export default function App() {
               >
                 <ChevronDown />
               </button>
-              <SwipeSurface
-                className="player-dismiss-grip"
-                axis="y"
-                positive
-                onSwipe={() => setExpanded(false)}
-              >
+              {/* Pull handle: the whole panel follows a downward drag from here (PlayerLayer). */}
+              <div className="player-dismiss-grip">
                 REPRODUCIENDO DESDE
                 <br />
                 <b>
@@ -2411,7 +2453,7 @@ export default function App() {
                       ? "SPOTIFY INTEGRADO"
                       : "SPOTIFY CONNECT"}
                 </b>
-              </SwipeSurface>
+              </div>
               <div className="player-top-actions">
                 {isNative && (
                   <motion.button
@@ -2496,13 +2538,10 @@ export default function App() {
               <SeekBar
                 key={current.queueId || current.id}
                 position={state.position}
-                duration={current.duration}
+                duration={length}
+                playing={state.playing && !state.loading}
                 onError={(message) => notify(message, "error")}
               />
-              <div className="time-labels">
-                <span>{time(state.position)}</span>
-                <span>{time(current.duration)}</span>
-              </div>
               <div className="transport">
                 <button
                   className={"icon-button shuffle-button mode-" + state.shuffleMode}
@@ -2650,11 +2689,8 @@ export default function App() {
               </button>
               <AnimatePresence initial={false}>
               {lyricsOpen && (
-                <motion.div className="lyrics" key="lyrics"
-                  initial={{ opacity: 0, y: reduced ? 0 : -5 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: reduced ? 0 : -3, pointerEvents: "none", transition: { duration: 0.13 } }}
-                  transition={{ duration: reduced ? 0.1 : 0.22, ease: settle }}>
+                <Unfold key="lyrics">
+                <div className="lyrics">
                   {lyrics.length ? (
                     <SyncedLyrics
                       lines={lyrics}
@@ -2689,7 +2725,8 @@ export default function App() {
                     }}>
                     Buscar letra en Genius <ArrowUpRight size={16} aria-hidden="true" />
                   </a>}
-                </motion.div>
+                </div>
+                </Unfold>
               )}
               </AnimatePresence>
               <button
@@ -2707,11 +2744,7 @@ export default function App() {
               </button>
               <AnimatePresence initial={false}>
               {queueVisible && (
-                <motion.div key="queue"
-                  initial={{ opacity: 0, y: reduced ? 0 : -5 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: reduced ? 0 : -3, pointerEvents: "none", transition: { duration: 0.13 } }}
-                  transition={{ duration: reduced ? 0.1 : 0.22, ease: settle }}>
+                <Unfold key="queue">
                 <PlaybackQueue tracks={state.queue.slice(state.index + 1)}>
                   {(t, queueIndex, handlers) => (
                     <QueueRow
@@ -2768,7 +2801,7 @@ export default function App() {
                     </QueueRow>
                   )}
                 </PlaybackQueue>
-                </motion.div>
+                </Unfold>
               )}
               </AnimatePresence>
             </div>
@@ -2787,13 +2820,13 @@ export default function App() {
           />
         )}
       </AnimatePresence>
-      <AnimatePresence>
-        {(actionTrack || playlistPicker || newPlaylist || shared || sleepSheet) && (
+      <AnimatePresence custom={sheetThrown.current}>
+        {sheetOpen && (
           <motion.div
             className="sheet-backdrop"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0, transition: { duration: 0.17, ease: release } }}
+            exit={{ opacity: 0, pointerEvents: "none", transition: { duration: 0.17, ease: release } }}
             transition={{ duration: 0.24, ease: settle }}
             onClick={() => {
               setActionTrack(undefined);
@@ -2824,6 +2857,8 @@ export default function App() {
               onDragEnd={(_, info) => {
                 if (info.offset.y < 110 && info.velocity.y < 650) return;
                 haptic();
+                // Thrown down: it leaves downward from where the finger let go (see the "leave" variant).
+                sheetThrown.current = !reduced;
                 setActionTrack(undefined);
                 setPlaylistPicker(undefined);
                 setNewPlaylist(false);
@@ -2832,7 +2867,20 @@ export default function App() {
               }}
               initial={{ y: reduced ? 0 : 42, opacity: reduced ? 1 : 0.72 }}
               animate={{ y: 0, opacity: 1 }}
-              exit={{ y: reduced ? 0 : 30, opacity: 0, transition: { duration: 0.16, ease: release } }}
+              variants={{
+                leave: (thrown: boolean, current: { y?: unknown }) =>
+                  thrown
+                    ? {
+                        y: (Number(current.y) || 0) + Math.round(window.innerHeight * 0.6),
+                        opacity: 0,
+                        transition: {
+                          y: { type: "spring", duration: 0.28, bounce: 0 },
+                          opacity: { duration: 0.2, ease: release, delay: 0.04 },
+                        },
+                      }
+                    : { y: reduced ? 0 : 30, opacity: 0, transition: { duration: 0.16, ease: release } },
+              }}
+              exit="leave"
               transition={{ duration: reduced ? 0.1 : 0.29, ease: settle }}
               onClick={(e) => e.stopPropagation()}
             >
@@ -3108,6 +3156,22 @@ export default function App() {
         )}
       </AnimatePresence>
       <AnimatePresence>
+        {wakeListening && (
+          <motion.div
+            className="voice-listening"
+            role="status"
+            aria-live="polite"
+            initial={{ y: reduced ? 0 : -14, opacity: 0, scale: reduced ? 1 : 0.94 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: reduced ? 1 : 0.96, transition: { duration: 0.15, ease: release } }}
+            transition={{ duration: 0.26, ease: settle }}
+          >
+            <span className="voice-listening-bars" aria-hidden="true"><i /><i /><i /><i /></span>
+            <span>Te escucho…</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
         {toast && (
           <motion.div
             role={toastKind === "error" ? "alert" : "status"}
@@ -3190,6 +3254,9 @@ function QueueRow({
   children: React.ReactNode;
 }) {
   const controls = useDragControls();
+  const reduced = useReducedMotion();
+  /** Picked up: the row rises on a spring and its card and shadow fade in under it (motion215.css). */
+  const [lifted, setLifted] = useState(false);
   const scrollFrame = useRef(0);
   const scrollSpeed = useRef(0);
   const scrollOwner = useRef<HTMLElement | null>(null);
@@ -3211,7 +3278,10 @@ function QueueRow({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, x: -24, transition: { duration: 0.16 } }}
+      data-lifted={lifted ? "true" : undefined}
+      whileDrag={reduced ? undefined : { scale: 1.03 }}
       onDragStart={() => {
+        setLifted(true);
         onDragStart();
         scrollOwner.current = document.querySelector(".expanded-player");
         scrollFrame.current = requestAnimationFrame(autoScroll);
@@ -3229,6 +3299,7 @@ function QueueRow({
       }}
       onDragEnd={() => {
         stopScroll();
+        setLifted(false);
         onDragEnd();
       }}
       transition={{ type: "spring", stiffness: 500, damping: 40 }}
@@ -3267,24 +3338,27 @@ function PlaybackQueue({
   const [ids, setIds] = useState(() => tracks.map((t) => t.queueId!));
   const draft = useRef(ids);
   const dragging = useRef(false);
+  /** The queue changed under the finger (a song ended mid-drag): reconciled on drop, not mid-gesture. */
+  const stale = useRef(false);
   const [limit, setLimit] = useState(80);
-  const [dragEpoch, setDragEpoch] = useState(0);
+  // Rows keep their song while a drag outlives it, so the row under the finger never vanishes or jumps.
+  const known = useRef(new Map<string, QueueItem>());
+  if (!dragging.current) known.current = new Map();
+  for (const t of tracks) known.current.set(t.queueId!, t);
   useEffect(() => {
     if (dragging.current) {
-      // A provider advance or enqueue invalidates the gesture's starting order.
-      dragging.current = false;
-      setDragEpoch((epoch) => epoch + 1);
+      stale.current = true;
+      return;
     }
     const order = tracks.map((t) => t.queueId!);
     draft.current = order;
     setIds(order);
   }, [key]);
-  const lookup = new Map(tracks.map((t) => [t.queueId!, t]));
+  const lookup = known.current;
   const visible = ids.slice(0, limit);
   return (
     <>
       <Reorder.Group
-        key={dragEpoch}
         className="queue"
         axis="y"
         values={visible}
@@ -3304,7 +3378,11 @@ function PlaybackQueue({
             onDragEnd: () => {
               if (!dragging.current) return;
               dragging.current = false;
-              player.reorderUpcoming(draft.current);
+              const before = player.getSnapshot();
+              player.reorderUpcoming(stale.current
+                ? settleReorder(draft.current, before.queue.slice(before.index + 1).map((t) => t.queueId!))
+                : draft.current);
+              stale.current = false;
               const live = player.getSnapshot();
               draft.current = live.queue
                 .slice(live.index + 1)

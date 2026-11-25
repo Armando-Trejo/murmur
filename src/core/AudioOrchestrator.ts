@@ -13,6 +13,8 @@ export interface PlayerState {
   playing: boolean;
   loading: boolean;
   position: number;
+  /** Real length of what is playing, in seconds, as the engine reports it; 0 until known. */
+  duration: number;
   mode: MixMode;
   error: string;
   errorCode: string;
@@ -32,6 +34,7 @@ export class AudioOrchestrator {
     playing: false,
     loading: false,
     position: 0,
+    duration: 0,
     mode: "smooth",
     error: "",
     errorCode: "",
@@ -92,6 +95,19 @@ export class AudioOrchestrator {
   private polling = false;
   private seekTimer?: ReturnType<typeof setTimeout>;
   private finishSeek?: () => void;
+  /** Target of the last seek: progress ticks far from it are stale until it lands (or 1.5 s pass). */
+  private seekGuard?: { to: number; until: number };
+  private pausedAt = 0;
+  /**
+   * Paused in MURMUR, then resumed from the notification, headphones or lock screen: the engine
+   * says it plays this same song again. Events are trusted again, or the slider would stay frozen.
+   */
+  private externalResume(e: { playing?: boolean; queueId?: string; trackId?: string }) {
+    if (!this.ignoreNative || !e.playing || Date.now() - this.pausedAt < 800) return;
+    if ((e.queueId && e.queueId !== this.current?.queueId) || (e.trackId && e.trackId !== this.current?.id)) return;
+    this.ignoreNative = false;
+    if (this.current) this.loadedId = this.current.id;
+  }
   private ignoreNative = false;
   /** Measures tap-to-playback for the newest explicit selection only. */
   readonly selection = new SelectionTimer();
@@ -153,7 +169,10 @@ export class AudioOrchestrator {
   };
   update(patch: Partial<PlayerState>) {
     if (patch.loading === false || patch.playing === true || patch.error) this.clearLoadingTimer();
+    const before = this.current?.queueId ?? this.current?.id;
     this.state = { ...this.state, ...patch };
+    const after = this.current?.queueId ?? this.current?.id;
+    if (before !== after && patch.duration === undefined) this.state.duration = 0;
     if (this.state.loading && !this.loadingTimer) {
       const generation = this.generation;
       this.loadingTimer = setTimeout(() => {
@@ -232,10 +251,17 @@ export class AudioOrchestrator {
     if (mode) await Audio.setAutoMixMode({ mode }).catch(() => {});
     await Audio.addListener("onPlaybackProgress", (e) => {
       if (this.current?.source === "youtube" && !this.state.error && this.accepts(e)) {
-        this.update({ position: e.positionMs / 1000 });
+        const position = e.positionMs / 1000;
+        // A tick sent before the seek reached the engine would pull the thumb back to the old spot.
+        if (this.seekGuard) {
+          if (Date.now() < this.seekGuard.until && Math.abs(position - this.seekGuard.to) > 1.5) return;
+          this.seekGuard = undefined;
+        }
+        this.update({ position, ...(e.durationMs > 0 ? { duration: e.durationMs / 1000 } : {}) });
       }
     });
     await Audio.addListener("onPlaybackStateChanged", (e) => {
+      this.externalResume(e);
       if (this.current?.source === "youtube" && !this.state.error && this.accepts(e))
         this.update({ playing: e.playing, loading: e.loading || false });
     });
@@ -278,6 +304,7 @@ export class AudioOrchestrator {
       });
     });
     await Audio.addListener("onNativeTrackChanged", (e) => {
+      if (this.ignoreNative && Date.now() - this.pausedAt > 800) this.ignoreNative = false;
       const index = this.state.queue.findIndex((t) =>
         e.queueId ? t.queueId === e.queueId : t.id === e.id,
       );
@@ -293,7 +320,8 @@ export class AudioOrchestrator {
         if (e.transport) this.spotifyTransport = e.transport;
         this.update({
           index,
-          position: 0,
+          position: typeof e.positionMs === "number" && e.positionMs > 0 ? e.positionMs / 1000 : 0,
+          duration: typeof e.durationMs === "number" && e.durationMs > 0 ? e.durationMs / 1000 : 0,
           error: "",
           errorCode: "",
           playing: e.playing ?? true,
@@ -346,6 +374,7 @@ export class AudioOrchestrator {
         queue: restoredQueue,
         index: restoredIndex,
         position: native.positionMs / 1000,
+        duration: native.durationMs > 0 ? native.durationMs / 1000 : 0,
         playing: native.playing,
         loading: native.loading || false,
       });
@@ -469,7 +498,7 @@ export class AudioOrchestrator {
         };
         const queue = [...this.state.queue];
         queue[this.state.index] = updated;
-        this.update({ queue });
+        this.update({ queue, ...(info.duration > 0 ? { duration: info.duration } : {}) });
         this.update({
           playing: info.playing ?? true,
           loading: info.loading ?? false,
@@ -631,6 +660,7 @@ export class AudioOrchestrator {
     const generation = ++this.generation;
     const remoteSpotify = this.loadedSource === "spotify" && this.spotifyTransport !== "integrated";
     this.ignoreNative = true;
+    this.pausedAt = Date.now();
     this.clearLoadingTimer();
     this.selection.cancel();
     if (this.state.loading) this.loadedId = "";
@@ -668,6 +698,7 @@ export class AudioOrchestrator {
       this.update({
         index,
         position: native.positionMs / 1000,
+        ...(native.durationMs > 0 ? { duration: native.durationMs / 1000 } : {}),
         playing: native.playing,
         loading: native.loading ?? false,
       });
@@ -687,6 +718,7 @@ export class AudioOrchestrator {
         playing: native.playing,
         loading: native.loading ?? false,
         position: native.positionMs / 1000,
+        ...(native.durationMs > 0 ? { duration: native.durationMs / 1000 } : {}),
       });
   }
   async toggle() {
@@ -712,10 +744,9 @@ export class AudioOrchestrator {
   }
   async seek(seconds: number) {
     if (!isNative || !this.current) return;
-    const position = Math.max(
-      0,
-      Math.min(seconds, this.current.duration || seconds),
-    );
+    const length = this.state.duration || this.current.duration || seconds;
+    const position = Math.max(0, Math.min(seconds, length));
+    this.seekGuard = { to: position, until: Date.now() + 1500 };
     this.update({ position });
     clearTimeout(this.seekTimer);
     this.finishSeek?.();

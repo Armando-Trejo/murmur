@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { resolveView, type ViewId } from "./navigation";
+import { navTransitionKind, startNavTransition } from "./viewTransition";
 import type { QueueItem } from "./types";
 type Sheet = {
   kind: "actions" | "picker" | "shared" | "create" | "sleep";
@@ -50,6 +52,21 @@ export function useInterfaceNavigation() {
   const scrollFrame = useRef(0);
   const queued = useRef<InterfaceRoute>();
   const [invalid, setInvalid] = useState(resolveView(location.hash).invalid);
+  /**
+   * Shows the latest route. A page change runs inside a View Transition when available: the old page is
+   * kept as a still while the new one renders and takes its scroll, so nothing jumps. `place` restores
+   * the scroll; `inTransition` says the new page is already in the DOM.
+   */
+  const show = (before: InterfaceRoute, travel: -1 | 0 | 1, place: (inTransition: boolean) => void) => {
+    const kind = navTransitionKind(before, current.current, travel);
+    if (kind && startNavTransition(kind, () => {
+      flushSync(() => setRoute(current.current));
+      place(true);
+    }))
+      return;
+    setRoute(current.current);
+    place(false);
+  };
   const commit = (next: InterfaceRoute, replace = false) => {
     if (waiting.current) {
       queued.current = next;
@@ -67,14 +84,15 @@ export function useInterfaceNavigation() {
     }
     known.current.set(index.current, next);
     current.current = next;
-    setRoute(next);
     window.history[replace ? "replaceState" : "pushState"](
       { murmur: next, murmurIndex: index.current, scrollY: 0 },
       "",
       href(next),
     );
-    if (before.view !== next.view || before.playlistId !== next.playlistId || before.artist !== next.artist || before.artistId !== next.artistId || before.directory !== next.directory)
-      window.scrollTo({ top: 0 });
+    const page = before.view !== next.view || before.playlistId !== next.playlistId || before.artist !== next.artist || before.artistId !== next.artistId || before.directory !== next.directory;
+    show(before, replace ? 0 : 1, () => {
+      if (page) window.scrollTo({ top: 0 });
+    });
   };
   const commitRef = useRef(commit);
   commitRef.current = commit;
@@ -92,10 +110,11 @@ export function useInterfaceNavigation() {
         ? { view: "home" }
         : window.history.state?.murmur || fromUrl();
       if (!window.history.state?.murmur) known.current.clear();
+      const before = current.current;
+      const from = index.current;
       index.current = window.history.state?.murmurIndex ?? 0;
       known.current.set(index.current, next);
       current.current = next;
-      setRoute(next);
       waiting.current = false;
       if (invalidRoute)
         window.history.replaceState(
@@ -105,9 +124,14 @@ export function useInterfaceNavigation() {
         );
       cancelAnimationFrame(scrollFrame.current);
       const scroll = window.history.state?.scrollY || 0;
-      scrollFrame.current = requestAnimationFrame(() =>
-        window.scrollTo({ top: scroll }),
-      );
+      show(before, index.current < from ? -1 : 1, (inTransition) => {
+        // Inside a transition the page is already rendered: restore now, under the still of the old one.
+        if (inTransition) window.scrollTo({ top: scroll });
+        cancelAnimationFrame(scrollFrame.current);
+        scrollFrame.current = requestAnimationFrame(() =>
+          window.scrollTo({ top: scroll }),
+        );
+      });
       if (queued.current) {
         const target = queued.current;
         queued.current = undefined;

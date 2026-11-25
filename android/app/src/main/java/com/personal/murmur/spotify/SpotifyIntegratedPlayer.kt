@@ -147,7 +147,7 @@ class SpotifyIntegratedPlayer(private val context: Context, private val onNext: 
         }}};return true
     }
     fun seekIntegrated(ms:Long){positionMs=ms.coerceAtLeast(0);scope.launch{runCatching{backend.seek(positionMs)}};invalidate()}
-    private fun applyGain(){val gain=fadeLevel*(if(voiceDucked || focusDucked).15f else 1f);output.volume(gain);backend.volume(gain)}
+    private fun applyGain(){val gain=fadeLevel*(if(voiceDucked) com.personal.murmur.HybridMediaService.DUCK_GAIN else if(focusDucked) .15f else 1f);output.volume(gain);backend.volume(gain)}
     fun fadeGain(value:Float){fadeLevel=value.coerceIn(0f,1f);applyGain()}
     fun duck(value:Boolean){voiceDucked=value;applyGain()}
     private fun abandonFocus(){if(focusHeld){if(manageFocus)audio.abandonAudioFocusRequest(focus);focusHeld=false}}

@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ArrowRight, Check, Mic, Play, Sparkles } from "lucide-react";
+import { ArrowRight, Check, History, Mic, Play, Sparkles } from "lucide-react";
 import { Auth, isNative } from "../native";
 import { spotifyAvailable, spotifyClientId } from "../config";
 import { WakeWordSetting } from "./WakeWordSetting";
 import { settle } from "../core/motion";
+import { importBackup } from "../core/db";
 
 export const WELCOME_KEY = "murmur.welcomed";
 export const needsWelcome = () => typeof localStorage !== "undefined" && !localStorage.getItem(WELCOME_KEY) &&
@@ -25,6 +26,25 @@ export function Welcome({ notify, youtubeConnected, spotifyConnected, onDone }: 
   const [step, setStep] = useState(0);
   const [busy, setBusy] = useState("");
   const reduced = useReducedMotion();
+  const picker = useRef<HTMLInputElement>(null);
+  /**
+   * Coming from another install (an update signed with another key, a new phone): the automatic
+   * copy in Descargas/MURMUR brings back library, playlists, history and preferences in one step.
+   */
+  const restore = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy("restore");
+    try {
+      const result = await importBackup(await file.text());
+      localStorage.setItem(WELCOME_KEY, String(Date.now()));
+      notify(`Listo: recuperé ${result.tracks} canciones y ${result.playlists} playlists.`, "success");
+      // Preferences (accent, Spotify mode, last session) apply on a fresh start.
+      setTimeout(() => location.reload(), 900);
+    } catch (error) {
+      setBusy("");
+      notify((error as Error).message || "No se pudo leer ese respaldo.", "error");
+    }
+  };
   const finish = () => {
     localStorage.setItem(WELCOME_KEY, String(Date.now()));
     onDone();
@@ -50,7 +70,13 @@ export function Welcome({ notify, youtubeConnected, spotifyConnected, onDone }: 
       <span className="welcome-mark" aria-hidden="true"><Sparkles size={30} /></span>
       <h1>Bienvenido a MURMUR</h1>
       <p>Tu música de YouTube Music y Spotify en un solo lugar. Pídela con tu voz y deja que nunca se detenga: cuando termina lo que elegiste, sigue con algo parecido.</p>
-      <button className="button primary full" onClick={() => setStep(1)}>Empezar <ArrowRight size={18} /></button>
+      <button className="button primary full" onClick={() => setStep(1)} disabled={busy === "restore"}>Empezar <ArrowRight size={18} /></button>
+      <button className="button secondary full welcome-restore" disabled={busy === "restore"} onClick={() => picker.current?.click()}>
+        <History size={18} /> {busy === "restore" ? "Restaurando…" : "Ya usaba MURMUR: restaurar"}
+      </button>
+      <small className="welcome-hint">Elige <b>murmur-respaldo.json</b> en Descargas › MURMUR. Trae tu biblioteca, playlists y ajustes.</small>
+      <input ref={picker} type="file" accept="application/json,.json" hidden
+        onChange={(event) => { void restore(event.target.files?.[0]); event.target.value = ""; }} />
     </>,
     <>
       <span className="welcome-mark" aria-hidden="true"><Play size={28} fill="currentColor" /></span>
@@ -73,7 +99,7 @@ export function Welcome({ notify, youtubeConnected, spotifyConnected, onDone }: 
       <p>Toca el micrófono de arriba o activa «Ok MURMUR» para pedirla sin tocar el teléfono. Habla normal:</p>
       <ul className="welcome-examples">
         <li>«Ok MURMUR, ponme Bailarina de Miranda»</li>
-        <li>«Algo tranquilo para trabajar»</li>
+        <li>«Ponme algo tranquilo para trabajar»</li>
         <li>«Pásale a la que sigue»</li>
       </ul>
       <WakeWordSetting notify={notify} />

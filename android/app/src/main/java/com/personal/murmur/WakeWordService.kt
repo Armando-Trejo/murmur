@@ -88,9 +88,10 @@ class WakeWordService : Service() {
         fun start(context: Context) = ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
         fun stop(context: Context) { context.stopService(Intent(context, WakeWordService::class.java)) }
 
-        private val wake = Regex("\\b(?:ok|okey|okay|oque|o que|o ke)\\s*(?:mur\\s*mur\\w*|mor\\s*mur\\w*|murmur\\w*)")
         /** True when recognised text contains the wake phrase (Vosk spells it loosely in Spanish). */
-        fun heard(text: String) = wake.containsMatchIn(YouTubeMusicPages.normalize(text))
+        fun heard(text: String) = WakePhrase.heard(text)
+        /** After music stops, keep listening this long so "Ok MURMUR, continúa" still works. */
+        const val IDLE_GRACE_MS = 10 * 60_000L
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -116,16 +117,54 @@ class WakeWordService : Service() {
     private fun startInForeground() {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Escucha «Ok MURMUR»", NotificationManager.IMPORTANCE_MIN))
-        val open = PendingIntent.getActivity(this, 3, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val stop = PendingIntent.getService(this, 4, Intent(this, WakeWordService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val notification: Notification = NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_sound).setContentTitle("Di «Ok MURMUR»")
-            .setContentText("Escucha local, sin enviar audio hasta que dices la frase.")
-            .setOngoing(true).setContentIntent(open).addAction(0, "Desactivar", stop)
-            .setPriority(NotificationCompat.PRIORITY_MIN).build()
+        val notification = notification(listening = true)
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
         else startForeground(NOTIFICATION, notification)
         running = true
+    }
+
+    private fun notification(listening: Boolean): Notification {
+        val open = PendingIntent.getActivity(this, 3, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val stop = PendingIntent.getService(this, 4, Intent(this, WakeWordService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        return NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_sound)
+            .setContentTitle(if (listening) "Di «Ok MURMUR»" else "«Ok MURMUR» en espera")
+            .setContentText(if (listening) "Escucha local, sin enviar audio hasta que dices la frase."
+                else "Micrófono apagado. Vuelve a escuchar cuando suena música o abres MURMUR.")
+            .setOngoing(true).setContentIntent(open).addAction(0, "Desactivar", stop)
+            .setPriority(NotificationCompat.PRIORITY_MIN).build()
+    }
+
+    /** Last time music played: the phrase stays useful a while after a pause ("Ok MURMUR, continúa"). */
+    @Volatile private var lastMusicAt = android.os.SystemClock.elapsedRealtime()
+    private var listeningShown = true
+
+    /**
+     * The microphone only opens when a command can matter: MURMUR is on screen, music is playing,
+     * or it stopped less than [IDLE_GRACE_MS] ago. Otherwise the service waits without recording.
+     */
+    private fun useful(): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val audio = getSystemService(android.media.AudioManager::class.java)
+        if (audio?.isMusicActive == true || HybridMediaService.instance?.visualPlaying == true) lastMusicAt = now
+        return HybridMediaService.uiVisible || now - lastMusicAt < IDLE_GRACE_MS
+    }
+
+    private fun showListening(listening: Boolean) {
+        if (listening == listeningShown || !running) return
+        listeningShown = listening
+        runCatching { getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification(listening)) }
+    }
+
+    /** While waiting, checks every 3 s whether listening became useful again. */
+    private val watch = object : Runnable {
+        override fun run() {
+            if (!running) return
+            if (!capturing && loop == null && model != null) {
+                if (useful()) listen() else showListening(false)
+            }
+            handler.postDelayed(this, 3_000)
+        }
     }
 
     private fun load() {
@@ -136,6 +175,7 @@ class WakeWordService : Service() {
                 if (!running) { loaded.close(); return@post }
                 model = loaded; loading = false
                 listen()
+                handler.removeCallbacks(watch); handler.postDelayed(watch, 3_000)
                 NativeEvents.emit("onWakeWordChanged", JSObject().put("enabled", true).put("ready", true))
             }
         } catch (failure: Exception) {
@@ -155,8 +195,9 @@ class WakeWordService : Service() {
     private fun listen() {
         val current = model ?: return
         if (capturing || loop != null) return
-        val grammar = org.json.JSONArray(listOf("ok murmur", "okey murmur", "okay murmur", "o que murmura", "o que murmuro",
-            "ok murmura", "okey murmura", "ok", "okey", "okay", "o", "que", "murmur", "murmura", "murmuro", "mur", "[unk]")).toString()
+        if (!useful()) { showListening(false); return }
+        showListening(true)
+        val grammar = org.json.JSONArray(WakePhrase.grammar).toString()
         val worker = Thread({ capture(current, grammar) }, "MurmurWakeWord")
         loop = worker
         worker.start()
@@ -201,16 +242,21 @@ class WakeWordService : Service() {
         val recognizer = Recognizer(model, rate.toFloat(), grammar)
         val buffer = ShortArray(frame)
         val preroll = ArrayDeque<ShortArray>()
+        // The last 2.5 s of audio, loud or not: what the second check transcribes.
+        val recent = ArrayDeque<ShortArray>()
         var hangover = 0
         // Background level (music left after echo cancelling, room noise): speech must rise above it.
         var floor = 300.0
         var frames = 0
+        var verifyAt = -1
+        var quietUntil = 0L
         var reopen = false
         try {
             record.startRecording()
             while (loop === Thread.currentThread() && !capturing) {
                 val read = record.read(buffer, 0, frame)
                 if (read <= 0) { Thread.sleep(50); continue }
+                frames++
                 var sum = 0.0
                 for (i in 0 until read) sum += buffer[i] * buffer[i].toDouble()
                 val rms = kotlin.math.sqrt(sum / read)
@@ -218,19 +264,35 @@ class WakeWordService : Service() {
                 val loud = rms > maxOf(800.0, floor * 1.8)
                 floor = if (rms < floor) floor * 0.8 + rms * 0.2 else floor * 0.995 + rms * 0.005
                 val chunk = buffer.copyOf(read)
+                recent.addLast(chunk); if (recent.size > 25) recent.removeFirst()
                 if (loud) hangover = 12 // keep decoding 1.2 s after the last loud frame
+                var spotted = false
                 if (hangover > 0) {
                     hangover--
-                    while (preroll.isNotEmpty()) feed(recognizer, preroll.removeFirst())
-                    feed(recognizer, chunk)
-                    if (hangover == 0) { check(recognizer.finalResult, "text"); recognizer.reset() }
+                    while (preroll.isNotEmpty()) spotted = feed(recognizer, preroll.removeFirst()) || spotted
+                    spotted = feed(recognizer, chunk) || spotted
+                    if (hangover == 0) { spotted = spotted(recognizer.finalResult, "text") || spotted; recognizer.reset() }
                 } else {
                     preroll.addLast(chunk); if (preroll.size > 5) preroll.removeFirst()
                 }
-                // Every 2 s: if the music started or stopped, reopen the microphone on the right path.
-                if (++frames % 20 == 0) {
+                val now = android.os.SystemClock.elapsedRealtime()
+                // The spotter fired: let the phrase finish (0.4 s), then confirm it with an open transcription.
+                if (spotted && verifyAt < 0 && now >= quietUntil && now - lastWake >= 3_000) verifyAt = frames + 4
+                if (verifyAt in 0..frames) {
+                    verifyAt = -1
+                    recognizer.reset(); hangover = 0; preroll.clear()
+                    if (confirm(model, recent.toList())) {
+                        lastWake = now
+                        handler.post { captureCommand() }
+                    } else quietUntil = now + 1_500
+                }
+                // Every 2 s: stop if listening no longer helps; reopen if the music started or stopped.
+                if (frames % 20 == 0) {
                     if (android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG)) android.util.Log.d(LOG_TAG, "wake mic echo=$echo aec=${effects.size} rms=${rms.toInt()} floor=${floor.toInt()}")
-                    if (hangover == 0 && wantsEchoCancel() != echo) { reopen = true; break }
+                    if (hangover == 0 && verifyAt < 0) {
+                        if (!useful()) break
+                        if (wantsEchoCancel() != echo) { reopen = true; break }
+                    }
                 }
             }
         } catch (failure: Exception) {
@@ -245,24 +307,37 @@ class WakeWordService : Service() {
         return reopen
     }
 
-    private fun feed(recognizer: Recognizer, samples: ShortArray) {
-        if (recognizer.acceptWaveForm(samples, samples.size)) check(recognizer.result, "text")
-        else check(recognizer.partialResult, "partial")
+    /** Feeds the spotter; true when what it has so far contains the phrase. */
+    private fun feed(recognizer: Recognizer, samples: ShortArray): Boolean =
+        if (recognizer.acceptWaveForm(samples, samples.size)) spotted(recognizer.result, "text")
+        else spotted(recognizer.partialResult, "partial")
+
+    private fun spotted(json: String?, key: String): Boolean {
+        val text = runCatching { JSONObject(json ?: "{}").optString(key) }.getOrDefault("")
+        return text.isNotBlank() && WakePhrase.heard(text)
+    }
+
+    /**
+     * Second check, on the capture thread (~0.3 s): the same seconds transcribed without the phrase
+     * grammar. Only word counts reach the debug log, never what was said.
+     */
+    private fun confirm(model: Model, audio: List<ShortArray>): Boolean {
+        val open = try { Recognizer(model, 16000f) } catch (_: Exception) { return false }
+        return try {
+            val parts = mutableListOf<String>()
+            for (samples in audio) if (open.acceptWaveForm(samples, samples.size)) parts += JSONObject(open.result).optString("text")
+            parts += JSONObject(open.finalResult).optString("text")
+            WakePhrase.confirmed(parts).also { ok ->
+                if (android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG))
+                    android.util.Log.d(LOG_TAG, "wake check ${if (ok) "confirmed" else "rejected"} words=${parts.joinToString(" ").split(' ').count { it.isNotBlank() }}")
+            }
+        } catch (_: Exception) { false } finally { open.close() }
     }
 
     private fun pauseListening() {
         val worker = loop
         loop = null
         worker?.join(400)
-    }
-
-    private fun check(json: String?, key: String) {
-        val text = runCatching { JSONObject(json ?: "{}").optString(key) }.getOrDefault("")
-        if (text.isBlank() || !heard(text)) return
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastWake < 3_000 || capturing) return
-        lastWake = now
-        handler.post { captureCommand() }
     }
 
     /** Each capture gets a token so a late callback from an abandoned recognizer is ignored. */
@@ -278,6 +353,8 @@ class WakeWordService : Service() {
             capturing = true
             pauseListening()
             VoiceTriggerManager.beginListening()
+            // The app shows "Te escucho…" so the person knows the phrase was understood.
+            NativeEvents.emit("onVoiceListening", JSObject().put("listening", true).put("source", "wake"))
             handler.postDelayed({ if (capturing) finishCommand(null, "No escuché un comando después de «Ok MURMUR».") }, 14_000)
         }
         val token = ++attempt
@@ -349,6 +426,7 @@ class WakeWordService : Service() {
         attempt++
         command?.destroy(); command = null
         VoiceTriggerManager.restoreAudio()
+        NativeEvents.emit("onVoiceListening", JSObject().put("listening", false).put("source", "wake"))
         if (!text.isNullOrBlank()) NativeEvents.emit("onVoiceCommandCaptured", JSObject().put("text", text.take(1000)).put("source", "wake"))
         else if (error != null) NativeEvents.emit("onVoiceError", JSObject().put("message", error))
         handler.postDelayed({ if (running) listen() }, 600)

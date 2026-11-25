@@ -1,4 +1,7 @@
-import { parseVoiceIntent, type Platform } from "./VoiceIntentParser";
+import { asksToPlay, parseVoiceIntent, type Platform, type VoiceIntent } from "./VoiceIntentParser";
+
+/** Intents that start music (as opposed to controlling what already plays). */
+const MUSIC = new Set<VoiceIntent["type"]>(["track", "album", "artist", "vibe", "youtube", "request", "playlist"]);
 import {
   searchAll,
   buildAffinity,
@@ -87,11 +90,20 @@ export async function routeVoiceCommand(
   const playlists = await db.playlists.toArray();
   const heard = text.split("\n").map((t) => t.trim()).filter(Boolean);
   const intents = heard.map((t) => parseVoiceIntent(t, playlists));
-  const at = Math.max(0, intents.findIndex((i) => i.type !== "unknown"));
+  // A control ("para la música") or an explicit request beats a guess from another alternative.
+  const rank = (i: VoiceIntent, said: string) =>
+    i.type === "unknown" ? 0 : MUSIC.has(i.type) && !asksToPlay(said) ? 1 : 2;
+  let at = 0;
+  intents.forEach((intent, index) => { if (rank(intent, heard[index]) > rank(intents[at], heard[at])) at = index; });
   const intent = intents[at] ?? { type: "unknown" as const };
   text = heard.join(" | ");
   let answer = "";
   try {
+    // Music without "pon", a wish or a platform is not played: it may be talk near the phone.
+    if (MUSIC.has(intent.type) && !asksToPlay(heard[at] ?? "")) {
+      answer = `Para poner música, di «pon» y lo que quieres escuchar. Escuché: «${heard[at]}»`;
+      return answer;
+    }
     answer = await run(intent, save);
     return answer;
   } catch (error) {

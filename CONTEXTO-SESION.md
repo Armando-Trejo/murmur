@@ -10,8 +10,17 @@ Léelo primero si continúas MURMUR en otra PC u otra sesión. El detalle técni
 - No escribir contraseñas en formularios. Las sesiones de YouTube Music y Spotify las inicia él en el teléfono.
 - No inventar resultados: lo probado en el teléfono se dice como probado, y lo demás como no verificado.
 
-## Estado actual: 2.14.1 (code 30)
-La 2.14.1 se hizo en la PC RAM y recupera los arreglos de audio de la 2.7.1 que no habían pasado a la 2.8.0. El detalle está en [CONTINUAR-MURMUR.md](CONTINUAR-MURMUR.md). Es solo de prueba: falta firmarla para compartir.
+## Estado actual: 2.15.0 (code 31)
+Hecha en la PC RAM e instalada en el teléfono del dueño por depuración inalámbrica (`adb connect <ip>:<puerto>`; el cable USB de esa PC falla). Trae:
+- voz con doble comprobación de «Ok MURMUR» y comandos de control;
+- nada de adivinar canciones;
+- sliders con la duración real;
+- respaldo automático en Descargas/MURMUR;
+- gestos con animación.
+
+El detalle está en [CONTINUAR-MURMUR.md](CONTINUAR-MURMUR.md). La 2.14.1 recuperó los arreglos de audio de la 2.7.1.
+
+**Firma:** el teléfono tiene ahora versiones firmadas con la llave de prueba de la PC RAM (`78d2b623…`). Para que la PC original genere versiones que se instalen encima, copia `C:\Users\RAM\.android\debug.keystore` a `%USERPROFILE%\.android\debug.keystore` en esa PC por USB (respalda antes la suya). Sin la misma firma, cada cambio de PC obliga a desinstalar. La restauración desde `Descargas/MURMUR/murmur-respaldo.json` evita empezar de cero, pero hay que volver a iniciar sesión.
 
 La 2.14.0 (code 29) fue la primera versión para compartir: firmada para distribución, sin depuración, con bienvenida, Conexiones simplificada y reporte de cierres. Funciones de las últimas entregas:
 - **La música no se detiene:** `src/core/continuation.ts`. Con 2 o menos canciones restantes agrega 12 afines sin repetir ninguna versión. En Buscar, tocar un resultado reproduce solo esa canción.
@@ -51,5 +60,6 @@ La 2.14.0 (code 29) fue la primera versión para compartir: firmada para distrib
 ## Decisiones tomadas (no volver a discutir)
 - Spotify reproduce con su gemela de YouTube Music. librespot y el Web SDK fallan por restricciones de Spotify (claves de audio rechazadas, sin DRM en WebView), y el dueño pidió no depender para nada de la app de Spotify.
 - Spotify ya no permite leer playlists ajenas en modo desarrollo. Los ambientes usan playlists de YouTube Music: `youtubePlaylists`, y hay que quitar el prefijo «VL» antes de llamar a `youtubeCollection`.
-- La voz entiende sin comandos fijos: unas pocas reglas para los controles y, para la música, los catálogos deciden.
+- La voz entiende sin comandos fijos: unas pocas reglas para los controles y, para la música, los catálogos deciden. Desde 2.15 la música solo suena con un pedido explícito («pon», «quiero», «en Spotify»): MURMUR no adivina.
+- «Ok MURMUR» comprueba la frase dos veces y solo abre el micrófono con la app en pantalla, con música o hasta 10 min después de pausar.
 - No se publica en Google Play, porque extraer audio de YouTube va contra sus reglas. Se distribuye el APK directo.

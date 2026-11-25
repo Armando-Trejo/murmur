@@ -1,0 +1,107 @@
+/* MURMUR 2.15: voice listening pill, scrubber alignment and gesture motion. */
+
+/* «Te escucho…»: shown while the request after «Ok MURMUR» is being captured. */
+.voice-listening {
+  position: fixed;
+  z-index: 90;
+  top: calc(14px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  translate: -50% 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 18px 10px 14px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 999px;
+  color: #ffffff;
+  background: rgb(18 18 18 / 0.72);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.55);
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+}
+.voice-listening-bars {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+}
+.voice-listening-bars i {
+  display: block;
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent, #ffffff);
+  transform-origin: 50% 50%;
+  animation: voice-listening-bar 900ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.voice-listening-bars i:nth-child(2) { animation-delay: -650ms; }
+.voice-listening-bars i:nth-child(3) { animation-delay: -300ms; }
+.voice-listening-bars i:nth-child(4) { animation-delay: -800ms; }
+@keyframes voice-listening-bar {
+  0%, 100% { transform: scaleY(0.28); }
+  50% { transform: scaleY(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-listening-bars i { animation: none; transform: scaleY(0.6); }
+}
+
+/* Scrubber: the fill ends under the thumb's centre, which travels from thumb/2 to 100% - thumb/2. */
+.seek-wrap {
+  --seek-fill: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--seek-fraction, 0));
+}
+.seek-wrap input.seek::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, var(--brand-accent) var(--seek-fill), rgba(255, 255, 255, 0.16) var(--seek-fill));
+}
+.seek-wrap .seek-bubble { left: clamp(26px, var(--seek-fill), calc(100% - 26px)); }
+.seek-wrap.unknown input.seek { cursor: default; }
+.seek-wrap.unknown input.seek::-webkit-slider-thumb { opacity: 0; }
+.time-labels { font-variant-numeric: tabular-nums; }
+.time-labels.scrubbing > span:first-child { color: var(--brand-accent); }
+
+/* The mini bar is driven frame by frame by the playback clock: no CSS easing between reports. */
+.mini-progress > i { transition: none; will-change: transform; }
+.mini-progress.unknown > i { opacity: 0; }
+
+/* Welcome: restore from the automatic copy. */
+.welcome-restore { gap: 8px; }
+.welcome-hint {
+  display: block;
+  margin-top: -2px;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  text-align: center;
+}
+.welcome-hint b { color: rgba(255, 255, 255, 0.86); font-weight: 600; }
+
+/*
+ * During a page transition the bars are captured on their own, without what lies behind them, so
+ * their blur has nothing to blur and the sliding content showed through. For those ~300 ms they
+ * become nearly opaque (the same dark glass, without transparency).
+ */
+:root[data-nav-transition] .topbar,
+:root[data-nav-transition] .bottom-nav { background-color: rgb(14 14 18 / 0.97); }
+:root[data-nav-transition] .mini-player { background-color: rgb(20 19 25 / 0.97); }
+/* Their colour transitions would otherwise still be mid-way when the bars are captured. */
+:root[data-nav-transition] .topbar,
+:root[data-nav-transition] .bottom-nav,
+:root[data-nav-transition] .mini-player { transition: none; }
+:root[data-nav-transition] .mini-player.toned {
+  background:
+    linear-gradient(100deg, rgba(var(--tone), 0.5) 0%, rgba(var(--tone), 0.26) 62%, rgba(var(--tone), 0.14) 100%),
+    rgb(16 16 20 / 0.97);
+}
+
+/* Long titles that scroll: soft edges instead of letters cut in half. */
+.marquee-active {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 6px, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 6px, #000 calc(100% - 14px), transparent 100%);
+}
+/* The bars' snapshot keeps the transparency of their glass: a dark backing hides the page sliding underneath. */
+::view-transition-new(murmur-bottom),
+::view-transition-new(murmur-topbar) { background: rgb(12 12 16); }

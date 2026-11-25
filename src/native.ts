@@ -80,6 +80,7 @@ interface AudioBridge {
   setDucking(o: { ducking: boolean }): Promise<void>;
   showVideo(o: { videoId: string }): Promise<void>;
   saveBackup(o: { content: string }): Promise<{ saved: boolean }>;
+  saveAutoBackup(o: { content: string }): Promise<{ saved: boolean; file: string }>;
   addListener(
     name: string,
     callback: (event: any) => void,

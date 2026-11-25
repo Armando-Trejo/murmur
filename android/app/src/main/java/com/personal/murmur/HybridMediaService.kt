@@ -48,6 +48,8 @@ class HybridMediaService : MediaSessionService() {
         const val METERED_PRELOAD_AFTER_MS = 12_000L
         /** True while MURMUR's own screen is visible; progress events to the WebView slow down otherwise. */
         @Volatile var uiVisible = true
+        /** Music level while the person talks to MURMUR (about -26 dB): low enough for the recognizer, still continuous. */
+        const val DUCK_GAIN = 0.05f
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
@@ -90,7 +92,10 @@ class HybridMediaService : MediaSessionService() {
     private fun updateMediaButtons(){transportPlayer?.let{sessionPlayer(it.engine)}}
     private fun emitNativeTrack(data:JSONObject, prepared: Boolean = true){
         val local=if(spotifyActive)spotifyIntegrated.webState()else null
-        NativeEvents.emit("onNativeTrackChanged",JSObject().put("id",data.optString("id")).put("queueId",data.optString("queueId")).put("prepared",prepared).put("playing",local?.optBoolean("is_playing")?:primaryPlayer.isPlaying).put("loading",local?.optBoolean("loading")?:(primaryPlayer.playbackState==Player.STATE_BUFFERING)).put("transport",if(spotifyActive)"integrated" else "youtube"))
+        NativeEvents.emit("onNativeTrackChanged",JSObject().put("id",data.optString("id")).put("queueId",data.optString("queueId")).put("prepared",prepared).put("playing",local?.optBoolean("is_playing")?:primaryPlayer.isPlaying).put("loading",local?.optBoolean("loading")?:(primaryPlayer.playbackState==Player.STATE_BUFFERING)).put("transport",if(spotifyActive)"integrated" else "youtube")
+            // Where the new song already is (a crossfade starts it seconds in) and its real length.
+            .put("positionMs", if (spotifyActive) spotifyIntegrated.positionMs else youtubePositionMs.coerceAtLeast(0))
+            .put("durationMs", if (spotifyActive) 0L else primaryPlayer.duration.takeIf { it > 0 } ?: 0L))
     }
     fun previousNative() {
         val position = if (spotifyActive) spotifyIntegrated.positionMs else youtubePositionMs
@@ -428,7 +433,7 @@ class HybridMediaService : MediaSessionService() {
         recoveryPositionMs = null
         fade?.cancel(); fade = null; preparing?.cancel(); secondaryPlayer.stop(); secondaryPlayer.clearMediaItems(); nextTrack = null; pendingTrack = null; chainedTrack = null
         sourceTrackId = data.optString("id"); sourceAttempts = 1; alternatives.clear(); alternatives.addAll(sources.drop(1))
-        track = data; primaryPlayer.volume = if (ducking) .15f else 1f
+        track = data; primaryPlayer.volume = if (ducking) DUCK_GAIN else 1f
         primaryPlayer.setMediaItem(item(first.uri, data, first.mime), startPosition); primaryPlayer.prepare(); primaryPlayer.play(); configureEnhancer(primaryPlayer.audioSessionId)
         updateMediaButtons()
     }
@@ -453,7 +458,7 @@ class HybridMediaService : MediaSessionService() {
         secondaryPlayer.pause()
         secondaryPlayer.seekTo(0)
         secondaryPlayer.volume = 0f
-        primaryPlayer.volume = if (ducking) .15f else 1f
+        primaryPlayer.volume = if (ducking) DUCK_GAIN else 1f
     }
 
     /**
@@ -567,23 +572,23 @@ class HybridMediaService : MediaSessionService() {
         primaryPlayer.pause()
         secondaryPlayer.pause()
         secondaryPlayer.seekTo(0)
-        primaryPlayer.volume = if (ducking) .15f else 1f
+        primaryPlayer.volume = if (ducking) DUCK_GAIN else 1f
         secondaryPlayer.volume = 0f
     }
     fun setDucking(value: Boolean) {
         if(spotifyActive)spotifyIntegrated.duck(value)
         if (value == ducking) return
-        val ratio = if (value) .15f else 1f / .15f
+        val ratio = if (value) DUCK_GAIN else 1f / DUCK_GAIN
         ducking = value
         primaryPlayer.volume = (primaryPlayer.volume * ratio).coerceIn(0f, 1f)
         secondaryPlayer.volume = (secondaryPlayer.volume * ratio).coerceIn(0f, 1f)
     }
-    fun sleep(minutes: Int) { if (minutes == -1) { fadeVolume(5000); return }; if (minutes == SLEEP_AT_TRACK_END) { sleepAt = 0; sleepAtTrackEnd = true; clearChain(); return }; sleepAtTrackEnd = false; if(minutes<=0){volumeFade?.cancel();if(spotifyActive)spotifyIntegrated.fadeGain(1f);if(fade==null)primaryPlayer.volume=if(ducking).15f else 1f}; sleepAt = if (minutes <= 0) 0 else System.currentTimeMillis() + minutes * 60_000L }
+    fun sleep(minutes: Int) { if (minutes == -1) { fadeVolume(5000); return }; if (minutes == SLEEP_AT_TRACK_END) { sleepAt = 0; sleepAtTrackEnd = true; clearChain(); return }; sleepAtTrackEnd = false; if(minutes<=0){volumeFade?.cancel();if(spotifyActive)spotifyIntegrated.fadeGain(1f);if(fade==null)primaryPlayer.volume=if(ducking)DUCK_GAIN else 1f}; sleepAt = if (minutes <= 0) 0 else System.currentTimeMillis() + minutes * 60_000L }
     private fun fadeVolume(duration: Long) {
         volumeFade?.cancel();val native=spotifyActive;val id=track?.optString("id")
         volumeFade=scope.launch {val initial=primaryPlayer.volume;val start=android.os.SystemClock.elapsedRealtime()
-            while(isActive && android.os.SystemClock.elapsedRealtime()-start<duration){if(native!=spotifyActive || track?.optString("id")!=id){if(native)spotifyIntegrated.fadeGain(1f)else primaryPlayer.volume=if(ducking).15f else 1f;return@launch};val p=(android.os.SystemClock.elapsedRealtime()-start).toFloat()/duration;val gain=(1-p).pow(2);if(native)spotifyIntegrated.fadeGain(gain)else primaryPlayer.volume=initial*gain;delay(30)}
-            if(native)spotifyIntegrated.pauseIntegrated()else primaryPlayer.pause();if(native)spotifyIntegrated.fadeGain(1f)else primaryPlayer.volume=if(ducking).15f else 1f
+            while(isActive && android.os.SystemClock.elapsedRealtime()-start<duration){if(native!=spotifyActive || track?.optString("id")!=id){if(native)spotifyIntegrated.fadeGain(1f)else primaryPlayer.volume=if(ducking)DUCK_GAIN else 1f;return@launch};val p=(android.os.SystemClock.elapsedRealtime()-start).toFloat()/duration;val gain=(1-p).pow(2);if(native)spotifyIntegrated.fadeGain(gain)else primaryPlayer.volume=initial*gain;delay(30)}
+            if(native)spotifyIntegrated.pauseIntegrated()else primaryPlayer.pause();if(native)spotifyIntegrated.fadeGain(1f)else primaryPlayer.volume=if(ducking)DUCK_GAIN else 1f
         }
     }
     private fun finishSleepAtTrackEnd(): Boolean {
@@ -633,7 +638,7 @@ class HybridMediaService : MediaSessionService() {
         sourceAttempts = 1
         alternatives.clear()
         primaryPlayer.setAudioAttributes(audioAttributes(), true)
-        primaryPlayer.volume = if (ducking) .15f else 1f
+        primaryPlayer.volume = if (ducking) DUCK_GAIN else 1f
         secondaryPlayer.volume = 0f
         attach(primaryPlayer)
         primaryPlayer.play()
@@ -666,7 +671,7 @@ class HybridMediaService : MediaSessionService() {
                 }
                 val fraction = ((android.os.SystemClock.elapsedRealtime() - started).toDouble() / duration).coerceIn(0.0, 1.0)
                 val gains = AutoMixCurve.gains(fraction)
-                val base = if (ducking) .15f else 1f
+                val base = if (ducking) DUCK_GAIN else 1f
                 outgoing.volume = gains.first * base
                 incoming.volume = gains.second * base
                 if (fraction >= 1) break

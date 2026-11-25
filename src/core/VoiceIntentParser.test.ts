@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseVoiceIntent, stripInvocation } from "./VoiceIntentParser";
+import { asksToPlay, parseVoiceIntent, stripInvocation } from "./VoiceIntentParser";
 describe("MURMUR VoiceIntentParser", () => {
   it.each([
     "Murmur, siguiente canción, por favor.",
@@ -120,4 +120,36 @@ describe("MURMUR VoiceIntentParser", () => {
     expect(parseVoiceIntent("desde youtube ponme enjambre")).toMatchObject({ platform: "youtube", query: "enjambre" });
     expect(parseVoiceIntent("pon bailarina en espotifai")).toMatchObject({ platform: "spotify", query: "bailarina" });
   });
+});
+
+describe("controls said with the music after them (2.15)", () => {
+  it.each([
+    ["para la música", "pause"],
+    ["oye para la música", "pause"],
+    ["pausa la canción", "pause"],
+    ["detén la canción un momento", "pause"],
+    ["ponle pausa", "pause"],
+    ["apaga la música", "pause"],
+    ["continúa con la música", "resume"],
+    ["sigue con la música", "resume"],
+    ["reanuda la canción", "resume"],
+    ["ponle play", "resume"],
+    ["dale play", "resume"],
+    ["vuelve a ponerla", "resume"],
+  ])("%s", (text, type) => expect(parseVoiceIntent(text).type).toBe(type));
+  it("«para» alone keeps meaning «for» in a request", () =>
+    expect(parseVoiceIntent("pon algo para trabajar").type).toBe("vibe"));
+});
+
+describe("asksToPlay: music only with an explicit ask", () => {
+  it.each([
+    ["pon bailarina de miranda", true],
+    ["Ok MURMUR ponme algo de enjambre", true],
+    ["quiero escuchar algo tranquilo", true],
+    ["se me antoja bailarina", true],
+    ["bailarina en spotify", true],
+    ["bailarina de miranda", false],
+    ["la casa de mi mamá", false],
+    ["algo tranquilo para trabajar", false],
+  ])("%s → %s", (text, expected) => expect(asksToPlay(text)).toBe(expected));
 });

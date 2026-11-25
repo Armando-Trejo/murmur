@@ -138,3 +138,28 @@ describe("voice commands execute real player actions", () => {
     expect(mock.playList).not.toHaveBeenCalled();
   });
 });
+
+describe("no guessing (2.15)", () => {
+  it("does not play music said without «pon», a wish or a platform", async () => {
+    const answer = await routeVoiceCommand("la casa de mi mamá");
+    expect(answer).toContain("di «pon»");
+    expect(mock.search).not.toHaveBeenCalled();
+    expect(mock.playList).not.toHaveBeenCalled();
+  });
+  it("a control among the recognizer's alternatives beats a guessed title", async () => {
+    mock.current = track;
+    mock.state = { error: "", loading: false, playing: true };
+    await routeVoiceCommand("para la mamá\npara la música");
+    expect(mock.pause).toHaveBeenCalledOnce();
+    expect(mock.search).not.toHaveBeenCalled();
+  });
+  it("pauses and resumes with the music named after the verb", async () => {
+    mock.current = track;
+    mock.state = { error: "", loading: false, playing: true };
+    expect(await routeVoiceCommand("pausa la música")).toBe("En pausa");
+    mock.state = { error: "", loading: false, playing: false };
+    await routeVoiceCommand("sigue con la música");
+    expect(mock.pause).toHaveBeenCalledOnce();
+    expect(mock.toggle).toHaveBeenCalledOnce();
+  });
+});

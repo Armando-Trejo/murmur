@@ -1,0 +1,141 @@
+/* MURMUR 2.15 · Motion: pull-to-close player, thrown mini player, page transitions, unfolding
+   lyrics and queue, queue lift. Moves only transform and opacity; reduced motion at the end. */
+
+/* ---------- Full player: pull down to close ---------- */
+/* At the top of the player, and always on its header, a downward drag is the pull (PlayerLayer), not an
+   overscroll; dragging up still scrolls. Nested scrollers (lyrics) keep their own scrolling. */
+.expanded-player[data-at-top="true"],
+.expanded-player .player-top {
+  touch-action: pan-down;
+}
+/* Pulled, it reads as a card leaving rather than a page sliding. */
+.expanded-player[data-pulling="true"] {
+  border-radius: 24px 24px 0 0;
+}
+
+/* ---------- Mini player: songs swap sideways ---------- */
+/* Outgoing and incoming song share one cell; the stage clips them at the controls. */
+.mini-info > .mini-stage {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: inherit;
+  overflow: clip;
+  overflow-clip-margin: 6px;
+}
+.mini-stage > .mini-track {
+  grid-area: 1 / 1;
+  display: flex;
+  align-items: center;
+  gap: inherit;
+  min-width: 0;
+}
+.mini-track > .mini-copy {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+/* The arrival is the sideways swap now, not the vertical rise of v2.7. */
+.mini-track .mini-copy {
+  animation: none;
+}
+.mini-track[data-leaving] {
+  pointer-events: none;
+}
+
+/* ---------- Page changes (View Transitions) ---------- */
+/* Only while a page changes (<html data-nav-transition>): the bars stay still and live on top while
+   the page moves underneath. Without the name they would slide and fade with the page. */
+:root[data-nav-transition] .bottom-shell { view-transition-name: murmur-bottom; }
+:root[data-nav-transition] .topbar { view-transition-name: murmur-topbar; }
+:root[data-nav-transition] .desktop-rail { view-transition-name: murmur-rail; }
+/* Taps during the short transition reach the new page instead of being swallowed. */
+::view-transition { pointer-events: none; }
+::view-transition-group(murmur-bottom),
+::view-transition-group(murmur-topbar),
+::view-transition-group(murmur-rail),
+::view-transition-new(murmur-bottom),
+::view-transition-new(murmur-topbar),
+::view-transition-new(murmur-rail) {
+  animation: none;
+}
+::view-transition-old(murmur-bottom),
+::view-transition-old(murmur-topbar),
+::view-transition-old(murmur-rail) {
+  display: none;
+}
+/* Deeper page: the old one steps left and fades fast, the new one arrives from the right. */
+:root[data-nav-transition="forward"]::view-transition-old(root) {
+  animation: murmur-page-out-left 120ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+:root[data-nav-transition="forward"]::view-transition-new(root) {
+  animation: murmur-page-in-right 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+/* Back: the mirror image. */
+:root[data-nav-transition="back"]::view-transition-old(root) {
+  animation: murmur-page-out-right 120ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+:root[data-nav-transition="back"]::view-transition-new(root) {
+  animation: murmur-page-in-left 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+/* Another tab: no direction, a quick crossfade with a slight rise. */
+:root[data-nav-transition="tab"]::view-transition-old(root) {
+  animation: murmur-page-fade 120ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+:root[data-nav-transition="tab"]::view-transition-new(root) {
+  animation: murmur-page-rise 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes murmur-page-out-left { to { opacity: 0; transform: translateX(-24px); } }
+@keyframes murmur-page-out-right { to { opacity: 0; transform: translateX(24px); } }
+@keyframes murmur-page-in-right { from { opacity: 0; transform: translateX(32px); } }
+@keyframes murmur-page-in-left { from { opacity: 0; transform: translateX(-32px); } }
+@keyframes murmur-page-fade { to { opacity: 0; } }
+@keyframes murmur-page-rise { from { opacity: 0; transform: translateY(10px); } }
+
+/* ---------- Lyrics and queue unfold ---------- */
+/* Clipped only while the height moves (Unfold sets data-unfolded); its own margins stay inside. */
+.expand-panel {
+  display: flow-root;
+  overflow: clip;
+}
+.expand-panel[data-unfolded="true"] {
+  overflow: visible;
+}
+
+/* ---------- Queue lift ---------- */
+/* The picked-up row springs up a little (framer whileDrag) while its card and shadow fade in under it,
+   instead of the shadow popping on press. */
+.queue .queue-item {
+  isolation: isolate;
+}
+.queue .queue-item::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 12px;
+  background: rgba(30, 28, 38, 0.96);
+  box-shadow: 0 18px 36px -16px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(var(--brand-rgb), 0.3);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.queue .queue-item[data-lifted]::before {
+  opacity: 1;
+  transition-duration: 140ms;
+}
+.queue .queue-item:has(.drag-handle:active) {
+  background: transparent;
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+  .queue .queue-item::before {
+    transition: none;
+  }
+}

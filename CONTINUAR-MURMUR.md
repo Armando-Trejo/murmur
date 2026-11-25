@@ -253,3 +253,53 @@ La 2.7.1 de la PC RAM nunca llegó a GitHub; la 2.8.0 solo trasladó su precarga
 - **Enlace roto al precargar:** cuando falla la precarga de la siguiente, se olvida su enlace (`NativeNetwork.forget`) y el reintento resuelve uno nuevo, en vez de reutilizar el roto hasta 3 h.
 - Pruebas: `AudioResolutionTest` (5). La caché de 2.8.0 (3 h y margen de 20 min antes de `expire`) no cambia.
 - No verificado en el teléfono: esta PC no tiene uno conectado por ADB.
+## 2.15.0 (code 31) — voz que no adivina, tiempo exacto, respaldo automático y gestos fluidos
+**«Ok MURMUR» con doble comprobación** (`WakePhrase.kt`, `WakeWordService.kt`):
+- Paso 1: el detector de la frase (gramática mínima de Vosk) corre solo mientras hay sonido.
+- Paso 2: cuando dispara, los últimos 2.5 s se transcriben otra vez sin gramática, y la frase tiene que aparecer también ahí. La letra de una canción ya no activa a MURMUR.
+- En el registro de depuración solo quedan conteos de palabras, nunca lo que se dijo.
+- El micrófono solo se abre con MURMUR en pantalla, con música sonando o hasta 10 minutos después de pausar (`IDLE_GRACE_MS`), para que «continúa» funcione. Fuera de eso el servicio espera sin grabar y la notificación dice «en espera».
+- Mientras escucha el pedido, la música baja al 5 % (`HybridMediaService.DUCK_GAIN`); antes bajaba al 15 %.
+- La app muestra la píldora «Te escucho…» (evento `onVoiceListening`).
+
+**Comandos de control y nada de adivinar** (`VoiceIntentParser.ts`, `VoiceCommandRouter.ts`):
+- Entiende «para / pausa / detén la música», «ponle pausa», «continúa / sigue con la música», «ponle play», «vuelve a ponerla».
+- La música solo suena si se pide de forma explícita (`asksToPlay`): con un verbo («pon», «reproduce»), un deseo («quiero», «se me antoja») o una plataforma («en Spotify»).
+- Sin eso no busca nada y contesta: «Para poner música, di «pon»…».
+- Entre las alternativas del reconocedor gana un control o un pedido explícito, nunca una suposición.
+
+**Sliders de tiempo** (`AudioOrchestrator.ts`, `SeekBar.tsx`):
+- Usan la duración real que reporta el motor (`state.duration`), ya no la del catálogo. La gemela de YouTube de una canción de Spotify dura distinto.
+- `onNativeTrackChanged` ahora trae `positionMs` y `durationMs`, así el fundido DJ ya no reinicia la barra a 0.
+- Los avisos de avance viejos ya no regresan el control después de adelantar (`seekGuard`).
+- Si se pausa en la app y se reanuda desde la notificación, los audífonos o la pantalla de bloqueo, la barra ya no se congela (`externalResume`).
+- La barra avanza cuadro por cuadro con `usePlaybackClock`: va hasta 1.2 s por delante del último aviso y nunca pasa del final.
+- El relleno termina bajo el centro del control, y la etiqueta izquierda muestra el tiempo mientras arrastras.
+
+**Respaldo que sobrevive a desinstalar** (`AutoBackup.kt`, `src/core/autoBackup.ts`, `db.ts`):
+- El formato 2 incluye las preferencias de `localStorage` (`murmur.*`, menos `jsErrors`).
+- La copia se guarda en `Descargas/MURMUR/murmur-respaldo.json` sin pedir permisos, con MediaStore (Android 10 o más). Se hace 20 s después de abrir, como máximo cada 6 h, y al pasar a segundo plano. Nunca guarda una biblioteca vacía encima.
+- La bienvenida tiene «Ya usaba MURMUR: restaurar».
+- Las sesiones de YouTube Music y Spotify no entran en el respaldo: siguen en el almacenamiento cifrado de Android. Con la misma firma, cada actualización las conserva solas.
+
+**Gestos y animaciones** (`PlayerLayer.tsx`, `SwipeSurface.tsx`, `MiniTrackSwap.tsx`, `Unfold.tsx`, `viewTransition.ts`, `motion215.css`):
+- Al cerrar el reproductor deslizando hacia abajo, todo el panel sigue el dedo. Cierra por distancia o por velocidad; si no, regresa con resorte.
+- El minirreproductor cambia de canción con un deslizamiento rápido: la canción sale en la dirección del gesto y la siguiente entra por el lado contrario. Si lo tomas a media animación, sigue desde donde va.
+- Las pestañas y las páginas cambian con View Transitions: las páginas más profundas entran por la derecha, al regresar entran por la izquierda y las pestañas se funden con una leve subida. Las barras no se mueven; durante esos ~300 ms tienen un fondo oscuro detrás para que no se vea la página a través del vidrio. Sin soporte o con movimiento reducido, se usa la animación anterior.
+- La letra y la cola se despliegan animando la altura.
+- El minirreproductor aparece y desaparece con animación.
+- La portada solo va hacia atrás con «Anterior».
+- La fila de la cola se levanta con resorte al arrastrarla.
+- La hoja de acciones sigue hacia abajo al cerrarse.
+- Los títulos largos que se desplazan se desvanecen en los bordes, ya no se cortan.
+
+**Verificado en el teléfono** (HONOR, Android 16, 25 nov 2026, por adb inalámbrico):
+- La 2.15.0 se instaló encima de la 2.14.1 sin perder datos: 2,176 canciones, 38 playlists y el historial.
+- Comandos de texto como voz:
+  - «para la música», «sigue con la música», «ponle pausa» y «ponle play» funcionaron;
+  - «la casa de mi mamá» no reprodujo nada;
+  - «pon static age de misfits en youtube» la reprodujo.
+- Slider: la etiqueta coincide con el motor (0:36–0:40 de 1:47, contra 37–40.5 s del motor).
+- Gestos: deslizar hacia abajo cerró el reproductor y el deslizamiento rápido en el minirreproductor cambió de canción.
+- El respaldo `Download/MURMUR/murmur-respaldo.json` (1.7 MB) se creó solo.
+- **Falta probar con voz real:** la doble comprobación de «Ok MURMUR» con música sonando. El permiso de micrófono se perdió al reinstalar en la 2.14.1: hay que volver a activar «Ok MURMUR» en Ajustes.

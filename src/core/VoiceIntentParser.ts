@@ -46,13 +46,19 @@ const ASK = /^(?:(?:me |nos )?(?:puedes|podrias|quieres|quisiera|quiero|queremos
 /** Every way of saying "play" (with the pronouns Spanish glues to it). */
 const PLAY = /^(?:(?:me |nos )?(?:pones|pondrias|pondras|pon(?:me|nos|le|la|lo)?|ponga|poner(?:me)?|reproduc(?:e|eme|ir|elo|ela)|toca(?:me|r)?|escuchar|oir|play|dale play a|dale play|busca(?:me|r)?|encuentra(?:me)?|suena|que suene|mete(?:me)?|agrega(?:me)?|manda(?:me)?|ponte|oir|escuche|escuchemos|reproduzcas|toques))\s+/;
 
+/** What a control can act on, optional: "la música", "esta canción", "la reproducción". */
+const MUSIC_OBJECT = "(?: (?:(?:la|el|esta|esa|este|ese) )?(?:musica|cancion|rola|reproduccion|audio|tema|rolita))?";
+const A_MOMENT = "(?: (?:tantito|un momento|un rato|un segundo|ahorita|por ahora))?";
+
 const TRANSPORT: [RegExp, VoiceIntent["type"]][] = [
   [/^(?:mezcla ahora|mezclar ahora|mezclala|mix now|haz la mezcla|cruzala)$/, "mix"],
   [/^(?:(?:la )?siguiente|next|salta(?:la|te)?|skip|pasa(?:la|le)?|cambia(?:la|le)?|otra|la que sigue|adelanta(?:la)?|no me gusta(?: esta)?|quita(?: esta|la)?)(?: cancion| track| rola| tema)?$/, "next"],
   [/^(?:(?:la )?anterior|previous|go back|vuelve|regresa(?:la)?|atras|la de antes|repite(?:la)?(?: la anterior)?)(?: cancion| track| rola| tema)?$/, "previous"],
   [/^(?:guarda(?:la|r)?|save|me gusta(?: mucho)?(?: esta)?|dale like|like|agrega(?:la)? a (?:mis )?(?:favoritas|favoritos|guardadas|mi biblioteca)|me encanta(?: esta)?)(?: esta| this)?(?: cancion| song| track| rola)?$/, "save"],
-  [/^(?:pausa|pausala|pausar|pause|detente|deten(?:la)?|para(?:la|le)?|alto|stop|silencio|callate|apaga(?: la musica)?|quita la musica)$/, "pause"],
-  [/^(?:continua|continuar|reanuda(?:r)?|resume|play|sigue|dale|seguir|reproduce|ponla|pon musica|quita la pausa)$/, "resume"],
+  // "Para", "pausa la música", "detén la canción un momento", "ponle pausa".
+  [new RegExp(`^(?:pausa(?:la|lo)?|pausar|pause|detente|deten(?:la|lo|er)?|para(?:la|le|lo|r)?|alto|stop|silencio|callate|apaga(?:la|lo)?|quita la musica|pon(?:le)? pausa|ya no)${MUSIC_OBJECT}${A_MOMENT}$`), "pause"],
+  // "Continúa", "sigue con la música", "reanuda la canción", "ponle play", "vuelve a ponerla".
+  [new RegExp(`^(?:continua(?:r)?|reanuda(?:r|la|lo)?|resume|play|sigue|dale|seguir|reproduce|ponla|pon musica|quita la pausa|quitale la pausa|pon(?:le|la)? play|dale play|regresa la musica|vuelve a (?:ponerla|sonar|poner la musica)|sigue sonando)(?: con)?${MUSIC_OBJECT}$`), "resume"],
   [/^(?:que (?:cancion|rola|tema) es(?: esta| esto)?|que (?:esta sonando|suena|estoy escuchando)|como se llama(?: esta)?(?: cancion| rola)?|quien canta(?: esta)?)$/, "nowPlaying"],
   [/^(?:(?:pon |quiero )?(?:mas|algo) (?:como|parecido a|similar a) (?:esta|esto)|mas de esto|radio de esta|haz(?:me)? un mix con esta)$/, "moreLikeThis"],
   [/^(?:aleatorio|modo aleatorio|revuelve(?:la|las)?|mezcla(?: las canciones)?|shuffle|aleatorio magico)$/, "shuffle"],
@@ -64,11 +70,25 @@ const LOOSE: [RegExp, VoiceIntent["type"]][] = [
   [/\b(?:anterior|regresa\w*|atras|la de antes|la pasada)\b/, "previous"],
   [/\b(?:siguiente|que sigue|pasale|pasala|salta\w*|cambia\w*|adelanta\w*|otra cancion|otra rola|skip|next)\b/, "next"],
   [/\b(?:pausa\w*|parale|detente|deten\w*|stop|silencio|callate)\b/, "pause"],
+  // "Para" alone is also "for"; only with the music after it is it a stop ("oye para la música").
+  [/\b(?:para(?:la|le|lo)?|apaga(?:la)?) (?:(?:la|el|esta|esa) )?(?:musica|cancion|rola|reproduccion)\b/, "pause"],
   [/\b(?:guardala|guarda esta|me gusta esta|me encanta esta|dale like|a favoritos|a mis favoritas)\b/, "save"],
   [/\b(?:aleatorio|revuelve\w*|shuffle)\b/, "shuffle"],
   [/\b(?:parecid\w+|similar\w*|como esta|mas de esto)\b/, "moreLikeThis"],
-  [/\b(?:continua\w*|reanuda\w*|quita la pausa|sigue sonando|dale play)\b/, "resume"],
+  [/\b(?:continua\w*|reanuda\w*|quita(?:le)? la pausa|sigue sonando|dale play|ponle play|sigue (?:con )?(?:la )?(?:musica|cancion))\b/, "resume"],
 ];
+
+/**
+ * True when the words ask for music explicitly: a verb ("pon", "reproduce", "quiero escuchar"),
+ * a wish ("quiero", "se me antoja") or a platform ("… en Spotify"). Without one, a sentence that
+ * merely sounds like a title ("la casa de mi mamá") is not played: MURMUR asks for "pon" instead.
+ */
+export function asksToPlay(text: string) {
+  const n = stripInvocation(text).replace(FILLER, "").trim();
+  if (ASK.test(n)) return true;
+  const rest = n.replace(ASK, "");
+  return PLAY.test(rest + " ") || splitPlatform(rest).platform !== undefined;
+}
 
 /** What is left of a request once the verbs and the filler are gone: the music itself. */
 export function musicQuery(text: string) {

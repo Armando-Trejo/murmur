@@ -15,4 +15,21 @@ class WakeWordTest {
             assertFalse(text, WakeWordService.heard(text))
         }
     }
+
+    @Test fun theSecondCheckRejectsLyricsTheSpotterForcedIntoThePhrase() {
+        // The grammar spotter can only answer with its words; the open transcription writes the real lyrics.
+        assertFalse(WakePhrase.confirmed(listOf("lo que más quiero en la vida")))
+        assertFalse(WakePhrase.confirmed(listOf("yo que murmuro tu nombre")))
+        assertFalse(WakePhrase.confirmed(listOf("", "")))
+    }
+
+    @Test fun theSecondCheckAcceptsThePhraseEvenOverMusicOrSplitAcrossUtterances() {
+        assertTrue(WakePhrase.confirmed(listOf("la noche ok murmura")))
+        assertTrue(WakePhrase.confirmed(listOf("y", "o que murmura pon algo")))
+        assertTrue(WakePhrase.confirmed(listOf("okey mur mur")))
+    }
+
+    @Test fun theSpotterGrammarEndsWithUnknownSoOtherSpeechHasSomewhereToGo() {
+        assertEquals("[unk]", WakePhrase.grammar.last())
+    }
 }

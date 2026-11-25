@@ -172,5 +172,11 @@ class YouTubeAudioPlugin : Plugin() {
         BackupWriter.completion = { saved, error -> if(error != null) call.reject(error) else call.resolve(JSObject().put("saved",saved)) }
         try { activity.startActivity(Intent(context,BackupWriter::class.java)) } catch(e: Exception) { BackupWriter.pending = null; BackupWriter.completion = null; call.reject("No se pudo abrir el selector de archivos") }
     }
+    /** Silent copy of the backup in Descargas/MURMUR (survives uninstalling); no picker, no permission. */
+    @PluginMethod fun saveAutoBackup(call: PluginCall) = async(call) {
+        val content = call.getString("content") ?: error("Respaldo vacío")
+        val saved = withContext(Dispatchers.IO) { AutoBackup.write(context, content) }
+        JSObject().put("saved", saved).put("file", "Descargas/MURMUR/" + AutoBackup.NAME)
+    }
     override fun handleOnDestroy() { scope.cancel(); if (NativeEvents.plugin === this) NativeEvents.plugin = null; super.handleOnDestroy() }
 }

@@ -531,3 +531,49 @@ describe("AudioOrchestrator", () => {
  });
 
 });
+
+describe("time sliders follow the real song (2.15)", () => {
+  const send = (name: string, event: object) =>
+    mocks.Audio.addListener.mock.calls.find(([id]) => id === name)?.[1](event);
+
+  it("uses the engine's real length and forgets it when the song changes", async () => {
+    const p = new AudioOrchestrator();
+    await p.init();
+    await p.playList([a, b]);
+    send("onPlaybackProgress", { queueId: p.current?.queueId, positionMs: 30000, durationMs: 241000 });
+    expect(p.getSnapshot()).toMatchObject({ position: 30, duration: 241 });
+    await p.next();
+    expect(p.getSnapshot().duration).not.toBe(241);
+  });
+
+  it("a tick sent before the seek landed does not pull the thumb back", async () => {
+    const p = new AudioOrchestrator();
+    await p.init();
+    await p.playList([a]);
+    void p.seek(120);
+    send("onPlaybackProgress", { queueId: p.current?.queueId, positionMs: 10000, durationMs: 200000 });
+    expect(p.getSnapshot().position).toBe(120);
+    send("onPlaybackProgress", { queueId: p.current?.queueId, positionMs: 120400, durationMs: 200000 });
+    expect(p.getSnapshot().position).toBeCloseTo(120.4);
+  });
+
+  it("paused in the app and resumed from the notification: progress moves again", async () => {
+    const p = new AudioOrchestrator();
+    await p.init();
+    await p.playList([a]);
+    await p.pause();
+    vi.advanceTimersByTime(2000);
+    send("onPlaybackStateChanged", { queueId: p.current?.queueId, playing: true, loading: false });
+    send("onPlaybackProgress", { queueId: p.current?.queueId, positionMs: 45000, durationMs: 200000 });
+    expect(p.getSnapshot()).toMatchObject({ playing: true, position: 45 });
+  });
+
+  it("a late «playing» event right after an in-app pause is still ignored", async () => {
+    const p = new AudioOrchestrator();
+    await p.init();
+    await p.playList([a]);
+    await p.pause();
+    send("onPlaybackStateChanged", { queueId: p.current?.queueId, playing: true, loading: false });
+    expect(p.getSnapshot().playing).toBe(false);
+  });
+});

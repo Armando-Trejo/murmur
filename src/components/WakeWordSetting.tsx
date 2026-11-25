@@ -40,8 +40,9 @@ export function WakeWordSetting({ notify }: { notify: (message: string, kind?: "
       <span>
         {busy ? "Preparando «Ok MURMUR»…" : "Decir «Ok MURMUR»"}
         <small>
-          Escucha local sin enviar audio. Android muestra una notificación fija y el indicador del
-          micrófono, y usa algo más de batería.
+          Escucha local sin enviar audio y comprueba dos veces la frase para no activarse con canciones
+          ni pláticas. El micrófono solo se abre con MURMUR en pantalla, con música sonando o hasta
+          10 minutos después de pausar. Para pedir música di «pon…».
         </small>
       </span>
       <input type="checkbox" checked={enabled} disabled={busy} onChange={(e) => void change(e.target.checked)} />
