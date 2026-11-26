@@ -1638,50 +1638,6 @@ export default function App() {
                 </motion.button>
               )}
             </motion.section>
-
-            <div className="quick-grid">
-              {[
-                {
-                  title: "Guardadas",
-                  icon: Heart,
-                  action: () => {
-                    setTab("library");
-                    setLibraryFilter("Canciones");
-                  },
-                },
-                {
-                  title: "Playlists",
-                  icon: ListMusic,
-                  action: () => {
-                    setTab("library");
-                    setLibraryFilter("Playlists");
-                  },
-                },
-                {
-                  title: "Tu resumen",
-                  icon: BarChart3,
-                  action: () => nav.push({ view: "library", directory: "insights" }),
-                },
-              ].map((q, index) => (
-                <motion.button
-                  whileTap={{ scale: 0.95 }}
-                  className="quick-item"
-                  key={q.title}
-                  initial={{ opacity: 0, y: reduced ? 0 : 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.4, ease: settle, delay: reduced ? 0 : 0.26 + index * 0.05 }}
-                  onClick={() => {
-                    haptic();
-                    q.action();
-                  }}
-                >
-                  <span className="quick-art">
-                    <q.icon size={21} />
-                  </span>
-                  <strong>{q.title}</strong>
-                </motion.button>
-              ))}
-            </div>
           </div>
         )}
         <div hidden={tab !== "home"} className="home-provider-region">
@@ -2307,29 +2263,27 @@ export default function App() {
                   />
                 ) : (
                   <>
-                    <div className="library-links">
-                      <motion.button whileTap={{ scale: 0.95 }} onClick={() => nav.push({ view: "library", directory: "artists" })}>Artistas</motion.button>
-                      <motion.button whileTap={{ scale: 0.95 }} onClick={() => nav.push({ view: "library", directory: "albums" })}>Álbumes</motion.button>
-                      <motion.button whileTap={{ scale: 0.95 }} onClick={() => nav.push({ view: "library", directory: "insights" })}>
+                    {/* One row under the search: what is listed here, then the places that open apart. */}
+                    <div className="library-chips" role="toolbar" aria-label="Secciones de tu biblioteca">
+                      {[
+                        { key: "Canciones", label: "Guardadas", icon: Heart },
+                        { key: "Playlists", label: "Playlists", icon: ListMusic },
+                        ...(hasDownloads || filter === "Descargas" ? [{ key: "Descargas", label: "Descargas", icon: null }] : []),
+                      ].map((f) => {
+                        const active = filter === f.key || (f.key === "Canciones" && !["Playlists", "Descargas"].includes(filter));
+                        return (
+                          <button key={f.key} className={active ? "active" : ""} aria-pressed={active}
+                            onClick={() => { haptic(); setFilter(f.key); }}>
+                            {f.icon && <f.icon size={15} aria-hidden="true" />}{f.label}
+                          </button>
+                        );
+                      })}
+                      <span className="chip-divider" aria-hidden="true" />
+                      <button onClick={() => nav.push({ view: "library", directory: "artists" })}>Artistas</button>
+                      <button onClick={() => nav.push({ view: "library", directory: "albums" })}>Álbumes</button>
+                      <button onClick={() => nav.push({ view: "library", directory: "insights" })}>
                         <BarChart3 size={15} aria-hidden="true" />Tu resumen
-                      </motion.button>
-                    </div>
-                    <div className="pills">
-                      {["Canciones", "Playlists", ...(hasDownloads || filter === "Descargas" ? ["Descargas"] : [])].map((f) => (
-                        <button
-                          key={f}
-                          className={
-                            filter === f ||
-                            (f === "Canciones" &&
-                              !["Playlists", "Descargas"].includes(filter))
-                              ? "active"
-                              : ""
-                          }
-                          onClick={() => setFilter(f)}
-                        >
-                          {f}
-                        </button>
-                      ))}
+                      </button>
                     </div>
                     {filter === "Playlists" ? (
                       <>
