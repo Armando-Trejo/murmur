@@ -148,3 +148,18 @@ describe("editing the library survives the sync", () => {
     expect(mergeSyncedTrack(await get("sp:1"), song(1, { saved: true }))).toMatchObject({ saved: false, deleted: true });
   });
 });
+
+describe("escuchar una canción no deshace lo que editaste", () => {
+  it("mantiene el «quitado de Guardadas», el nombre corregido y la carátula del álbum", async () => {
+    await saveCollection(album());
+    await editSong("sp:1", { title: "Nombre corregido", artist: "Artista" });
+    await unlikeSong("sp:2");
+    // Lo que llega de la cola tras reproducir: la versión del catálogo, sin nada de lo tuyo.
+    const { recordListening } = await import("./DiscoveryEngine");
+    await recordListening(song(1), 120, false);
+    await recordListening(song(2, { saved: true }), 120, false);
+    expect((await get("sp:1")).title).toBe("Nombre corregido");
+    expect((await get("sp:1")).artworkUrl).toBe("https://img/album.jpg");
+    expect((await get("sp:2")).saved).toBe(false);
+  });
+});

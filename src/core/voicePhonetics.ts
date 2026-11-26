@@ -206,6 +206,27 @@ export function levenshteinRatio(a: string, b: string): number {
   return 1 - row[b.length] / Math.max(a.length, b.length);
 }
 
+const keyScores = new Map<string, number>();
+/**
+ * How alike the letters of two sound keys are, without the consonant skeleton: the honest part of
+ * the comparison, and what tells a real match from one the skeleton merely allows.
+ */
+export function keySimilarity(a: Pick<Tok, "key">, b: Pick<Tok, "key">): number {
+  if (a.key === b.key) return 1;
+  const digits = /^\d+$/;
+  if (digits.test(a.key) || digits.test(b.key)) return 0;
+  if (Math.min(a.key.length, b.key.length) / Math.max(a.key.length, b.key.length) < 0.5) return 0;
+  const id = a.key < b.key ? a.key + "|" + b.key : b.key + "|" + a.key;
+  const known = keyScores.get(id);
+  if (known !== undefined) return known;
+  // Jaro-Winkler alone is generous with a shared beginning ("misfits"/"misery"); edit distance keeps it honest.
+  const jw = jaroWinkler(a.key, b.key);
+  const s = jw >= 0.44 ? (jw + levenshteinRatio(a.key, b.key)) / 2 : 0;
+  if (keyScores.size > 50_000) keyScores.clear();
+  keyScores.set(id, s);
+  return s;
+}
+
 const sims = new Map<string, number>();
 /** How alike two words sound, 0..1. */
 export function wordSimilarity(a: Pick<Tok, "key" | "skel">, b: Pick<Tok, "key" | "skel">): number {
@@ -215,23 +236,25 @@ export function wordSimilarity(a: Pick<Tok, "key" | "skel">, b: Pick<Tok, "key" 
   const id = a.key < b.key ? a.key + "|" + b.key : b.key + "|" + a.key;
   const known = sims.get(id);
   if (known !== undefined) return known;
-  let s = 0;
+  let s = keySimilarity(a, b);
   const ratio = Math.min(a.key.length, b.key.length) / Math.max(a.key.length, b.key.length);
-  if (ratio >= 0.5) {
-    // Jaro-Winkler alone is generous with a shared beginning ("misfits"/"misery"); edit distance keeps it honest.
-    const jw = jaroWinkler(a.key, b.key);
-    if (jw >= 0.44) s = (jw + levenshteinRatio(a.key, b.key)) / 2;
-    // The skeleton drops every vowel, so words of very different length collide through it
-    // ("ac dc" and "acuática" are both a-k-t-k): it only counts between words of similar length.
-    if (ratio >= 0.7) {
-      if (a.skel.length >= 2 && a.skel === b.skel) s = Math.max(s, a.skel.length >= 3 ? 0.92 : 0.78);
-      else if (a.skel.length >= 3 && b.skel.length >= 3) s = Math.max(s, jaroWinkler(a.skel, b.skel) * 0.85);
-    }
+  // The skeleton drops every vowel, so words of very different length collide through it
+  // ("ac dc" and "acuática" are both a-k-t-k): it only counts between words of similar length.
+  if (ratio >= 0.7) {
+    if (a.skel.length >= 2 && a.skel === b.skel) s = Math.max(s, a.skel.length >= 3 ? 0.92 : 0.78);
+    else if (a.skel.length >= 3 && b.skel.length >= 3) s = Math.max(s, jaroWinkler(a.skel, b.skel) * 0.85);
   }
   if (sims.size > 50_000) sims.clear();
   sims.set(id, s);
   return s;
 }
+
+/**
+ * A pair that rests only on a two-consonant skeleton ("soda", "city", "suite" and "sad" all come
+ * out "st"). It is kept only when some other word of the phrase really matches letter by letter.
+ */
+const thin = (a: Pick<Tok, "key" | "skel">, b: Pick<Tok, "key" | "skel">) =>
+  a.skel.length === 2 && a.skel === b.skel && keySimilarity(a, b) < MIN_WORD;
 
 /** Credit only for words that really sound alike. */
 const MIN_WORD = 0.72;
@@ -270,16 +293,20 @@ export interface Alignment {
 export function align(said: Tok[], name: Tok[]): Alignment {
   const su = units(said);
   const nu = units(name);
-  const pairs: { s: Unit; n: Unit; sim: number; merged: boolean }[] = [];
+  const pairs: { s: Unit; n: Unit; sim: number; merged: boolean; thin: boolean }[] = [];
   for (const s of su)
     for (const n of nu) {
       const merged = s.to > s.from || n.to > n.from;
       const sim = wordSimilarity(s, n) * (merged ? 0.97 : 1);
-      if (sim >= MIN_WORD) pairs.push({ s, n, sim, merged });
+      if (sim >= MIN_WORD) pairs.push({ s, n, sim, merged, thin: thin(s, n) });
     }
   // Nothing matched word against word: the merge is carrying the whole name on its own.
   if (!pairs.some((p) => !p.merged))
     for (let i = pairs.length - 1; i >= 0; i--) if (pairs[i].sim < MIN_MERGED_ALONE) pairs.splice(i, 1);
+  // No word really agrees letter by letter, so a two-consonant echo is not evidence either
+  // («soda stereo» must not become «'City of Stars' (Duet…)»).
+  if (!pairs.some((p) => keySimilarity(p.s, p.n) >= MIN_WORD))
+    for (let i = pairs.length - 1; i >= 0; i--) if (pairs[i].thin) pairs.splice(i, 1);
   pairs.sort((a, b) => b.sim - a.sim || b.s.to - b.s.from + (b.n.to - b.n.from) - (a.s.to - a.s.from + (a.n.to - a.n.from)));
   const usedS = new Array<boolean>(said.length).fill(false);
   const nameHits = new Array<number>(name.length).fill(0);

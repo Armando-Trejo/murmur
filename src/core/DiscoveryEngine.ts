@@ -1,5 +1,6 @@
 import { Audio, Auth, isNative } from "../native";
 import { db } from "./db";
+import { mergeSyncedTrack } from "./libraryEdit";
 import { parseFanUpload, normalize, stripTitleNoise } from "./FanUploadParser";
 import { similarity } from "./SourceResolver";
 import type { QueueItem } from "./types";
@@ -23,7 +24,9 @@ export async function recordListening(
   skipped: boolean,
 ) {
   const existing = await db.tracks.get(track.id);
-  await db.tracks.put({ ...track, saved: existing?.saved ?? false });
+  // The queue's copy refreshes what the provider sends, never what the owner changed: a song taken
+  // out of Guardadas, a corrected name, the album's cover or when it entered the library.
+  await db.tracks.put(mergeSyncedTrack(existing, { ...track, saved: existing?.saved ?? false }));
   await db.history.add({ trackId: track.id, at: Date.now(), seconds, skipped });
   if (skipped && seconds < 30)
     for (const tag of track.tags) {

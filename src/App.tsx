@@ -131,7 +131,7 @@ import { normalize } from "./core/FanUploadParser";
 import { CoverEditor } from "./components/CoverEditor";
 import { LibraryEditor, type EditorTarget } from "./components/LibraryEditor";
 import {
-  addSongs, applyAllAlbumCovers, editCollection, isAutoList, isLiked, likeSong, onSongsChanged,
+  addSongs, applyAllAlbumCovers, editCollection, isAutoList, isLiked, likeSong, mergeSyncedTrack, onSongsChanged,
   removeSongs, setCover, unlikeSong,
 } from "./core/libraryEdit";
 import { uniqueSongs } from "./core/dedupe";
@@ -653,7 +653,7 @@ export default function App() {
       await db.transaction("rw", db.tracks, db.playlists, async () => {
         for (const track of mix) {
           const stored = await db.tracks.get(track.id);
-          await db.tracks.put({ ...track, saved: stored?.saved ?? false });
+          await db.tracks.put(mergeSyncedTrack(stored, { ...track, saved: stored?.saved ?? false }));
         }
         await db.playlists.put({
           id,
@@ -673,7 +673,7 @@ export default function App() {
         await db.transaction("rw", db.tracks, db.playlists, async () => {
           for (const track of enriched) {
             const stored=await db.tracks.get(track.id);
-            await db.tracks.put({...track,saved:stored?.saved??false});
+            await db.tracks.put(mergeSyncedTrack(stored,{...track,saved:stored?.saved??false}));
           }
           await db.playlists.update(id,{trackIds:enriched.map(t=>t.id)});
         });

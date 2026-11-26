@@ -115,3 +115,11 @@ describe("el esqueleto de consonantes no junta palabras de distinto largo", () =
   it("«king caesars» sigue siendo King Gizzard", () =>
     expect(soundsLike("king caesars and the leaser weaser", "King Gizzard & The Lizard Wizard")).toBeGreaterThan(0.8));
 });
+
+describe("dos consonantes no bastan para nombrar algo", () => {
+  // De la prueba real: «pon Soda Stereo» metía «'City of Stars' (Duet ft. …)» de la biblioteca.
+  it("«soda stereo» no es «City of Stars (Duet ft. Ryan Gosling, Emma Stone)»", () =>
+    expect(soundsLike("soda stereo", "'City of Stars' (Duet ft. Ryan Gosling, Emma Stone)", 1)).toBeLessThan(0.7));
+  it("«soda stereo» sí es Soda Stereo", () =>
+    expect(soundsLike("soda stereo", "Soda Stereo")).toBeGreaterThan(0.95));
+});

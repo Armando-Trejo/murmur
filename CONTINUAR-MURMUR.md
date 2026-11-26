@@ -455,3 +455,8 @@ La 2.7.1 de la PC RAM nunca llegó a GitHub; la 2.8.0 solo trasladó su precarga
 
 **Falta probar con voz real:** «Ok MURMUR» dicho por ti y por otra persona, y el panel de voz.
 
+### Correcciones del 26 nov 2026 (probadas con las cuentas conectadas)
+- **Escuchar una canción ya no deshace lo que editaste.** `recordListening` (y los mixes de Inicio) reescribían la canción con la copia de la cola, y eso borraba el «quitado de Guardadas», el nombre corregido, la carátula del álbum y la fecha de agregado. Ahora pasan por `mergeSyncedTrack`.
+- **El esqueleto de consonantes de dos letras ya no empareja solo.** «soda» y «city» dan ambos «st», así que «pon Soda Stereo» metía «'City of Stars' (Duet ft. …)» de la biblioteca. Ahora esa coincidencia solo cuenta si alguna otra palabra de la frase coincide de verdad en letras (así «reverend horton jit» sigue siendo Reverend Horton Heat).
+
+**Probado en el teléfono con Spotify y YouTube Music conectados:** «pon ac dc» → AC/DC, «pon soda stereo» → Soda Stereo (cola limpia), «pon caifanes», «pon las mejores de queen», «pon bailarina de miranda», «pon algo triste», «pon el disco nevermind de nirvana», «súbele al volumen», «bájale tantito», «qué canción es esta», «repite esta canción», «dame like», «quita de favoritos», «pásale a la que sigue», «párale tantito», «sígale».
