@@ -86,3 +86,20 @@
 /* With the key already pasted only the field remains: no step number. */
 .setup-steps.compact > li { padding-left: 14px; }
 .setup-steps.compact > li::before { display: none; }
+
+/* Pull to refresh on Inicio. */
+.pull-refresh {
+  position: fixed; top: calc(env(safe-area-inset-top) + 8px); left: 50%; z-index: 30;
+  width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+  background: #1e1e22; color: var(--brand-readable, var(--accent));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  pointer-events: none; will-change: transform;
+}
+.pull-refresh span { display: grid; place-items: center; }
+.pull-refresh .spinning { animation: pull-spin 0.8s linear infinite; }
+@keyframes pull-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pull-refresh .spinning { animation-duration: 2.4s; } }
+
+/* Scrollbars show only while scrolling (styled ones never fade by themselves on Android). */
+::-webkit-scrollbar-thumb { background: transparent; }
+.is-scrolling::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.28); }

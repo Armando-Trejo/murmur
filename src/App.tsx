@@ -20,6 +20,7 @@ import {
   useState,
   useSyncExternalStore,
   useMemo,
+  useCallback,
 } from "react";
 import {
   AnimatePresence,
@@ -149,6 +150,7 @@ import { checkForUpdate, dismissUpdate } from "./core/updates";
 import { chooseSpotifyRoute } from "./core/spotifyBridge";
 import { UpdateCard, installRelease } from "./components/UpdateCard";
 import { GuestModeSetting } from "./components/GuestModeSetting";
+import { PullToRefresh } from "./components/PullToRefresh";
 import { syncAutoLibrary, type AutoTrack } from "./core/autoLibrary";
 import { Welcome, needsWelcome } from "./components/Welcome";
 import {
@@ -298,6 +300,10 @@ export default function App() {
     nav.push({ view: next.view });
   };
   const expanded = !!nav.route.player;
+  // «Deslizar hacia abajo» on Inicio: your providers' feeds and the moment mix are asked again.
+  const [homeRefresh, setHomeRefresh] = useState(0);
+  const [homeLoading, setHomeLoading] = useState(false);
+  const refreshHome = useCallback(() => setHomeRefresh((n) => n + 1), []);
   const setExpanded = (value: boolean) =>
     value ? nav.patch({ player: true }) : nav.close("player");
   const [toast, setToast] = useState("");
@@ -1514,6 +1520,11 @@ export default function App() {
           Tu música, en tu teléfono.
         </div>
       </aside>
+      <PullToRefresh
+        enabled={isNative && tab === "home" && !expanded && !status.preview}
+        busy={homeLoading}
+        onRefresh={refreshHome}
+      />
       <main className="main-content">
         <header className="topbar">
           <AnimatePresence initial={false}>
@@ -1674,7 +1685,7 @@ export default function App() {
           </div>
         )}
         <div hidden={tab !== "home"} className="home-provider-region">
-          {isNative && !status.preview && <MomentMix onPlayMix={playMomentMix} onPlay={playMoment} busy={momentBusy} />}
+          {isNative && !status.preview && <MomentMix onPlayMix={playMomentMix} onPlay={playMoment} busy={momentBusy} refreshSignal={homeRefresh} />}
           <MadeForYou
             enabled={tab === "home" && isNative && !status.preview}
             onOpen={(playlistId) => nav.push({ view: "library", playlistId })}
@@ -1682,6 +1693,8 @@ export default function App() {
           />
           <HomeFeed
             active={tab === "home"}
+            refreshSignal={homeRefresh}
+            onLoading={setHomeLoading}
             status={status}
             onPlay={(items, index) => void player.playList(items, index)}
             onCollection={item => {

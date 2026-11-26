@@ -6,6 +6,8 @@ import type { QueueItem } from "../core/types";
 export { momentFor, type Moment } from "../core/momentMix";
 
 export interface MomentMixProps {
+  /** Bumped by «deslizar hacia abajo» on Inicio. */
+  refreshSignal?: number;
   /**
    * The personal mix (preferred): the card builds it — your songs for this hour plus discoveries
    * near them, cached 30 min — and hands over the songs to play. While it returns a promise the card
@@ -26,7 +28,7 @@ const icons = { morning: Sun, focus: Coffee, weekend: Sparkles, evening: Moon, l
 const keyAt = (date: Date) => momentFor(date.getHours(), date.getDay()).key;
 
 /** "Mix del momento": the music you play at this time of day, with discoveries close to it. */
-export function MomentMix({ onPlayMix, onPlay, busy, now }: MomentMixProps) {
+export function MomentMix({ onPlayMix, onPlay, busy, now, refreshSignal = 0 }: MomentMixProps) {
   const [clock, setClock] = useState(() => new Date());
   const at = now ?? clock;
   const moment = momentFor(at.getHours(), at.getDay());
@@ -37,6 +39,7 @@ export function MomentMix({ onPlayMix, onPlay, busy, now }: MomentMixProps) {
   });
   const [working, setWorking] = useState(false);
   const [wake, setWake] = useState(0);
+  useEffect(() => { if (refreshSignal) setWake((n) => n + 1); }, [refreshSignal]);
 
   // Follow the clock (a new moment brings a new mix) and refresh when the app comes back.
   useEffect(() => {

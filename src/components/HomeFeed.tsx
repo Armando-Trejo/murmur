@@ -10,6 +10,8 @@ type Provider = "youtube" | "spotify";
 type Feed = { shelves: FeedShelf[]; loading: boolean; error?: string };
 const empty: Feed = { shelves: [], loading: false };
 const names = { youtube: "YouTube Music", spotify: "Spotify" };
+/** After this long in the background, Inicio asks the providers for fresh picks on return. */
+export const FEED_STALE_MS = 30 * 60_000;
 
 async function loadFeed(provider: Provider): Promise<FeedShelf[]> {
   if (provider === "youtube") {
@@ -65,8 +67,11 @@ function FeedSource({ children }: { children: ReactNode }) {
   </motion.div>;
 }
 
-export function HomeFeed({ active, status, onPlay, onCollection, onConnect, renderArt }: {
+export function HomeFeed({ active, status, onPlay, onCollection, onConnect, renderArt, refreshSignal = 0, onLoading }: {
   active: boolean;
+  /** Bumped by «deslizar hacia abajo» on Inicio: asks every source again. */
+  refreshSignal?: number;
+  onLoading?: (loading: boolean) => void;
   status: ConnectionStatus;
   onPlay: (items: QueueItem[], index: number) => void;
   onCollection: (item: FeedItem) => void;
@@ -83,9 +88,21 @@ export function HomeFeed({ active, status, onPlay, onCollection, onConnect, rend
   const spotify = !!(status.spotify || status.oauth);
   const youtube = !!(status.youtubeSession || status.youtube);
   const feeds = {
-    youtube: useProviderFeed("youtube", isNative && youtube ? status.youtubeRevision ?? 0 : undefined, started, revision),
-    spotify: useProviderFeed("spotify", isNative && spotify ? status.spotifyRevision ?? 0 : undefined, started, revision),
+    youtube: useProviderFeed("youtube", isNative && youtube ? status.youtubeRevision ?? 0 : undefined, started, revision + refreshSignal),
+    spotify: useProviderFeed("spotify", isNative && spotify ? status.spotifyRevision ?? 0 : undefined, started, revision + refreshSignal),
   };
+  const anyLoading = feeds.youtube.loading || feeds.spotify.loading;
+  useEffect(() => { onLoading?.(anyLoading); }, [anyLoading]);
+  // Back to MURMUR after a while: the providers' algorithms have new picks, ask again.
+  useEffect(() => {
+    let hiddenAt = 0;
+    const change = () => {
+      if (document.visibilityState === "hidden") { hiddenAt = Date.now(); return; }
+      if (hiddenAt && Date.now() - hiddenAt > FEED_STALE_MS) setRevision(value => value + 1);
+    };
+    document.addEventListener("visibilitychange", change);
+    return () => document.removeEventListener("visibilitychange", change);
+  }, []);
   // "Todos" shows only the connected sources: a disconnected one is a choice made in Conexiones,
   // not something to nag about at the top of Home. Its own filter still offers to connect it.
   const linked = (["youtube", "spotify"] as const).filter(provider => provider === "youtube" ? youtube : spotify);

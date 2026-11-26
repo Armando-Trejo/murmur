@@ -1,4 +1,13 @@
-# Continuidad de MURMUR 2.20.0
+# Continuidad de MURMUR 2.20.1
+
+## Estado de 2.20.1 (26 nov 2026, código 38)
+
+- **Deslizar para actualizar Inicio** (`components/PullToRefresh.tsx`): solo con la página arriba y el gesto vertical; sube `homeRefresh`, que vuelve a pedir `youtubeHome`, el top de Spotify y el Mix del momento. Inicio también se actualiza al volver tras 30 min (`FEED_STALE_MS` en HomeFeed). Comprobado en el teléfono: el gesto dispara `youtubeHome` y `/me/top/tracks`.
+- **Barras de scroll que se ocultan** (`core/scrollbars.ts` + `v220.css`): la regla global `::-webkit-scrollbar` impedía que Android las desvaneciera; ahora el pulgar es transparente salvo con `.is-scrolling`. Comprobado en el reproductor del teléfono.
+- **Comprobado con cuentas conectadas:** al conectar Spotify la app eligió sola el modo `web` (Premium) y *Persiana Americana* sonó dentro de MURMUR con la app de Spotify cerrada.
+- **Pendientes recomendados:** calidad de audio según la red (hoy siempre la más alta, también con datos), volumen parejo entre canciones (YouTube trae `loudnessDb`), probar Android Auto en un coche.
+
+## 2.20.0
 
 ## Estado de 2.20.0 (26 nov 2026, código 37)
 
