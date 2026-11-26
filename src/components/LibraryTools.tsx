@@ -397,7 +397,7 @@ export function LibraryResults({
   const shown = group === "all" ? groups : [group];
   return (
     <div className="library-results" aria-live="polite">
-      <div className="pills library-result-pills" role="group" aria-label="Filtrar resultados">
+      <div className="library-chips library-result-pills" role="group" aria-label="Filtrar resultados">
         <button type="button" className={group === "all" ? "active" : ""} aria-pressed={group === "all"} onClick={() => choose("all")}>
           Todo <span className="pill-count">{results.total.toLocaleString("es")}</span>
         </button>

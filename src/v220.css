@@ -126,3 +126,5 @@
 .library-chips button:active { scale: 0.96; }
 .chip-divider { flex: 0 0 1px; height: 22px; background: rgba(255, 255, 255, 0.14); }
 @media (prefers-reduced-motion: reduce) { .library-chips button { transition: none; } .library-chips button:active { scale: 1; } }
+.search-chips { margin-top: 16px; }
+.library-chips.library-result-pills { margin-top: 0; margin-bottom: 12px; }

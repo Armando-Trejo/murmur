@@ -1872,7 +1872,7 @@ export default function App() {
                 </button>
               )}
             </div>
-            <div className="pills search-pills">
+            <div className="library-chips search-chips" role="toolbar" aria-label="Dónde buscar">
               {[
                 { id: "all", title: "Todo" },
                 { id: "albums", title: "Álbumes" },
@@ -1883,6 +1883,7 @@ export default function App() {
                 <button
                   key={p.id}
                   className={provider === p.id ? "active" : ""}
+                  aria-pressed={provider === p.id}
                   onClick={() => setProvider(p.id)}
                 >
                   {p.title}
