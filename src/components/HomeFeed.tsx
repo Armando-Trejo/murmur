@@ -5,6 +5,7 @@ import { Audio, Auth, isNative, type ConnectionStatus, type FeedItem, type FeedS
 import { unwrapSpotifyTrack } from "../core/SpotifyLibrary";
 import { settle } from "../core/motion";
 import type { QueueItem } from "../core/types";
+import { feedMoods, moodShelves, nextFeedRound, pickWindow, rotateShelves } from "../core/feedRotation";
 
 type Provider = "youtube" | "spotify";
 type Feed = { shelves: FeedShelf[]; loading: boolean; error?: string };
@@ -13,15 +14,35 @@ const names = { youtube: "YouTube Music", spotify: "Spotify" };
 /** After this long in the background, Inicio asks the providers for fresh picks on return. */
 export const FEED_STALE_MS = 30 * 60_000;
 
-async function loadFeed(provider: Provider): Promise<FeedShelf[]> {
+let moodChips: { title: string; params: string }[] | undefined;
+
+async function loadFeed(provider: Provider, round: number): Promise<FeedShelf[]> {
   if (provider === "youtube") {
-    return (await Auth.youtubeHome()).shelves ?? [];
+    const base = (await Auth.youtubeHome()).shelves ?? [];
+    // A different mood each reload brings sections the plain feed does not have.
+    try {
+      moodChips ??= feedMoods((await Auth.youtubeHomeChips()).chips ?? []);
+      const mood = moodChips.length ? moodChips[round % moodChips.length] : undefined;
+      if (mood) {
+        const extra = moodShelves(mood.title, (await Auth.youtubeHome({ params: mood.params })).shelves ?? [], base);
+        const rotated = rotateShelves(base, round);
+        return [...rotated.slice(0, 1), ...extra, ...rotated.slice(1)];
+      }
+    } catch { /* the plain feed is still good */ }
+    return rotateShelves(base, round);
   }
-  const { data } = await Auth.spotifyRequest({ path: "/me/top/tracks?time_range=short_term&limit=20" });
-  if (!Array.isArray(data?.items)) throw Error("Spotify no entregó tus canciones principales.");
-  const tracks = data.items.map(unwrapSpotifyTrack).filter(Boolean) as QueueItem[];
+  // Your Spotify favourites from the last weeks and months: another 20 each reload.
+  const [short, medium] = await Promise.all([
+    Auth.spotifyRequest({ path: "/me/top/tracks?time_range=short_term&limit=50" }),
+    Auth.spotifyRequest({ path: "/me/top/tracks?time_range=medium_term&limit=50" }).catch(() => ({ data: { items: [] } })),
+  ]);
+  if (!Array.isArray(short.data?.items)) throw Error("Spotify no entregó tus canciones principales.");
+  const seen = new Set<string>();
+  const pool = [...short.data.items, ...(medium.data?.items ?? [])]
+    .map(unwrapSpotifyTrack).filter((t): t is QueueItem => !!t && !seen.has(t.id) && !!seen.add(t.id));
+  const tracks = pickWindow(pool, round, 20);
   return tracks.length ? [{
-    title: "Lo más escuchado recientemente",
+    title: "Tus favoritos en Spotify",
     items: tracks.map(track => ({
       id: track.id, title: track.title, subtitle: track.artist, artworkUrl: track.artworkUrl, track,
     })),
@@ -40,7 +61,7 @@ function useProviderFeed(provider: Provider, account: number | undefined, enable
     setResult(current => ({
       account, feed: { shelves: current?.account === account ? current.feed.shelves : [], loading: true },
     }));
-    void loadFeed(provider).then(shelves => {
+    void loadFeed(provider, nextFeedRound()).then(shelves => {
       if (live) setResult({ account, feed: { shelves, loading: false } });
     }).catch((error: unknown) => {
       if (!live) return;

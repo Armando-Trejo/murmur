@@ -1,4 +1,10 @@
-# Continuidad de MURMUR 2.20.1
+# Continuidad de MURMUR 2.20.2
+
+## Estado de 2.20.2 (26 nov 2026, código 39)
+
+- **«Para ti» cambia en cada recarga** (`core/feedRotation.ts`): YouTube Music responde casi el mismo Inicio dos veces seguidas, así que cada carga (`nextFeedRound`, guardado entre sesiones) añade 1–2 secciones del ánimo de turno (chips de `youtubeHomeChips`, sin pódcasts ni dormir), rota el orden de las secciones (la primera se queda) y la tarjeta inicial de los carruseles largos. Spotify: grupo de top `short_term` + `medium_term` (50+50), otras 20 cada vez. Visto en el teléfono: al abrir salió «Amor · …». El gesto completo no se pudo repetir porque el dueño estaba usando el teléfono (no inyectar `adb input` con la app en segundo plano: los toques caen en otra app).
+
+## 2.20.1
 
 ## Estado de 2.20.1 (26 nov 2026, código 38)
 
