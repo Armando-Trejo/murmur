@@ -216,12 +216,17 @@ export function wordSimilarity(a: Pick<Tok, "key" | "skel">, b: Pick<Tok, "key" 
   const known = sims.get(id);
   if (known !== undefined) return known;
   let s = 0;
-  if (Math.min(a.key.length, b.key.length) / Math.max(a.key.length, b.key.length) >= 0.5) {
+  const ratio = Math.min(a.key.length, b.key.length) / Math.max(a.key.length, b.key.length);
+  if (ratio >= 0.5) {
     // Jaro-Winkler alone is generous with a shared beginning ("misfits"/"misery"); edit distance keeps it honest.
     const jw = jaroWinkler(a.key, b.key);
     if (jw >= 0.44) s = (jw + levenshteinRatio(a.key, b.key)) / 2;
-    if (a.skel.length >= 2 && a.skel === b.skel) s = Math.max(s, a.skel.length >= 3 ? 0.92 : 0.78);
-    else if (a.skel.length >= 3 && b.skel.length >= 3) s = Math.max(s, jaroWinkler(a.skel, b.skel) * 0.85);
+    // The skeleton drops every vowel, so words of very different length collide through it
+    // ("ac dc" and "acuática" are both a-k-t-k): it only counts between words of similar length.
+    if (ratio >= 0.7) {
+      if (a.skel.length >= 2 && a.skel === b.skel) s = Math.max(s, a.skel.length >= 3 ? 0.92 : 0.78);
+      else if (a.skel.length >= 3 && b.skel.length >= 3) s = Math.max(s, jaroWinkler(a.skel, b.skel) * 0.85);
+    }
   }
   if (sims.size > 50_000) sims.clear();
   sims.set(id, s);
@@ -230,6 +235,13 @@ export function wordSimilarity(a: Pick<Tok, "key" | "skel">, b: Pick<Tok, "key" 
 
 /** Credit only for words that really sound alike. */
 const MIN_WORD = 0.72;
+/**
+ * Two words heard as one (or one as two) is already a guess. When nothing else in the phrase
+ * corroborates it, it has to sound nearly the same: "miss suites" is Misfits (0.83), but "ac dc"
+ * is not "CatDog" (0.78). With another word matching on its own ("can you west" → Kanye **West**),
+ * the ordinary bar is enough.
+ */
+const MIN_MERGED_ALONE = 0.8;
 
 interface Unit { from: number; to: number; key: string; skel: string; w: number }
 function units(toks: Tok[]): Unit[] {
@@ -258,13 +270,16 @@ export interface Alignment {
 export function align(said: Tok[], name: Tok[]): Alignment {
   const su = units(said);
   const nu = units(name);
-  const pairs: { s: Unit; n: Unit; sim: number }[] = [];
+  const pairs: { s: Unit; n: Unit; sim: number; merged: boolean }[] = [];
   for (const s of su)
     for (const n of nu) {
       const merged = s.to > s.from || n.to > n.from;
       const sim = wordSimilarity(s, n) * (merged ? 0.97 : 1);
-      if (sim >= MIN_WORD) pairs.push({ s, n, sim });
+      if (sim >= MIN_WORD) pairs.push({ s, n, sim, merged });
     }
+  // Nothing matched word against word: the merge is carrying the whole name on its own.
+  if (!pairs.some((p) => !p.merged))
+    for (let i = pairs.length - 1; i >= 0; i--) if (pairs[i].sim < MIN_MERGED_ALONE) pairs.splice(i, 1);
   pairs.sort((a, b) => b.sim - a.sim || b.s.to - b.s.from + (b.n.to - b.n.from) - (a.s.to - a.s.from + (a.n.to - a.n.from)));
   const usedS = new Array<boolean>(said.length).fill(false);
   const nameHits = new Array<number>(name.length).fill(0);

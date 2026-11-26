@@ -62,13 +62,14 @@ class VoiceProfile(val vectors: List<FloatArray>, val threshold: Double, val ena
     fun withEnabled(value: Boolean) = VoiceProfile(vectors, threshold, value)
 
     fun toJson(): String = JSONObject()
-        .put("version", 1)
+        .put("version", VERSION)
         .put("enabled", enabled)
         .put("threshold", threshold)
         .put("vectors", JSONArray().apply { vectors.forEach { vector -> put(JSONArray().apply { vector.forEach { put(it.toDouble()) } }) } })
         .toString()
 
     companion object {
+        private const val VERSION = 2
         private fun file(context: Context) = File(context.noBackupFilesDir, "voice/profile.json")
 
         /** Null when the text is not a usable profile; a threshold out of range is brought back into it. */
@@ -83,7 +84,9 @@ class VoiceProfile(val vectors: List<FloatArray>, val threshold: Double, val ena
             val threshold = data.optDouble("threshold", VoiceMatch.MIN_THRESHOLD)
                 .let { if (it.isNaN()) VoiceMatch.MIN_THRESHOLD else it }
                 .coerceIn(VoiceMatch.MIN_THRESHOLD, VoiceMatch.MAX_THRESHOLD)
-            VoiceProfile(vectors, threshold, data.optBoolean("enabled", false))
+            // Profiles saved before 2.19 left «Solo mi voz» on without making clear that nobody else
+            // could wake MURMUR: they come back switched off, and anyone's voice works again.
+            VoiceProfile(vectors, threshold, data.optInt("version", 1) >= VERSION && data.optBoolean("enabled", false))
         }.getOrNull()
 
         fun load(context: Context): VoiceProfile? =

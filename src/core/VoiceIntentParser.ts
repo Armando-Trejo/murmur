@@ -4,7 +4,9 @@ import { similarity } from "./SourceResolver";
 import { soundsLike } from "./voicePhonetics";
 export type Platform = "spotify" | "youtube";
 export type VoiceIntent =
-  | { type: "mix" | "next" | "previous" | "save" | "pause" | "resume" | "nowPlaying" | "moreLikeThis" | "shuffle" }
+  | { type: "mix" | "next" | "previous" | "save" | "unsave" | "restart" | "surprise" | "pause" | "resume" | "nowPlaying" | "moreLikeThis" | "shuffle" }
+  /** The phone's media volume: a few steps up or down, or a percentage. */
+  | { type: "volume"; change: "up" | "down" | number }
   | { type: "playlist"; id: string }
   /** Sleep timer: minutes from now, "track" (when this song ends) or 0 (cancel). */
   | { type: "sleep"; minutes: number | "track" }
@@ -63,8 +65,27 @@ const PLAY = /^(?:(?:me |nos )?(?:pones|pondrias|pondras|pon(?:me|nos|le|la|lo)?
 const MUSIC_OBJECT = "(?: (?:(?:la|el|esta|esa|este|ese) )?(?:musica|cancion|rola|reproduccion|audio|tema|rolita))?";
 const A_MOMENT = "(?: (?:tantito|un momento|un rato|un segundo|ahorita|por ahora))?";
 
+/** "Súbele", "baja un poco el volumen", "más fuerte", "volumen al 50", "volumen al máximo". */
+export function parseVolume(n: string): "up" | "down" | number | undefined {
+  const t = n.replace(/\b(?:un poco|un poquito|tantito|mas bien|a la musica|a la cancion|la musica)\b/g, " ").replace(/\s+/g, " ").trim();
+  if (/^(?:sube(?:le)?|subir|aumenta(?:le)?)(?: (?:el|al))?(?: volumen)?(?: mas)?$|^(?:mas (?:fuerte|alto|recio|volumen)|volumen arriba|no se oye|no se escucha)$/.test(t)) return "up";
+  if (/^(?:baja(?:le)?|bajar|reduce)(?: (?:el|al))?(?: volumen)?(?: mas)?$|^(?:mas (?:bajo|bajito|quedito|suave)|menos volumen|volumen abajo|muy (?:fuerte|alto|recio))$/.test(t)) return "down";
+  const set = t.match(/^(?:(?:pon(?:le)?|sube(?:le)?|baja(?:le)?) )?(?:el )?volumen (?:al?|en) (?:(\d{1,3})(?: por ciento)?|(maximo|tope|todo lo que da|la mitad|minimo))$|^(?:sube(?:le)?) (?:todo|al maximo|a todo lo que da)$/);
+  if (!set) return undefined;
+  if (set[1]) return Math.min(100, Number(set[1]));
+  return set[2] === "la mitad" ? 50 : set[2] === "minimo" ? 10 : 100;
+}
+
 const TRANSPORT: [RegExp, VoiceIntent["type"]][] = [
   [/^(?:mezcla ahora|mezclar ahora|mezclala|mix now|haz la mezcla|cruzala)$/, "mix"],
+  // "Repite esta canción", "ponla otra vez", "desde el principio".
+  [/^(?:repite(?:la)?(?: (?:esta|esa))?|reinicia(?:la)?|(?:pon(?:la|le)? )?(?:otra vez|de nuevo)|(?:pon(?:la)? )?desde el (?:principio|inicio|comienzo)|empieza(?:la)? de nuevo|vuelve a empezar(?:la)?)(?: (?:la |esta |esa )?(?:cancion|rola|tema))?(?: (?:otra vez|de nuevo|desde el principio))?$/, "restart"],
+  [/^(?:quita(?:la|r)?|saca(?:la)?|elimina(?:la)?|borra(?:la)?)(?: (?:esta|esa))?(?: (?:cancion|rola))? de (?:mis )?(?:favoritas|favoritos|guardadas|guardados|me gusta|likes)$|^quita(?:le)? (?:el |mi )?(?:like|me gusta|corazon)$/, "unsave"],
+  [/^(?:sorprendeme|pon(?:me)? (?:algo|lo que sea|cualquier cosa|lo que quieras|musica aleatoria)|(?:pon(?:me)? )?algo de (?:mi musica|lo mio))$/, "surprise"],
+  [/^(?:sigale|siguele|dale que siga|que siga(?: la musica)?)$/, "resume"],
+  [/^(?:dame like|ponle (?:like|me gusta|corazon)|dale (?:me gusta|corazon)|ponla en (?:mis )?(?:favoritas|favoritos|me gusta))$/, "save"],
+  [/^de quien es(?: (?:esta|esa))?(?: (?:cancion|rola))?$/, "nowPlaying"],
+  [/^(?:pasa(?:le)?|cambia(?:le)?|salta(?:te)?|quita|siguiente) (?:a )?(?:la |esta |esa |de )?(?:cancion|track|rola|tema)$/, "next"],
   [/^(?:(?:la )?siguiente|next|salta(?:la|te)?|skip|pasa(?:la|le)?|cambia(?:la|le)?|otra|la que sigue|adelanta(?:la)?|no me gusta(?: esta)?|quita(?: esta|la)?)(?: cancion| track| rola| tema)?$/, "next"],
   [/^(?:(?:la )?anterior|previous|go back|vuelve|regresa(?:la)?|atras|la de antes|repite(?:la)?(?: la anterior)?)(?: cancion| track| rola| tema)?$/, "previous"],
   [/^(?:guarda(?:la|r)?|save|me gusta(?: mucho)?(?: esta)?|dale like|like|agrega(?:la)? a (?:mis )?(?:favoritas|favoritos|guardadas|mi biblioteca)|me encanta(?: esta)?)(?: esta| this)?(?: cancion| song| track| rola)?$/, "save"],
@@ -182,6 +203,8 @@ export function parseVoiceIntent(
   // Before the controls: "para la música en 20 minutos" is a timer, not a pause.
   const sleep = parseSleep(n);
   if (sleep !== undefined) return { type: "sleep", minutes: sleep };
+  const volume = parseVolume(n);
+  if (volume !== undefined) return { type: "volume", change: volume };
   for (const [pattern, type] of TRANSPORT)
     if (pattern.test(n)) return { type } as VoiceIntent;
   // Colloquial control: short sentences that mention the action anywhere
@@ -232,6 +255,8 @@ export function parseVoiceIntent(
       playlists.map((p) => ({ p, s: soundsLike(playlist[1], p.title, 0.7) })).filter((x) => x.s >= 0.8).sort((a, b) => b.s - a.s)[0]?.p;
     if (p) return { type: "playlist", id: p.id };
     if (/^(?:mi|my) /.test(what)) return { type: "unknown" };
+    // Not one of the owner's: the catalogue's playlists for those words.
+    return { type: "vibe", query: playlist[1] };
   }
   const video = what.match(/^(?:el |the |un )?(?:video|concierto|concert|en vivo|live|directo) (?:de |of |del )?(.+)$/);
   if (video) return { type: "youtube", query: video[1] + " live" };

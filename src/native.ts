@@ -180,6 +180,8 @@ interface VoiceBridge {
   lastCrash(): Promise<{ report: string | null; version: string }>;
   /** Android's share sheet with a text. */
   shareText(o: { text: string; title?: string }): Promise<void>;
+  /** The phone's media volume: a few steps, or a percentage. Returns the new level. */
+  adjustVolume(o: { direction?: "up" | "down"; percent?: number }): Promise<{ percent: number }>;
   /** Names the speech recognizer should expect (artists, playlists). */
   setVoiceHints(o: { hints: string[] }): Promise<void>;
   setWakeWord(o: { enabled: boolean }): Promise<{ enabled: boolean; model?: boolean }>;

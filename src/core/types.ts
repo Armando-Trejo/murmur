@@ -16,7 +16,21 @@ export interface CustomArtwork {
   customArtwork?: string;
   artworkFrame?: ArtworkFrame;
 }
+/** A cover as stored on a song. */
+export interface ArtSnapshot extends CustomArtwork {
+  artworkUrl?: string;
+}
 export interface QueueItem extends CustomArtwork {
+  /** The album whose cover this song shows (an album's cover is the cover of its songs). */
+  coverAlbum?: string;
+  /** The song's cover before the album's, restored when it leaves the album. */
+  ownArt?: ArtSnapshot;
+  /** Names the owner corrected: a sync keeps them. */
+  edits?: { title: string; artist: string; album?: string };
+  /** Taken out of «Guardadas» by the owner: a sync does not like it again. */
+  unliked?: boolean;
+  /** Deleted by the owner: hidden everywhere, kept for the listening history. */
+  deleted?: boolean;
   id: string;
   source: Source;
   title: string;
@@ -63,6 +77,12 @@ export interface Playlist extends CustomArtwork {
   artist?: string;
   year?: string;
   subtitle?: string;
+  /** When it entered the library (ms). */
+  addedAt?: number;
+  /** Songs the owner removed: a sync does not bring them back. */
+  removedIds?: string[];
+  /** What the owner changed by hand: a sync keeps it. */
+  edited?: { title?: boolean; artist?: boolean; year?: boolean; kind?: boolean };
 }
 export interface Override {
   id?: number;

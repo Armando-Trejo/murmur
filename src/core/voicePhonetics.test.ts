@@ -97,3 +97,21 @@ describe("songScore: a title, with or without its artist", () => {
   it("part of a title with the artist still lands", () => expect(score("holiday dead kennedys", "Holiday in Cambodia", "Dead Kennedys")).toBeGreaterThan(0.82));
   it("a different song by the same artist does not", () => expect(score("last caress misfits", "Static Age", "Misfits")).toBeLessThan(0.6));
 });
+
+describe("una unión de palabras no inventa un nombre", () => {
+  // De la prueba real en el teléfono: «CatDog» está en la biblioteca y sonaba como «AC DC».
+  it("«ac dc» no es «CatDog»", () => expect(soundsLike("ac dc", "CatDog")).toBeLessThan(0.7));
+  it("«ac dc» sí es «AC/DC»", () => expect(soundsLike("ac dc", "AC/DC")).toBeGreaterThan(0.95));
+  it("sigue uniendo lo que de verdad suena igual", () => {
+    expect(soundsLike("miss suites", "The Misfits")).toBeGreaterThanOrEqual(0.75);
+    expect(soundsLike("can you west", "Kanye West")).toBeGreaterThanOrEqual(0.85);
+    expect(soundsLike("mis fits", "Misfits")).toBeGreaterThan(0.95);
+  });
+});
+
+describe("el esqueleto de consonantes no junta palabras de distinto largo", () => {
+  it("«ac dc» no es «Canción Acuática»", () =>
+    expect(songScore(tokens("ac dc"), tokens("Canción Acuática"), tokens("Daniel, Me Estás Matando"))).toBeLessThan(0.7));
+  it("«king caesars» sigue siendo King Gizzard", () =>
+    expect(soundsLike("king caesars and the leaser weaser", "King Gizzard & The Lizard Wizard")).toBeGreaterThan(0.8));
+});

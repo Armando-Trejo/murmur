@@ -9,8 +9,8 @@ android {
         applicationId "com.personal.murmur"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 35
-        versionName "2.18.0"
+        versionCode 36
+        versionName "2.19.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Optional single-ABI build for direct phone downloads, e.g. -Pabi=arm64-v8a.
         if (project.hasProperty('abi')) {
@@ -37,6 +37,8 @@ android {
         }
     }
     buildTypes {
+        // -PtestSuffix=.bench: a second MURMUR beside the owner's, to measure without touching theirs.
+        debug { applicationIdSuffix project.findProperty("testSuffix") ?: "" }
         release {
             minifyEnabled false
             debuggable false

@@ -1,6 +1,7 @@
 import { Auth } from "../native";
 import { addedStamp, db } from "./db";
 import type { Playlist, QueueItem } from "./types";
+import { applyAllAlbumCovers, deletedPlaylists, mergeSyncedPlaylist, mergeSyncedTrack } from "./libraryEdit";
 import { parseFanUpload } from "./FanUploadParser";
 export async function importYouTubeLibrary(
   progress: (message: string) => void = () => {},
@@ -28,24 +29,25 @@ export async function importYouTubeLibrary(
         };
       });
       const now = Date.now();
+      if (p.id in (await deletedPlaylists())) continue;
       await db.transaction("rw", [db.tracks, db.playlists], async () => {
         for (const [index, track] of items.entries()) {
           const existing = await db.tracks.get(track.id);
           await db.tracks.put({
-            ...existing,
-            ...track,
-            offlinePath: existing?.offlinePath,
+            ...mergeSyncedTrack(existing, track),
             addedAt: addedStamp(existing, now - index),
           });
           tracks.add(track.id);
         }
-        await db.playlists.put({
+        const incoming: Playlist = {
           id: p.id,
           title: p.title,
           source: "youtube",
           trackIds: items.map((t) => t.id),
           artworkUrl: p.artworkUrl,
-        } satisfies Playlist);
+        };
+        const merged = mergeSyncedPlaylist(await db.playlists.get(p.id), incoming);
+        if (merged) await db.playlists.put(merged);
       });
       imported++;
     } catch (error) {
@@ -65,6 +67,7 @@ export async function importYouTubeLibrary(
     throw new Error(
       "YouTube detectó tus playlists, pero no permitió importar sus canciones. Renueva la sesión. No se crearon listas vacías ni se borraron tus datos locales.",
     );
+  await applyAllAlbumCovers();
   return {
     detected: playlists.length,
     imported,

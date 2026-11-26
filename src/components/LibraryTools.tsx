@@ -2,6 +2,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowDownUp, ArrowUpRight, ChevronDown, Search, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { db } from "../core/db";
+import { applyAlbumCover, forgetDeleted } from "../core/libraryEdit";
 import { haptic } from "../core/haptics";
 import {
   loadSort,
@@ -110,9 +111,12 @@ export async function albumPlaylist(album: AlbumEntry): Promise<Playlist> {
     source: "hybrid",
     trackIds: album.trackIds,
     artworkUrl: items.find((item) => item.artworkUrl)?.artworkUrl,
+    addedAt: Date.now(),
     ...(album.artist ? { artist: album.artist } : {}),
   };
+  await forgetDeleted(playlist.id);
   await db.playlists.put(playlist);
+  await applyAlbumCover(playlist.id);
   return playlist;
 }
 

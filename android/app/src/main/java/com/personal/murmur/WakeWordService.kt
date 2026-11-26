@@ -255,18 +255,12 @@ class WakeWordService : Service() {
 
     @Volatile private var loop: Thread? = null
 
-    /**
-     * Battery: the recognizer only sees a tiny grammar (variants of the wake phrase; words missing
-     * from the model are ignored by Vosk) and only while there is sound. Silence is measured with a
-     * cheap RMS per 100 ms frame and never decoded; half a second of pre-roll keeps the "ok".
-     */
     private fun listen() {
         val current = model ?: return
         if (capturing || loop != null || held) return
         if (!useful()) { showListening(false); return }
         showListening(true)
-        val grammar = org.json.JSONArray(WakePhrase.grammar).toString()
-        val worker = Thread({ capture(current, grammar) }, "MurmurWakeWord")
+        val worker = Thread({ capture(current) }, "MurmurWakeWord")
         loop = worker
         worker.start()
     }
@@ -286,17 +280,17 @@ class WakeWordService : Service() {
         return audio.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).none { it.type in private }
     }
 
-    private fun capture(model: Model, grammar: String) {
+    private fun capture(model: Model) {
         while (loop === Thread.currentThread() && !capturing) {
             val echo = wantsEchoCancel()
-            if (!captureWith(model, grammar, echo)) return
+            if (!captureWith(model, echo)) return
         }
     }
 
     /** One microphone session; returns true to reopen (the music started or stopped), false to end. */
-    private fun captureWith(model: Model, grammar: String, echo: Boolean): Boolean {
-        val rate = 16000
-        val frame = rate / 10 // 100 ms of 16-bit mono samples
+    private fun captureWith(model: Model, echo: Boolean): Boolean {
+        val rate = WakeDetector.RATE
+        val frame = WakeDetector.FRAME // 100 ms of 16-bit mono samples
         val source = if (echo) android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION else android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION
         val record = try {
             android.media.AudioRecord(source, rate,
@@ -307,18 +301,15 @@ class WakeWordService : Service() {
             if (android.media.audiofx.AcousticEchoCanceler.isAvailable()) runCatching { android.media.audiofx.AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true } }.getOrNull() else null,
             if (android.media.audiofx.NoiseSuppressor.isAvailable()) runCatching { android.media.audiofx.NoiseSuppressor.create(record.audioSessionId)?.apply { enabled = true } }.getOrNull() else null,
         ) else emptyList()
-        val recognizer = Recognizer(model, rate.toFloat(), grammar)
+        val detector = WakeDetector(model) { audio, hard ->
+            val checkStarted = android.os.SystemClock.elapsedRealtime()
+            confirm(model, audio, hard).also {
+                if (android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG))
+                    android.util.Log.d(LOG_TAG, "wake timing check=${android.os.SystemClock.elapsedRealtime() - checkStarted}ms")
+            }
+        }
         val buffer = ShortArray(frame)
-        val preroll = ArrayDeque<ShortArray>()
-        // The last 2.5 s of audio, loud or not: what the second check transcribes.
-        val recent = ArrayDeque<ShortArray>()
-        var hangover = 0
-        // Background level (music left after echo cancelling, room noise): speech must rise above it.
-        var floor = 300.0
-        var gain = 1.0
         var frames = 0
-        var verifyAt = -1
-        var quietUntil = 0L
         var reopen = false
         try {
             record.startRecording()
@@ -326,49 +317,18 @@ class WakeWordService : Service() {
                 val read = record.read(buffer, 0, frame)
                 if (read <= 0) { Thread.sleep(50); continue }
                 frames++
-                var sum = 0.0
-                for (i in 0 until read) sum += buffer[i] * buffer[i].toDouble()
-                val rms = kotlin.math.sqrt(sum / read)
-                // A voice from across the room (~ -40 dBFS) in a quiet room; over music, clearly above it.
-                val music = echo || musicPlaying()
-                val loud = rms > maxOf(if (music) 600.0 else 300.0, floor * if (music) 1.4 else 1.6)
-                floor = if (rms < floor) floor * 0.8 + rms * 0.2 else floor * 0.995 + rms * 0.005
-                // A faraway voice is brought up to a normal level before Vosk hears it (it decodes
-                // quiet speech poorly); eased so one loud frame doesn't pump the level.
-                if (loud) gain = gain * 0.6 + (2_500.0 / rms).coerceIn(1.0, 6.0) * 0.4
-                val chunk = amplified(buffer, read, gain)
-                recent.addLast(chunk); if (recent.size > 25) recent.removeFirst()
-                if (loud) hangover = 12 // keep decoding 1.2 s after the last loud frame
-                var spotted = false
-                if (hangover > 0) {
-                    hangover--
-                    while (preroll.isNotEmpty()) spotted = feed(recognizer, preroll.removeFirst()) || spotted
-                    spotted = feed(recognizer, chunk) || spotted
-                    if (hangover == 0) { spotted = spotted(recognizer.finalResult, "text") || spotted; recognizer.reset() }
-                } else {
-                    preroll.addLast(chunk); if (preroll.size > 5) preroll.removeFirst()
-                }
-                val now = android.os.SystemClock.elapsedRealtime()
-                // The spotter fired: let the phrase finish (0.4 s), then confirm it with an open transcription.
-                if (spotted && verifyAt < 0 && now >= quietUntil && now - lastWake >= 3_000) verifyAt = frames + 4
-                if (verifyAt in 0..frames) {
-                    verifyAt = -1
-                    recognizer.reset(); hangover = 0; preroll.clear()
-                    val checkStarted = android.os.SystemClock.elapsedRealtime()
-                    // Over music or from far away the voiceprint comes out blurred: a little more leeway.
-                    val confirmed = confirm(model, recent.toList(), echo || musicPlaying() || gain > 2.5)
-                    if (android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG))
-                        android.util.Log.d(LOG_TAG, "wake timing check=${android.os.SystemClock.elapsedRealtime() - checkStarted}ms")
-                    if (confirmed) {
-                        commandStarted = android.os.SystemClock.elapsedRealtime()
+                if (detector.accept(buffer, read, echo || musicPlaying())) {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (now - lastWake >= 3_000) {
+                        commandStarted = now
                         lastWake = now
                         handler.post { captureCommand() }
-                    } else quietUntil = now + 1_500
+                    }
                 }
                 // Every 2 s: stop if listening no longer helps; reopen if the music started or stopped.
                 if (frames % 20 == 0) {
-                    if (android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG)) android.util.Log.d(LOG_TAG, "wake mic echo=$echo aec=${effects.size} rms=${rms.toInt()} floor=${floor.toInt()} gain=${String.format(java.util.Locale.ROOT, "%.1f", gain)}")
-                    if (hangover == 0 && verifyAt < 0) {
+                    if (android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG)) android.util.Log.d(LOG_TAG, "wake mic echo=$echo aec=${effects.size} rms=${detector.rms.toInt()} floor=${detector.floor.toInt()} gain=${String.format(java.util.Locale.ROOT, "%.1f", detector.gain)}")
+                    if (detector.idle) {
                         if (!useful()) break
                         if (wantsEchoCancel() != echo) { reopen = true; break }
                     }
@@ -379,29 +339,14 @@ class WakeWordService : Service() {
             if (running && !capturing) handler.postDelayed({ loop = null; listen() }, 3_000)
             reopen = false
         } finally {
-            runCatching { record.stop() }; record.release(); recognizer.close()
+            runCatching { record.stop() }; record.release(); detector.close()
             effects.forEach { runCatching { it.release() } }
             if (!reopen && loop === Thread.currentThread()) loop = null
         }
         return reopen
     }
 
-    private fun amplified(buffer: ShortArray, read: Int, gain: Double): ShortArray {
-        if (gain <= 1.05) return buffer.copyOf(read)
-        return ShortArray(read) { i -> (buffer[i] * gain).toInt().coerceIn(-32_768, 32_767).toShort() }
-    }
-
     private fun musicPlaying() = runCatching { getSystemService(android.media.AudioManager::class.java).isMusicActive }.getOrDefault(false)
-
-    /** Feeds the spotter; true when what it has so far contains the phrase. */
-    private fun feed(recognizer: Recognizer, samples: ShortArray): Boolean =
-        if (recognizer.acceptWaveForm(samples, samples.size)) spotted(recognizer.result, "text")
-        else spotted(recognizer.partialResult, "partial")
-
-    private fun spotted(json: String?, key: String): Boolean {
-        val text = runCatching { JSONObject(json ?: "{}").optString(key) }.getOrDefault("")
-        return text.isNotBlank() && WakePhrase.heard(text)
-    }
 
     /**
      * Second check, on the capture thread (~0.3 s): the same seconds transcribed without the phrase
@@ -410,22 +355,21 @@ class WakeWordService : Service() {
      * decides, as before. Only counts and similarities reach the debug log, never what was said.
      */
     private fun confirm(model: Model, audio: List<ShortArray>, overMusic: Boolean): Boolean {
+        val debug = android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG)
+        val heard = runCatching { WakeCheck.passes(model, audio) }.getOrDefault(false)
         val profile = VoiceProfile.active(this)
-        val speaker = if (profile != null) SpeakerModelStore.shared(this) else null
-        val verifying = speaker?.let { runCatching { Recognizer(model, 16000f, it) }.getOrNull() }
-        val open = verifying ?: try { Recognizer(model, 16000f) } catch (_: Exception) { return false }
+        val speaker = if (profile != null && heard) SpeakerModelStore.shared(this) else null
+        val open = speaker?.let { runCatching { Recognizer(model, 16000f, it) }.getOrNull() }
+        if (open == null || profile == null) {
+            if (debug) android.util.Log.d(LOG_TAG, "wake check ${if (heard) "confirmed" else "rejected"} voice=${if (profile == null) "off" else "unavailable"}")
+            return heard
+        }
+        // «Solo mi voz» (off unless the owner turns it on): the same audio must also sound like them.
         return try {
             val segments = mutableListOf<VoiceMatch.Segment>()
             for (samples in audio) if (open.acceptWaveForm(samples, samples.size)) segments += VoiceMatch.segment(open.result)
             segments += VoiceMatch.segment(open.finalResult)
-            val parts = segments.map { it.text }
-            val heard = WakePhrase.confirmed(parts)
-            val debug = android.util.Log.isLoggable(LOG_TAG, android.util.Log.DEBUG)
-            val words = parts.joinToString(" ").split(' ').count { it.isNotBlank() }
-            if (!heard || verifying == null || profile == null) {
-                if (debug) android.util.Log.d(LOG_TAG, "wake check ${if (heard) "confirmed" else "rejected"} words=$words voice=${if (profile == null) "off" else "unavailable"}")
-                return heard
-            }
+            val words = segments.joinToString(" ") { it.text }.split(' ').count { it.isNotBlank() }
             val sample = VoiceMatch.sample(segments)
             val similarity = sample?.let { VoiceMatch.similarity(profile.vectors, it.first) }
             VoiceMatch.accepts(similarity, profile.threshold, overMusic).also { ok ->

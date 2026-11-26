@@ -410,3 +410,48 @@ La 2.7.1 de la PC RAM nunca llegó a GitHub; la 2.8.0 solo trasladó su precarga
 - Elige la voz en español más natural: México primero, luego Latinoamérica y España, por calidad; las neuronales en línea solo cuando hay internet.
 - En Ajustes hay «Voz de MURMUR», con las voces disponibles: al tocar una se escucha una muestra y queda elegida (`tts_voice`).
 - El motor no informa el género de cada voz, así que se elige escuchándolas.
+
+## 2.19.0 (code 36) — tu biblioteca se edita, el álbum manda la carátula y la voz deja de inventar
+
+**Editar la biblioteca** (`src/core/libraryEdit.ts`, `src/components/LibraryEditor.tsx`)
+- Playlists y álbumes: crear, renombrar (en un álbum también artista y año), añadir canciones de tu biblioteca, quitarlas con «Deshacer» y eliminar la colección.
+- «Crear álbum» está en el menú ⋮ de Tu Biblioteca y arriba de Álbumes.
+- Canciones: no se crean (vienen de los catálogos), pero sí se corrigen título, artista y álbum, se quitan de una colección y se eliminan de MURMUR (sale de Guardadas, de toda playlist o álbum y borra su descarga).
+- **Nada de esto lo deshace una sincronización.** `mergeSyncedTrack` y `mergeSyncedPlaylist` conservan lo que tú cambiaste: lo que quitaste no vuelve (`removedIds`), lo que renombraste mantiene tu nombre (`edited`), lo que dejaste de guardar no se vuelve a guardar (`unliked`) y una colección eliminada no reaparece (`library:deletedPlaylists`).
+- En una playlist de un proveedor, lo que añades vive al lado (`playlist_overrides`), porque cada sincronización reemplaza su lista.
+
+**Guardar un álbum ya no guarda sus canciones**
+- Un álbum se guarda en Álbumes y sus canciones **no** entran a Guardadas: marcas con ♥ solo la que quieras. Las que ya estaban guardadas se quedan.
+- El menú del álbum tiene «Quitar sus canciones de Guardadas», con el número que hay.
+- El ♥ del reproductor ahora es interruptor: toca otra vez y se quita de Guardadas, con «Deshacer».
+
+**La carátula del álbum es la de sus canciones** (`applyAlbumCover`)
+- La que trae el álbum o la que tú subas se aplica a todas sus canciones, en la app y en la notificación (`TrackCover.kt`).
+- Cada canción guarda la suya debajo (`ownArt`) y la recupera si sale del álbum o el álbum se elimina.
+- Se aplica al guardar un álbum, al sincronizar y al abrir la app.
+
+**Voz: instrucciones de todos los días** (`VoiceIntentParser.ts`)
+- Volumen: «súbele», «baja un poco el volumen», «más fuerte», «volumen al 30», «volumen al máximo» (`VolumeSteps.kt`, muestra el control de Android).
+- Nuevas: «repite esta canción» / «desde el principio», «quita de favoritos», «sígale», «pasa la canción», «de quién es esta», «dame like», «sorpréndeme».
+- «Pon la playlist de rock», si no es tuya, ya busca esa música en el catálogo en vez de no entender.
+- El reconocedor espera 1.3 s de silencio (antes 0.9) para no cortarte a media frase.
+
+**Voz: deja de confundir artistas** (`voiceCatalogue.ts`, `voicePhonetics.ts`)
+- Spotify dejó de mandar `popularity` (llega vacío): el lugar en su búsqueda hace de popularidad (`catalogueRank`), así que nombres cortos y conocidos (AC/DC, Muse, Queen, Korn) ya no parecen desconocidos.
+- El nombre exacto que dijiste gana sobre el que solo suena parecido, aunque el parecido esté en tu biblioteca.
+- Dos arreglos del comparador fonético, salidos de pruebas reales en el teléfono:
+  - unir dos palabras en una solo cuenta si no hay otra evidencia y suena casi igual («miss suites» sí es Misfits; «ac dc» no es «CatDog»);
+  - el esqueleto de consonantes solo compara palabras de largo parecido («ac dc» ya no es «Canción Acuática»).
+- Si no está seguro, ofrece opciones en vez de poner cualquier cosa.
+
+**«Ok MURMUR»: lo dice cualquiera, pero solo esa frase** (`WakePhrase.kt`, `WakeCheck.kt`, `WakeDetector.kt`)
+- **«Solo mi voz» viene apagado** y los perfiles de antes vuelven apagados: antes podía quedar encendido sin que se notara y MURMUR ignoraba a cualquiera que no fueras tú. Enciéndelo solo si eso es lo que quieres.
+- La segunda comprobación ya no mira una sola transcripción: revisa las diez mejores del modelo y además pone la frase a competir contra una lista de parecidos («okay mamá», «murmullo», «Mauro», «Marmolejo»). Medido en el teléfono con voces grabadas: de 88 a 171 confirmaciones de las 177 que el detector alcanza, sin una sola activación falsa en 160 frases trampa.
+- La frase es estricta: «murmura», «murmuro», «mormón» y «mur mur» sí; «murmullo», «murmuran», «Mauro» o «ok mamá» no.
+- Voz lejana: el micrófono sube las voces bajas antes de decodificarlas, baja de golpe cuando alguien habla cerca (para no saturar) y el umbral de ruido es más bajo.
+- `WakeDetector.kt` separa la escucha del micrófono, así se puede medir sin hablar: `WakeBenchReceiver` (solo en versiones de prueba) graba «Ok MURMUR» con todas las voces del teléfono y se las reproduce de cerca, de lejos, muy lejos y con ruido.
+
+**Probado en el teléfono del dueño (26 nov 2026):** biblioteca restaurada (2 353 canciones, 40 playlists), carátulas de álbum aplicadas a 167 canciones al arrancar, menú de álbum y hoja de canción revisados en capturas reales, «súbele al volumen», «quita de favoritos», «pon muse», «pon queen», «pon algo de enjambre», «pon bailarina de miranda» y «pon ac dc» (ofrece opciones, ya no inventa).
+
+**Falta probar con voz real:** «Ok MURMUR» dicho por ti y por otra persona, y el panel de voz.
+

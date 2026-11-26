@@ -38,7 +38,9 @@ export function MusicDirectory({
   onAlbum,
   onPlay,
   onBack,
+  onCreateAlbum,
 }: {
+  onCreateAlbum?: () => void;
   artist?: string;
   mode?: "artists" | "albums";
   /** The songs of the library. */
@@ -200,6 +202,9 @@ export function MusicDirectory({
                 ? countLine(shownAlbums.items.length, albumList.length, shownAlbums.fuzzy, "álbum", "álbumes")
                 : `Ningún álbum coincide con «${text}».`}
             </p>
+          )}
+          {onCreateAlbum && (
+            <button className="button secondary full" onClick={onCreateAlbum}>Crear álbum</button>
           )}
           <div className="directory-grid">{shownAlbums.items.slice(0, visible).map(albumButton)}</div>
           {more(shownAlbums.items.length)}

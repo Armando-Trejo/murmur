@@ -45,8 +45,8 @@ object VoiceHints {
             // Words appear in the voice panel while they are being said.
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             // Let people pause mid-sentence ("ponme… la de… Bailarina") without being cut off.
-            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 900L)
-            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 700L)
+            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1300L)
+            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
         if (Build.VERSION.SDK_INT >= 33) intent.putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, ArrayList(biasing(load(context))))
         return intent
     }

@@ -58,6 +58,17 @@ class LocalIntentPlugin : Plugin() {
         else call?.reject(result.data?.getStringExtra("voice_error") ?: "Escucha cancelada.", "VOICE_CAPTURE_FAILED")
     }
     /** Artist and playlist names the speech recognizer should expect (Android 13+ biasing). */
+    /** "Súbele", "bájale", "volumen al 50": the media volume, showing Android's own slider. */
+    @PluginMethod fun adjustVolume(call: PluginCall) {
+        val audio = context.getSystemService(android.media.AudioManager::class.java) ?: return call.reject("No se pudo cambiar el volumen.")
+        val stream = android.media.AudioManager.STREAM_MUSIC
+        val max = audio.getStreamMaxVolume(stream)
+        val target = VolumeSteps.target(audio.getStreamVolume(stream), max, call.getString("direction"), call.getInt("percent"))
+        try {
+            audio.setStreamVolume(stream, target, android.media.AudioManager.FLAG_SHOW_UI)
+        } catch (_: SecurityException) { return call.reject("Android no permitió cambiar el volumen (modo No molestar).") }
+        call.resolve(JSObject().put("percent", VolumeSteps.percent(audio.getStreamVolume(stream), max)))
+    }
     @PluginMethod fun setVoiceHints(call: PluginCall) {
         val array = call.getArray("hints") ?: JSArray()
         VoiceHints.save(context, (0 until minOf(array.length(), VoiceHints.MAX_SAVED)).mapNotNull { runCatching { array.getString(it).take(60) }.getOrNull() })

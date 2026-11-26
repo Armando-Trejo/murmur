@@ -418,7 +418,7 @@ class HybridMediaService : MediaSessionService() {
         try { enhancer = LoudnessEnhancer(id).apply { setTargetGain(gain); enabled = true } } catch (_: Exception) { }
     }
     private fun item(url: String, data: JSONObject, mime: String? = null) = MediaItem.Builder().setUri(url).setMimeType(mime).setMediaId(data.optString("id"))
-        .setCustomCacheKey(MediaCache.key(url, data.optString("videoId"))).setMediaMetadata(MediaMetadata.Builder().setTitle(data.optString("title")).setArtist(data.optString("artist")).setArtworkUri(data.optString("artworkUrl").takeIf { it.startsWith("https://") }?.let { android.net.Uri.parse(YouTubeArtwork.hd(it, 1080)) }).build()).build()
+        .setCustomCacheKey(MediaCache.key(url, data.optString("videoId"))).setMediaMetadata(MediaMetadata.Builder().setTitle(data.optString("title")).setArtist(data.optString("artist")).setCover(data).build()).build()
     fun play(url: String, data: JSONObject) = playSources(listOf(PlaybackSource(url)), data)
     private fun sourcesFor(data:JSONObject):List<PlaybackSource> {
         val local=data.optString("offlinePath")

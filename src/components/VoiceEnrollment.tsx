@@ -83,8 +83,8 @@ export function VoiceMatchSetting({ notify }: { notify: Notify }) {
           Solo mi voz
           <small>
             {enrolled
-              ? "MURMUR reconoce tu voz y no responde a otras personas ni a la tele."
-              : "Entrena tu voz en unos segundos y MURMUR no responderá a otras personas ni a la tele."}{" "}
+              ? "Apagado, cualquiera puede decir «Ok MURMUR». Enciéndelo solo si quieres que ignore a todos menos a ti."
+              : "Apagado, cualquiera puede decir «Ok MURMUR». Si lo enciendes, ignorará a todos menos a ti."}{" "}
             Tu huella de voz se queda en este teléfono.
           </small>
         </span>

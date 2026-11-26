@@ -491,11 +491,12 @@ async function cachedMix(now: Date) {
 }
 
 async function build(now: Date, { size = 25, random = Math.random }: MomentMixOptions): Promise<MomentMixResult> {
-  const [history, library] = await Promise.all([db.history.toArray(), db.tracks.toArray()]);
+  const [history, stored] = await Promise.all([db.history.toArray(), db.tracks.toArray()]);
+  const library = stored.filter((t) => !t.deleted);
   const profile = momentProfile(history, library, now);
   const songs = profile.basis === "taste" ? await withMood(profile.songs, profile.moment.mood) : profile.songs;
   const yours = pickYours(songs, Math.round(size * YOURS_SHARE), { artists: profile.artists, random });
-  const exclude = new Set([...profile.recent, ...profile.pool, ...yours.map(songKey)]);
+  const exclude = new Set([...profile.recent, ...profile.pool, ...yours.map(songKey), ...stored.filter((t) => t.deleted).map(songKey)]);
   const wanted = size - yours.length;
   const discoveries = await discover(profile, yours, wanted, exclude, random);
   let tracks = spaceArtists(interleave(yours, discoveries));

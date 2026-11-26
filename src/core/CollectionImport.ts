@@ -1,5 +1,6 @@
 import { Auth, isNative } from "../native";
 import { addedStamp, db } from "./db";
+import { applyAlbumCover, forgetDeleted, mergeSyncedPlaylist, mergeSyncedTrack } from "./libraryEdit";
 import { fetchSpotifyPages, unwrapSpotifyTrack } from "./SpotifyLibrary";
 import type { Playlist, QueueItem } from "./types";
 export function parseCollectionLink(input:string){
@@ -39,17 +40,32 @@ export async function readCollectionLink(input:string, personalized=false){
  }
  if(!Array.isArray(items))throw Error("El proveedor no entregó las canciones de la colección.");
  if(!items.length)throw Error("La colección está vacía o el proveedor no permitió leer sus canciones. No se reemplazó tu biblioteca.");
- if(link.kind==="album")items=items.map(t=>({...t,album:title,albumId:link.id,artworkUrl:t.artworkUrl||artworkUrl}));
+ // An album's cover is the cover of its songs, whatever thumbnail each one came with.
+ if(link.kind==="album"){artworkUrl=artworkUrl||items.find(t=>t.artworkUrl)?.artworkUrl;items=items.map(t=>({...t,album:title,albumId:link.id,artworkUrl:artworkUrl||t.artworkUrl}));}
  const playlist:Playlist={id:link.source==="spotify"?(link.kind==="album"?"sp:album:":"")+link.id:"ytpl:"+(link.id.startsWith("MPREb")?link.id:"VL"+link.id),title,kind:link.kind==="album"?"album":"playlist",source:link.source,artworkUrl,trackIds:items.map(t=>t.id),...Object.fromEntries(Object.entries(details).filter(([,v])=>typeof v==="string"&&v))};
  return { playlist, items };
 }
+/**
+ * Saves a playlist or an album the owner chose. An album goes to «Álbumes» without liking its songs:
+ * each one is liked on its own.
+ */
 export async function saveCollection({playlist, items}: Awaited<ReturnType<typeof readCollectionLink>>){
  const now=Date.now();
+ const album=playlist.kind==="album";
+ await forgetDeleted(playlist.id);
+ let stored=playlist;
  await db.transaction("rw",db.tracks,db.playlists,async()=>{
-  for(const [index,track] of items.entries()){const existing=await db.tracks.get(track.id);await db.tracks.put({...existing,...track,tags:[...new Set([...(existing?.tags||[]),...track.tags])],saved:true,offlinePath:existing?.offlinePath,addedAt:addedStamp(existing,now-index)})}
-  await db.playlists.put(playlist);
+  for(const [index,track] of items.entries()){
+   const existing=await db.tracks.get(track.id);
+   const saved=album?!!existing&&!existing.deleted&&existing.saved!==false:true;
+   const merged=mergeSyncedTrack(existing,{...track,saved});
+   await db.tracks.put({...merged,saved:album?saved:merged.saved,deleted:undefined,addedAt:album?existing?.addedAt:addedStamp(existing,now-index)});
+  }
+  stored=mergeSyncedPlaylist(await db.playlists.get(playlist.id),playlist)!;
+  await db.playlists.put(stored);
  });
- return playlist;
+ if(album)await applyAlbumCover(stored.id,true);
+ return stored;
 }
 
 export async function importCollectionLink(input:string){

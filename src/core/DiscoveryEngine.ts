@@ -188,6 +188,7 @@ export async function searchAll(
   if (!isNative)
     return (await db.tracks.toArray()).filter(
       (t) =>
+        !t.deleted &&
         normalize(t.title + " " + t.artist).includes(normalize(query)) &&
         (provider === "all" || provider === t.source),
     );

@@ -51,6 +51,10 @@ import {
   ListMusic,
   X,
   Heart,
+  HeartOff,
+  ListX,
+  Pencil,
+  Trash2,
   Radio,
   ArrowUpRight,
   Headphones,
@@ -125,6 +129,11 @@ import { magicPicks } from "./core/magicShuffle";
 import { useFitCover } from "./core/useFitCover";
 import { normalize } from "./core/FanUploadParser";
 import { CoverEditor } from "./components/CoverEditor";
+import { LibraryEditor, type EditorTarget } from "./components/LibraryEditor";
+import {
+  addSongs, applyAllAlbumCovers, editCollection, isAutoList, isLiked, likeSong, onSongsChanged,
+  removeSongs, setCover, unlikeSong,
+} from "./core/libraryEdit";
 import { uniqueSongs } from "./core/dedupe";
 import { SmartDownloadsSetting } from "./components/SmartDownloadsSetting";
 import { runSmartDownloads } from "./core/smartDownloads";
@@ -380,7 +389,27 @@ export default function App() {
   useEffect(() => {
     if (sheetOpen) sheetThrown.current = false;
   }, [sheetOpen]);
-  const allTracks = useLiveQuery(() => db.tracks.toArray(), [], []);
+  const storedTracks = useLiveQuery(() => db.tracks.toArray(), [], []);
+  const allTracks = useMemo(() => storedTracks.filter((t) => !t.deleted), [storedTracks]);
+  const likedIds = useMemo(() => new Set(allTracks.filter(isLiked).map((t) => t.id)), [allTracks]);
+  // Create, edit, add songs and confirm deletions of the library.
+  const [editor, setEditor] = useState<EditorTarget>();
+  // The queue follows cover and name changes; every album's songs carry its cover.
+  useEffect(() => {
+    const off = onSongsChanged((changed) => {
+      const live = player.getSnapshot();
+      const next = new Map(changed.map((t) => [t.id, t]));
+      if (!live.queue.some((t) => next.has(t.id))) return;
+      player.update({
+        queue: live.queue.map((t) => {
+          const c = next.get(t.id);
+          return c ? { ...t, title: c.title, artist: c.artist, album: c.album, artworkUrl: c.artworkUrl, customArtwork: c.customArtwork, artworkFrame: c.artworkFrame } : t;
+        }),
+      });
+    });
+    void applyAllAlbumCovers().catch(() => {});
+    return () => { off(); };
+  }, []);
   const weekSeconds = useLiveQuery(async () => {
     const since = new Date();
     since.setHours(0, 0, 0, 0);
@@ -447,7 +476,11 @@ export default function App() {
   const collection = feedCollection && feedCollection.link === feedLink &&
     feedCollection.revision === status.youtubeRevision ? feedCollection : undefined;
   const activePlaylist = collection?.data?.playlist ?? playlists.find((p) => p.id === nav.route.playlistId);
-  const displayedPlaylistItems = feedLink ? collection?.data?.items ?? [] : playlistItems;
+  // Cover, name or like changes show at once in the open collection.
+  const displayedPlaylistItems = useMemo(
+    () => (feedLink ? collection?.data?.items ?? [] : playlistItems.map((t) => trackLookup.get(t.id) ?? t)),
+    [feedLink, collection?.data, playlistItems, trackLookup],
+  );
 
   useEffect(() => {
     if (!feedLink) return;
@@ -467,9 +500,12 @@ export default function App() {
     playlist
       ? nav.push({ view: "library", playlistId: playlist.id })
       : nav.close("playlistId");
+  const [playlistRevision, setPlaylistRevision] = useState(0);
+  const overrideCount = useLiveQuery(() => db.playlist_overrides.count(), [], 0);
+  useEffect(() => setPlaylistRevision((n) => n + 1), [overrideCount]);
+  useEffect(() => setPlaylistItems([]), [activePlaylist?.id]);
   useEffect(() => {
     let live = true;
-    setPlaylistItems([]);
     if (activePlaylist && !feedLink)
       void playlistTracks(activePlaylist)
         .then((items) => {
@@ -485,7 +521,7 @@ export default function App() {
     return () => {
       live = false;
     };
-  }, [activePlaylist?.id, activePlaylist?.trackIds.join("|"), feedLink]);
+  }, [activePlaylist?.id, activePlaylist?.trackIds.join("|"), activePlaylist?.removedIds?.join("|"), playlistRevision, feedLink]);
   const history = useLiveQuery(
     () => db.history.orderBy("at").reverse().limit(8).toArray(),
     [],
@@ -646,8 +682,22 @@ export default function App() {
       setBusy("");
     }
   };
+  const unlike = async (track: QueueItem) => {
+    await unlikeSong(track.id);
+    haptic("confirm");
+    notify("Quitada de Guardadas", "info", { label: "Deshacer", run: () => void guard(() => likeSong(track)) });
+  };
+  const toggleLike = (track: QueueItem) => (likedIds.has(track.id) ? unlike(track) : save(track));
+  const removeFromCollection = async (playlist: Playlist, track: QueueItem) => {
+    const undo = await removeSongs(playlist.id, [track.id]);
+    haptic("confirm");
+    notify(playlist.kind === "album" ? "Quitada del álbum" : "Quitada de la playlist", "info", {
+      label: "Deshacer",
+      run: () => void guard(undo),
+    });
+  };
   const save = async (track: QueueItem) => {
-    await saveTrack(track);
+    await likeSong(track);
     notify("Canción guardada en tu biblioteca local.", "success");
     if (track.source === "spotify" && status.spotify) {
       try {
@@ -847,6 +897,13 @@ export default function App() {
     );
     return () => clearTimeout(t);
   }, [toast]);
+  /** Android's back closes the library forms and the cover editor before leaving the page. */
+  const closeLibrarySheet = () => {
+    if (!editor && !coverTarget) return false;
+    setEditor(undefined);
+    setCoverTarget(undefined);
+    return true;
+  };
   const latestNative = useRef({
     nav,
     tab,
@@ -855,6 +912,7 @@ export default function App() {
     setShared,
     voiceCommand,
     runMix,
+    closeLibrarySheet,
   });
   latestNative.current = {
     nav,
@@ -864,6 +922,7 @@ export default function App() {
     setShared,
     voiceCommand,
     runMix,
+    closeLibrarySheet,
   };
   useEffect(() => {
     let cancelled = false;
@@ -959,6 +1018,7 @@ export default function App() {
           }),
       );
       void CapacitorApp.addListener("backButton", () => {
+        if (latestNative.current.closeLibrarySheet()) return;
         if (!latestNative.current.nav.back()) {
           if (latestNative.current.tab !== "home")
             latestNative.current.setTab("home");
@@ -1187,14 +1247,8 @@ export default function App() {
   );
   const saveCover = async (change: CustomArtwork) => {
     if (!coverTarget) return;
-    const table = coverTarget.kind === "playlist" ? db.playlists : db.tracks;
-    await (table as typeof db.tracks).update(coverTarget.id, { customArtwork: change.customArtwork, artworkFrame: change.artworkFrame } as never);
-    // The song may be in the queue right now: show the new cover there too.
-    if (coverTarget.kind === "track") {
-      const live = player.getSnapshot();
-      if (live.queue.some((t) => t.id === coverTarget.id))
-        player.update({ queue: live.queue.map((t) => t.id === coverTarget.id ? { ...t, ...change } : t) });
-    }
+    // On an album it reaches every one of its songs; the queue follows (onSongsChanged).
+    await setCover(coverTarget.kind, coverTarget.id, change);
   };
   useEffect(() => setCollectionQuery(""), [nav.route.playlistId]);
   const collectionMatches = useMemo(() => {
@@ -1252,11 +1306,12 @@ export default function App() {
   );
   const categorySongPosition = useMemo(() => new Map(categorySongs.map((t, i) => [t.id, i])), [categorySongs]);
   const librarySongPosition = useMemo(() => new Map(librarySongs.map((t, i) => [t.id, i])), [librarySongs]);
+  const ownPlaylists = playlists.filter((p) => p.kind !== "album").length;
   const libraryPlaylists = useMemo(
     () =>
       libraryHome && libraryFilter === "Playlists"
         ? filterItems(
-            playlistIndex(sortPlaylists(playlists, playlistSort, { stats: listening, opened: openedPlaylists })),
+            playlistIndex(sortPlaylists(playlists.filter((p) => p.kind !== "album"), playlistSort, { stats: listening, opened: openedPlaylists })),
             categorySearchText,
           )
         : { items: [], fuzzy: false },
@@ -1350,14 +1405,17 @@ export default function App() {
   ];
   const libraryMenu: MenuEntry[] = [
     { label: "Crear playlist híbrida", icon: <Plus size={18} />, onSelect: () => setNewPlaylist(true) },
+    { label: "Crear álbum", icon: <Disc3 size={18} />, onSelect: () => setEditor({ type: "new", kind: "album" }) },
     { label: "Importar desde un enlace", icon: <LinkIcon size={18} />, hint: "Playlists, mixes y álbumes", onSelect: () => setImportOpen(true) },
   ];
   const setCollectionKind = (kind: "playlist" | "album") => {
     if (!activePlaylist) return;
-    void db.playlists.update(activePlaylist.id, { kind })
+    void editCollection(activePlaylist.id, { title: activePlaylist.title, artist: activePlaylist.artist, year: activePlaylist.year, kind })
       .then(() => notify("Etiqueta de colección actualizada", "success"))
       .catch(() => notify("No se pudo cambiar la etiqueta", "error"));
   };
+  const collectionNoun = activePlaylist?.kind === "album" ? "álbum" : "playlist";
+  const likedInCollection = displayedPlaylistItems.filter((t) => likedIds.has(t.id)).length;
   const collectionMenu: MenuEntry[] = activePlaylist
     ? [
         { label: "Añadir todo a la cola", icon: <ListPlus size={18} />, disabled: !displayedPlaylistItems.length,
@@ -1366,9 +1424,18 @@ export default function App() {
             haptic("confirm");
             notify(`${displayedPlaylistItems.length} canciones añadidas a la cola`);
           } },
-        ...(!feedLink
-          ? ([{ label: "Cambiar carátula", icon: <ImageIcon size={18} />, hint: "Subir, recortar o ajustar",
+        ...(!feedLink && !isAutoList(activePlaylist.id)
+          ? ([{ label: "Añadir canciones", icon: <Plus size={18} />, onSelect: () => setEditor({ type: "add", id: activePlaylist.id }) },
+              { label: "Editar " + collectionNoun, icon: <Pencil size={18} />, hint: activePlaylist.kind === "album" ? "Nombre, artista y año" : "Nombre",
+                onSelect: () => setEditor({ type: "collection", id: activePlaylist.id }) },
+              { label: "Cambiar carátula", icon: <ImageIcon size={18} />,
+                hint: activePlaylist.kind === "album" ? "Se aplica a todas sus canciones" : "Subir, recortar o ajustar",
                 onSelect: () => setCoverTarget({ kind: "playlist", id: activePlaylist.id }) },
+              ...(likedInCollection
+                ? [{ label: "Quitar sus canciones de Guardadas", icon: <HeartOff size={18} />, hint: `${likedInCollection} en Guardadas`,
+                    onSelect: () => setEditor({ type: "unlike", id: activePlaylist.id, count: likedInCollection }) }]
+                : []),
+              { label: "Eliminar " + collectionNoun, icon: <Trash2 size={18} />, onSelect: () => setEditor({ type: "delete-collection", id: activePlaylist.id }) },
               "divider", { heading: "Mostrar como" },
               { label: "Playlist", checked: activePlaylist.kind !== "album", onSelect: () => setCollectionKind("playlist") },
               { label: "Álbum", checked: activePlaylist.kind === "album", onSelect: () => setCollectionKind("album") }] as MenuEntry[])
@@ -2016,7 +2083,7 @@ export default function App() {
               onArtist={(name, id) => nav.push({ view: "library", artist: name, ...(id ? { artistId: id } : {}) })}
               onSearch={value => startSearch(value, "all")}
               renderSong={(track, index, list) => songRow(track, index, list)}
-            /> : nav.route.directory ? <MusicDirectory artist={undefined} mode={nav.route.directory === "insights" ? undefined : nav.route.directory} tracks={tracks} playlists={playlists} albums={libraryAlbums} artists={libraryArtists} stats={listening} ranks={addedRank} onArtist={artist=>nav.push({view:"library",artist})} onAlbum={p=>nav.push({view:"library",playlistId:p.id})} onPlay={(items,index)=>void player.playList(items,index)} onBack={()=>nav.push({view:"library"})} /> : nav.route.playlistId && !activePlaylist ? <section className="empty-state">
+            /> : nav.route.directory ? <MusicDirectory onCreateAlbum={() => setEditor({ type: "new", kind: "album" })} artist={undefined} mode={nav.route.directory === "insights" ? undefined : nav.route.directory} tracks={tracks} playlists={playlists} albums={libraryAlbums} artists={libraryArtists} stats={listening} ranks={addedRank} onArtist={artist=>nav.push({view:"library",artist})} onAlbum={p=>nav.push({view:"library",playlistId:p.id})} onPlay={(items,index)=>void player.playList(items,index)} onBack={()=>nav.push({view:"library"})} /> : nav.route.playlistId && !activePlaylist ? <section className="empty-state">
               {collection?.error ? <>
                 <p role="alert">{collection.error}</p>
                 <button className="button secondary" onClick={() => setCollectionRetry(value => value + 1)}>Reintentar</button>
@@ -2096,7 +2163,7 @@ export default function App() {
                             const saved = await saveCollection(data);
                             haptic("confirm");
                             nav.push({ view: "library", playlistId: saved.id }, true);
-                            notify("Colección guardada", "success");
+                            notify(saved.kind === "album" ? "Álbum guardado en Álbumes. Marca con ♥ las canciones que quieras en Guardadas." : "Playlist guardada", "success");
                           });
                         }}
                       >
@@ -2149,8 +2216,13 @@ export default function App() {
                 {!displayedPlaylistItems.length && (
                   <div className="empty-state">
                     <ListMusic />
-                    <h2>{busy ? "Preparando tu mix…" : "Esta playlist aún no tiene canciones locales"}</h2>
-                    <p>Añade canciones desde el menú de búsqueda.</p>
+                    <h2>{busy ? "Preparando tu mix…" : isAlbum ? "Este álbum aún no tiene canciones" : "Esta playlist aún no tiene canciones"}</h2>
+                    <p>Añade canciones de tu biblioteca, o desde el menú de cualquier canción que busques.</p>
+                    {!feedLink && !isAutoList(activePlaylist.id) && (
+                      <button className="button primary" onClick={() => setEditor({ type: "add", id: activePlaylist.id })}>
+                        <Plus size={18} /> Añadir canciones
+                      </button>
+                    )}
                     <button
                       className="button secondary"
                       onClick={() => setTab("search")}
@@ -2213,9 +2285,9 @@ export default function App() {
                     </div>
                     {filter === "Playlists" ? (
                       <>
-                        {playlists.length > 0 && (
+                        {ownPlaylists > 0 && (
                           <LibraryToolbar
-                            count={`${playlists.length.toLocaleString("es")} ${playlists.length === 1 ? "playlist" : "playlists"}`}
+                            count={`${ownPlaylists.toLocaleString("es")} ${ownPlaylists === 1 ? "playlist" : "playlists"}`}
                             query={categoryQuery}
                             onQuery={setCategoryQuery}
                             placeholder="Buscar playlists"
@@ -2229,7 +2301,7 @@ export default function App() {
                               ? `Ninguna playlist coincide con «${categorySearchText}».`
                               : libraryPlaylists.fuzzy
                                 ? `Sin coincidencias exactas · ${libraryPlaylists.items.length} parecidas a «${categorySearchText}»`
-                                : `${libraryPlaylists.items.length} de ${playlists.length} playlists`}
+                                : `${libraryPlaylists.items.length} de ${ownPlaylists} playlists`}
                           </p>
                         )}
                         {libraryPlaylists.items.map((p) => (
@@ -2633,14 +2705,15 @@ export default function App() {
             </button>
             <button
               className="icon-button"
-              aria-label="Guardar canción"
+              aria-label={likedIds.has(current.id) ? "Quitar de Guardadas" : "Guardar canción"}
+              aria-pressed={likedIds.has(current.id)}
               onClick={() => {
                 haptic("confirm");
-                void guard(() => save(current));
+                void guard(() => toggleLike(current));
               }}
             >
-              <MotionGlyph state={tracks.some(t => t.id === current.id) ? "saved" : "save"}>
-                {tracks.some(t => t.id === current.id) ? <Check size={22} className="highlight" /> : <Plus size={22} />}
+              <MotionGlyph state={likedIds.has(current.id) ? "saved" : "save"}>
+                <Heart size={22} className={likedIds.has(current.id) ? "highlight" : ""} fill={likedIds.has(current.id) ? "currentColor" : "none"} />
               </MotionGlyph>
             </button>
             <button
@@ -2757,7 +2830,7 @@ export default function App() {
                 {/* Double-tap saves (the same save as "Guardar canción actual"); saved already: only the heart. */}
                 <CoverDoubleTap
                   onDoubleTap={() => {
-                    if (!allTracks.some((t) => t.id === current.id && t.saved !== false))
+                    if (!likedIds.has(current.id))
                       void guard(() => save(current));
                   }}
                 >
@@ -3094,6 +3167,18 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+      <AnimatePresence>
+        {editor && (
+          <LibraryEditor
+            key={editor.type}
+            target={editor}
+            onClose={() => setEditor(undefined)}
+            notify={notify}
+            onCreated={(p) => nav.push({ view: "library", playlistId: p.id })}
+            onDeletedCollection={() => nav.push({ view: "library" }, true)}
+          />
+        )}
+      </AnimatePresence>
       <AnimatePresence custom={sheetThrown.current}>
         {sheetOpen && (
           <motion.div
@@ -3253,7 +3338,7 @@ export default function App() {
                         await db.playlists.add(p);
                         setPlaylistName("");
                         if (playlistPicker) {
-                          await addToPlaylist(p.id, playlistPicker);
+                          await addSongs(p.id, [playlistPicker]);
                           nav.close("sheet");
                           notify("Canción añadida a " + p.title);
                         } else {
@@ -3268,30 +3353,10 @@ export default function App() {
                 </>
               ) : playlistPicker ? (
                 <>
-                  <h2>Guardar en playlist</h2>
+                  <h2>Añadir a una playlist o álbum</h2>
                   <p className="help-copy">
-                    Las playlists importadas conservan sus originales. Las
-                    nuevas canciones viven en tu teléfono.
+                    Añadirla no la marca en Guardadas. Lo que cambies aquí vive en tu teléfono.
                   </p>
-                  {playlists.map((p) => (
-                    <button
-                      className="sheet-action"
-                      key={p.id}
-                      onClick={() =>
-                        void guard(async () => {
-                          await addToPlaylist(p.id, playlistPicker);
-                          setPlaylistPicker(undefined);
-                          notify("Añadida a " + p.title);
-                          if (activePlaylist?.id === p.id)
-                            setPlaylistItems(await playlistTracks(p));
-                        })
-                      }
-                    >
-                      <ListMusic size={20} />
-                      {p.title}
-                      <Badge source={p.source} />
-                    </button>
-                  ))}
                   <button
                     className="sheet-action"
                     onClick={() => setNewPlaylist(true)}
@@ -3299,6 +3364,24 @@ export default function App() {
                     <Plus size={20} />
                     Crear playlist híbrida
                   </button>
+                  {[...playlists].filter((p) => !isAutoList(p.id)).sort((a, b) => Number(a.kind === "album") - Number(b.kind === "album")).map((p) => (
+                    <button
+                      className="sheet-action"
+                      key={p.id}
+                      onClick={() =>
+                        void guard(async () => {
+                          await addSongs(p.id, [playlistPicker]);
+                          setPlaylistPicker(undefined);
+                          notify("Añadida a " + p.title);
+                          setPlaylistRevision((n) => n + 1);
+                        })
+                      }
+                    >
+                      {p.kind === "album" ? <Disc3 size={20} /> : <ListMusic size={20} />}
+                      <span className="sheet-action-title">{p.title}</span>
+                      <small>{p.kind === "album" ? "Álbum" : "Playlist"}</small>
+                    </button>
+                  ))}
                 </>
               ) : (
                 <>
@@ -3354,7 +3437,7 @@ export default function App() {
                     }}
                   >
                     <Plus size={20} />
-                    Guardar en Playlist Híbrida
+                    Añadir a playlist o álbum
                   </button>
                   <button
                     className="sheet-action"
@@ -3362,12 +3445,29 @@ export default function App() {
                       const track = (actionTrack || shared)!;
                       setActionTrack(undefined);
                       setShared(undefined);
-                      void guard(() => save(track));
+                      void guard(() => toggleLike(track));
                     }}
                   >
-                    <Heart size={20} />
-                    Guardar en mi biblioteca
+                    {likedIds.has((actionTrack || shared)?.id ?? "") ? (
+                      <><HeartOff size={20} />Quitar de Guardadas</>
+                    ) : (
+                      <><Heart size={20} />Guardar en mis Me gusta</>
+                    )}
                   </button>
+                  {actionTrack && activePlaylist && !feedLink && !isAutoList(activePlaylist.id) &&
+                    displayedPlaylistItems.some((t) => t.id === actionTrack.id) && (
+                    <button
+                      className="sheet-action"
+                      onClick={() => {
+                        const track = actionTrack;
+                        setActionTrack(undefined);
+                        void guard(() => removeFromCollection(activePlaylist, track));
+                      }}
+                    >
+                      <ListX size={20} />
+                      {activePlaylist.kind === "album" ? "Quitar de este álbum" : "Quitar de esta playlist"}
+                    </button>
+                  )}
                   <button className="sheet-action" onClick={()=>nav.push({view:"library",artist:(actionTrack||shared)!.artist.split(", ")[0]})}><Library size={20}/>Ver artista</button>
                   {(actionTrack||shared)?.album&&<button className="sheet-action" onClick={()=>void guard(()=>openTrackAlbum((actionTrack||shared)!))}><Library size={20}/>Ver álbum</button>}
                   {(actionTrack || shared)?.source === "youtube" && (
@@ -3414,6 +3514,30 @@ export default function App() {
                       >
                         <ShieldCheck size={20} />
                         Validar artista en MusicBrainz
+                      </button>
+                    </>
+                  )}
+                  {actionTrack && trackLookup.has(actionTrack.id) && (
+                    <>
+                      <button
+                        className="sheet-action"
+                        onClick={() => {
+                          setEditor({ type: "song", id: actionTrack.id });
+                          setActionTrack(undefined);
+                        }}
+                      >
+                        <Pencil size={20} />
+                        Editar datos de la canción
+                      </button>
+                      <button
+                        className="sheet-action danger"
+                        onClick={() => {
+                          setEditor({ type: "delete-song", id: actionTrack.id });
+                          setActionTrack(undefined);
+                        }}
+                      >
+                        <Trash2 size={20} />
+                        Eliminar de mi biblioteca
                       </button>
                     </>
                   )}

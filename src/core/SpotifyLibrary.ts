@@ -1,6 +1,7 @@
 import { Auth } from "../native";
 import { addedStamp, db } from "./db";
 import { spotifyTrack } from "./DiscoveryEngine";
+import { applyAllAlbumCovers, deletedPlaylists, mergeSyncedPlaylist, mergeSyncedTrack } from "./libraryEdit";
 import type { Playlist, QueueItem } from "./types";
 
 export interface SyncSummary {
@@ -66,19 +67,19 @@ export async function syncSpotifyLibrary(
   const importedIds = new Set<string>();
   async function commit(playlist: Playlist, items: QueueItem[]) {
     const now = Date.now();
+    if (playlist.id in (await deletedPlaylists())) return;
     await db.transaction("rw", [db.tracks, db.playlists], async () => {
       for (const [index, track] of items.entries()) {
         const existing = await db.tracks.get(track.id);
         await db.tracks.put({
-          ...existing,
-          ...track,
-          tags: [...new Set([...(existing?.tags || []), ...track.tags])],
+          ...mergeSyncedTrack(existing, track),
           // Liked songs arrive newest first: the first one gets the latest "added" date.
           addedAt: addedStamp(existing, now - index),
         });
         importedIds.add(track.id);
       }
-      await db.playlists.put(playlist);
+      const merged = mergeSyncedPlaylist(await db.playlists.get(playlist.id), playlist);
+      if (merged) await db.playlists.put(merged);
     });
   }
   onProgress("Importando tus Me Gusta…");
@@ -138,15 +139,13 @@ export async function syncSpotifyLibrary(
       const track = unwrapSpotifyTrack(item);
       if (!track) continue;
       const existing = await db.tracks.get(track.id);
-      await db.tracks.put({
-        ...existing,
-        ...track,
-        tags: [...new Set([...(existing?.tags || []), "top"])],
-      });
+      const merged = mergeSyncedTrack(existing, track);
+      await db.tracks.put({ ...merged, tags: [...new Set([...merged.tags, "top"])] });
     }
   } catch {
     result.topUnavailable = true;
   }
+  await applyAllAlbumCovers();
   result.tracks = importedIds.size;
   return result;
 }

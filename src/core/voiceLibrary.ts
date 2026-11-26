@@ -61,7 +61,7 @@ export function buildVoiceLibrary(tracks: QueueItem[], playlists: Playlist[] = [
   const artists = new Map<string, ArtistEntry>();
   const albums = new Map<string, AlbumEntry>();
   for (const item of tracks) {
-    if (!item?.title || !item.artist) continue;
+    if (!item?.title || !item.artist || item.deleted) continue;
     const line = artistLine(item.artist);
     const artistToks = tokens(line);
     entries.push({ kind: "track", item, titles: titleVariants(item.title).map((t) => tokens(t)), artist: artistToks, plays: plays[item.id] ?? 0 });

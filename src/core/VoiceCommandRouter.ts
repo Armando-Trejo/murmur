@@ -27,6 +27,8 @@ import {
 } from "./voiceLibrary";
 import { offerVoiceChoices } from "./voiceChoices";
 import { moodByKey, type Mood } from "./moods";
+import { unlikeSong } from "./libraryEdit";
+import { catalogueRank, exactName } from "./voiceCatalogue";
 
 async function playbackResult(action: () => Promise<unknown>, message: string, note = "") {
   await action();
@@ -184,6 +186,25 @@ async function run(intent: ReturnType<typeof parseVoiceIntent>, save: (track: Qu
     case "mix":
       if (!player.nextTrack) return "No hay otra canción en la cola";
       return playbackResult(() => player.mixNow(), "Mezclando");
+    case "unsave": {
+      const now = player.current;
+      if (!now) return "Primero reproduce una canción";
+      await unlikeSong(now.id);
+      return `Quité «${now.title}» de Guardadas`;
+    }
+    case "restart":
+      if (!player.current) return "Primero elige una canción";
+      await player.seek(0);
+      if (!player.getSnapshot().playing) await player.toggle();
+      return "Desde el principio";
+    case "volume": {
+      if (!isNative) return "El volumen se cambia en Android";
+      const { percent } = await Voice.adjustVolume(
+        typeof intent.change === "number" ? { percent: intent.change } : { direction: intent.change });
+      return `Volumen al ${percent} %`;
+    }
+    case "surprise":
+      return playSaved();
     case "save":
       if (player.current) {
         await save(player.current);
@@ -247,7 +268,7 @@ async function run(intent: ReturnType<typeof parseVoiceIntent>, save: (track: Qu
       // The catalogue knows moods far better than the library's few tags; tags are the offline backup.
       const fromCatalogue = await playVibeFromCatalogue(intent.query, intent.mood, intent.extra);
       if (!fromCatalogue.startsWith("No encontré")) return fromCatalogue;
-      const tracks = await db.tracks.toArray();
+      const tracks = (await db.tracks.toArray()).filter((t) => !t.deleted);
       if (!tracks.length) return fromCatalogue;
       const tags = [...new Set(tracks.flatMap((t) => t.tags))];
       let rankedTags: { text: string; score: number }[] = [];
@@ -545,9 +566,16 @@ async function catalogueOptions(queries: string[], alts: Alt[], want: Want, lib:
   const artists = new Map<string, { name: string; popularity?: number; source: "spotify" | "youtube" }>();
   const albums = new Map<string, AlbumResult>();
   for (const { data, youtube } of results) {
-    for (const t of [...(data?.tracks?.items ?? []).filter(Boolean).map(spotifyTrack), ...youtube]) if (!tracks.has(t.id)) tracks.set(t.id, t);
-    for (const a of (data?.artists?.items ?? []) as { name?: string; popularity?: number }[])
-      if (a?.name && !artists.has(normalize(a.name))) artists.set(normalize(a.name), { name: a.name, popularity: a.popularity, source: "spotify" });
+    // Spotify stopped sending popularity: its search order says what is well known.
+    const found = ((data?.tracks?.items ?? []).filter(Boolean).map(spotifyTrack) as QueueItem[])
+      .map((t, i) => ({ ...t, popularity: t.popularity ?? catalogueRank(i) }));
+    for (const t of [...found, ...youtube]) if (!tracks.has(t.id)) tracks.set(t.id, t);
+    for (const [i, a] of ((data?.artists?.items ?? []) as { name?: string; popularity?: number }[]).entries()) {
+      if (!a?.name) continue;
+      const popularity = a.popularity ?? catalogueRank(i);
+      const seen = artists.get(normalize(a.name));
+      if (!seen || (seen.popularity ?? 0) < popularity) artists.set(normalize(a.name), { name: a.name, popularity, source: "spotify" });
+    }
     for (const al of fromSpotify(data?.albums?.items ?? [])) albums.set(al.feedId, al);
     // Without Spotify, YouTube's song artists are the artist candidates (popular when several songs are theirs).
     if (!data)
@@ -557,9 +585,16 @@ async function catalogueOptions(queries: string[], alts: Alt[], want: Want, lib:
   for (const a of want === "song" ? [] : artists.values()) {
     const toks = tokens(a.name);
     let { score, alt } = best((t) => phraseScore(t, toks, 0.75));
+    // The very name that was said ("AC DC", "Muse", "Queen") is no guess, however short it is.
+    const exact = saids.find((s) => exactName(s.raw, a.name));
+    if (exact) {
+      score = Math.max(score, 0.97 - exact.behind) + (a.popularity ?? 0) / 5000;
+      alt = exact.alt;
+    }
     if (knowsArtist(lib, a.name)) score += 0.04;
-    // A short, little known name that merely sounds like the words is a guess, not an answer.
-    else if (toks.reduce((n, t) => n + t.key.length, 0) < 6 && (a.popularity ?? 0) < 40) score = Math.min(score, 0.58);
+    // Not the name that was said, short and not clearly popular: a guess ("ac dc" → "CatDog"), so
+    // it is offered among the choices instead of playing on its own.
+    else if (!exact && toks.reduce((n, t) => n + t.key.length, 0) <= 7 && (a.popularity ?? 0) < 70) score = Math.min(score, 0.58);
     if (strict && score < 0.88) continue;
     const sample = [...tracks.values()].find((t) => byArtist(t, a.name));
     out.push({ kind: "artist", score: Math.min(1, score), base: score, from: a.source, alt, label: a.name, key: "a:" + tokens(a.name).map((t) => t.key).join(" "), name: a.name, track: sample });
@@ -762,15 +797,18 @@ async function canonicalArtist(sounds: string[], queries = sounds): Promise<{ na
       const hit = matchLibrary(lib, q, "artist", 1)[0];
       if (hit?.kind === "artist" && (!best || hit.score > best.score)) best = { name: hit.name, score: hit.score, from: "library" };
     }
-  if (best && best.score >= 0.8) return best;
+  // Only a near-certain library name skips the catalogue: one that merely sounds alike must not win
+  // over the artist that was actually named.
+  if (best && best.score >= 0.93) return best;
   if (isNative) {
     const found = await Promise.all(queries.slice(0, 2).map((q) =>
       Auth.spotifyRequest({ path: "/search?type=artist&limit=5&q=" + encodeURIComponent(q) }).then((r) => (r.data?.artists?.items ?? []) as { name?: string }[]).catch(() => [])));
     found.forEach((items, i) => {
       for (const a of items) {
         if (!a?.name) continue;
-        const score = phraseScore(tokens(queries[i]), tokens(a.name), 0.75);
-        if (score >= 0.8 && (!best || score > best.score)) best = { name: a.name, score, from: "spotify" };
+        const score = exactName(queries[i], a.name) ? 1 : phraseScore(tokens(queries[i]), tokens(a.name), 0.75);
+        // The library keeps a small advantage: it is what the owner listens to.
+        if (score >= 0.8 && (!best || score > best.score + (best.from === "library" ? 0.03 : 0))) best = { name: a.name, score, from: "spotify" };
       }
     });
     if (best && best.score >= 0.8) return best;

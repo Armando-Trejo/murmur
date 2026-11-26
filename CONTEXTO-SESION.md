@@ -10,7 +10,12 @@ Léelo primero si continúas MURMUR en otra PC u otra sesión. El detalle técni
 - No escribir contraseñas en formularios. Las sesiones de YouTube Music y Spotify las inicia él en el teléfono.
 - No inventar resultados: lo probado en el teléfono se dice como probado, y lo demás como no verificado.
 
-## Estado actual: 2.18.0 (code 35)
+## Estado actual: 2.19.0 (code 36)
+La 2.19.0 trae la edición de la biblioteca (crear, renombrar, quitar y eliminar playlists, álbumes y canciones, sin que una sincronización lo deshaga), guardar un álbum sin llenar Guardadas, la carátula del álbum aplicada a sus canciones, instrucciones de voz de todos los días (volumen, repetir, quitar de favoritos) y una escucha que deja de confundir artistas.
+
+**Ojo con la firma:** el 26 nov 2026 el teléfono se pasó a la llave de prueba de la PC RAM (`78d2b623...`). Hubo que desinstalar y reinstalar, y volver a iniciar sesión en YouTube Music y Spotify. Los respaldos de ese momento están en `../respaldo-telefono-2.18.0/`. Para que la PC Maindsoft vuelva a instalar encima, hay que llevarle `C:\Users\RAM\.android\debug.keystore` por USB.
+
+### 2.18.0 (code 35)
 La 2.18.0 trae el panel de voz con ondas y la elección de una voz más natural para el presentador y las respuestas.
 
 ### 2.17.1 (code 34)
