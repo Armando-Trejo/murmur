@@ -7,12 +7,14 @@ import {
   LogOut,
   Copy,
   Headphones,
+  Check,
 } from "lucide-react";
 import { Auth, isNative, type ConnectionStatus } from "../native";
 import { syncSpotifyLibrary } from "../core/SpotifyLibrary";
 import { importYouTubeLibrary } from "../core/YouTubeLibrary";
 import { SPOTIFY_CLIENT_ID, SPOTIFY_REDIRECT_URI } from "../config";
-import { setSpotifyViaYouTube, spotifyViaYouTube } from "../core/spotifyBridge";
+import { setSpotifyViaYouTube, settleSpotifyRoute, spotifyViaYouTube } from "../core/spotifyBridge";
+import { SpotifySetup } from "./SpotifySetup";
 
 export type NoticeKind = "info" | "success" | "error";
 const redirect = SPOTIFY_REDIRECT_URI;
@@ -89,7 +91,7 @@ export function ConnectionsPanel({
                   ? "Biblioteca autorizada"
                   : status.spotifySession
                     ? "Sesión guardada · autorización pendiente"
-                    : clientReady ? "Sin conectar" : "Disponible pronto"}
+                    : "Sin conectar"}
             </p>
           </div>
           <span
@@ -100,8 +102,8 @@ export function ConnectionsPanel({
           />
         </div>
         <p className="connection-copy">
-          Trae tus Me gusta y tus playlists de Spotify. MURMUR las reproduce
-          por su cuenta: no necesitas abrir la app de Spotify.
+          Trae tus Me gusta y tus playlists de Spotify. Suenan dentro de MURMUR:
+          nunca necesitas abrir la app de Spotify.
         </p>
         {!status.spotify && status.spotifySession && (
           <p className="connection-notice">
@@ -109,11 +111,15 @@ export function ConnectionsPanel({
               "Guardar la sesión web no concede permisos para sincronizar tu biblioteca. Completa la autorización OAuth."}
           </p>
         )}
-        {!clientReady && (
-          <p className="connection-notice">
-            La conexión con Spotify todavía no está habilitada en esta versión. Mientras tanto
-            puedes buscar y escuchar cualquier canción, también las de Spotify.
-          </p>
+        {!status.spotify && !status.oauth && (
+          <SpotifySetup
+            clientId={clientId}
+            notify={notify}
+            onClientId={(value) => {
+              setClientId(value);
+              localStorage.setItem("murmur.spotify.clientId", value);
+            }}
+          />
         )}
         <div className="oauth-form">
           <button
@@ -182,7 +188,7 @@ export function ConnectionsPanel({
             </button>
           </div>
         )}
-        <div className="sync-actions" hidden={!clientReady}>
+        <div className="sync-actions" hidden={!status.spotify}>
           <button
             className="button secondary full"
             disabled={!!busy || !status.spotify}
@@ -207,13 +213,56 @@ export function ConnectionsPanel({
             </p>
           )}
         </div>
+        {status.spotify && (
+          <div className="spotify-route" role="radiogroup" aria-label="Cómo suena Spotify">
+            <span className="route-title">Cómo suena Spotify</span>
+            {([
+              ["spotify", "Desde Spotify", "Calidad y versión originales, dentro de MURMUR. Requiere Premium."],
+              ["youtube", "Versión de YouTube Music", "La misma grabación con el motor de MURMUR. Sin Premium."],
+            ] as const).map(([value, title, detail]) => {
+              const selected = value === "spotify" ? !viaMurmur && status.spotifyPlaybackMode === "web" : viaMurmur;
+              return (
+                <button
+                  key={value}
+                  role="radio"
+                  aria-checked={selected}
+                  className={"route-option" + (selected ? " selected" : "")}
+                  disabled={!!busy}
+                  onClick={() =>
+                    void run("route", async () => {
+                      settleSpotifyRoute();
+                      if (value === "youtube") {
+                        setSpotifyViaYouTube(true);
+                        setViaMurmur(true);
+                        notify("Spotify sonará con su versión de YouTube Music.", "success");
+                        return;
+                      }
+                      if (!status.spotifyWebAuthorized) {
+                        await Auth.oauthLogin({ clientId });
+                        notify("Acepta los permisos del reproductor en Spotify y vuelve a MURMUR.");
+                        return;
+                      }
+                      onStatus(await Auth.setSpotifyPlaybackMode({ mode: "web" }));
+                      setSpotifyViaYouTube(false);
+                      setViaMurmur(false);
+                      notify("Spotify sonará desde Spotify, dentro de MURMUR.", "success");
+                    })
+                  }
+                >
+                  <span className="route-dot" aria-hidden="true">{selected && <Check size={14} />}</span>
+                  <span><strong>{title}</strong><small>{detail}</small></span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         <details
           className="oauth-configuration spotify-advanced"
           open={configurationOpen}
           onToggle={(e) => setConfigurationOpen(e.currentTarget.open)}
         >
           <summary>Opciones avanzadas</summary>
-          <p className="help-copy">Solo si quieres usar los motores propios de Spotify o tu propia aplicación de Spotify for Developers. No hace falta para escuchar.</p>
+          <p className="help-copy">Otros motores de Spotify y tu llave de Spotify for Developers. No hace falta tocarlos para escuchar.</p>
         <div className="spotify-engine">
           <label htmlFor="spotify-playback-mode">Reproducción de Spotify</label>
           <select
@@ -225,6 +274,7 @@ export function ConnectionsPanel({
                 if (!isNative)
                   throw new Error("Selecciona el motor desde el APK Android.");
                 const murmur = event.target.value === "murmur";
+                settleSpotifyRoute();
                 setSpotifyViaYouTube(murmur);
                 setViaMurmur(murmur);
                 if (murmur) { notify("Spotify sonará con el motor de MURMUR.", "success"); return; }
@@ -238,10 +288,10 @@ export function ConnectionsPanel({
               })
             }
           >
-            <option value="murmur">MURMUR (recomendado)</option>
-            <option value="integrated">Integrado · Premium</option>
-            <option value="web">Integrado · Web</option>
-            <option value="connect">Spotify Connect</option>
+            <option value="web">Spotify dentro de MURMUR (recomendado con Premium)</option>
+            <option value="murmur">Versión de YouTube Music</option>
+            <option value="integrated">Motor librespot (experimental)</option>
+            <option value="connect">Spotify Connect (usa la app de Spotify)</option>
           </select>
           {viaMurmur ? (
             <p className="help-copy">

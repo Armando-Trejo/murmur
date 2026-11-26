@@ -6,7 +6,8 @@ const DISMISSED = "murmur.updateDismissed";
 /** At most one check every 12 h; GitHub allows 60 anonymous requests per hour, far above that. */
 export const UPDATE_EVERY_MS = 12 * 60 * 60 * 1000;
 
-export interface Release { version: string; url: string; notes: string }
+export interface Release { version: string; url: string; notes: string; page: string }
+export const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
 
 /** "v2.16.0" / "2.16.0" → [2, 16, 0]; anything else → undefined. */
 export function parseVersion(tag: string): number[] | undefined {
@@ -26,7 +27,7 @@ export function isNewer(latest: string, current: string) {
 /** The APK to download from a release: the phone build (arm64) first, any APK otherwise, else the release page. */
 export function pickDownload(release: { html_url: string; assets?: { name: string; browser_download_url: string }[] }) {
   const apks = (release.assets ?? []).filter((a) => /\.apk$/i.test(a.name));
-  return (apks.find((a) => /arm64/i.test(a.name)) ?? apks[0])?.browser_download_url ?? release.html_url;
+  return (apks.find((a) => /^MURMUR\.apk$/i.test(a.name)) ?? apks.find((a) => /arm64/i.test(a.name)) ?? apks[0])?.browser_download_url ?? release.html_url;
 }
 
 /**
@@ -46,7 +47,7 @@ export async function checkForUpdate(now = Date.now(), force = false): Promise<R
     const version = String(data.tag_name ?? "").replace(/^v/, "");
     if (!isNewer(version, APP_VERSION)) return undefined;
     if (!force && localStorage.getItem(DISMISSED) === version) return undefined;
-    return { version, url: pickDownload(data), notes: String(data.body ?? "").slice(0, 400) };
+    return { version, url: pickDownload(data), notes: String(data.body ?? "").slice(0, 1200), page: String(data.html_url ?? RELEASES_PAGE) };
   } catch {
     return undefined;
   }

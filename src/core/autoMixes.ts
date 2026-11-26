@@ -1,4 +1,5 @@
 import { Audio, Auth, Voice, isNative } from "../native";
+import { tasteHistory } from "./tasteGuard";
 import { db } from "./db";
 import { normalize } from "./FanUploadParser";
 import { creditedArtists } from "../components/ArtistProfile";
@@ -43,8 +44,10 @@ export function weekKey(date = new Date()) {
 const artistKey = (artist: string) => normalize(creditedArtists(artist)[0] ?? artist);
 
 /** Taste per artist from listening, saves and how past recommendations went. */
-export function tasteProfile(history: HistoryEntry[], library: QueueItem[], suggested: AutoState["suggested"]) {
+export function tasteProfile(allHistory: HistoryEntry[], library: QueueItem[], suggested: AutoState["suggested"]) {
   const byId = new Map(library.map((t) => [t.id, t]));
+  // Tests, guests and one-off requests outside your taste do not count (see tasteGuard).
+  const history = tasteHistory(allHistory, library, suggested);
   const weight = new Map<string, number>();
   const add = (artist: string, value: number) => {
     const key = artistKey(artist);
@@ -147,7 +150,7 @@ async function semanticScores(topNames: string[], pool: QueueItem[]) {
 async function buildDiscoveries(state: AutoState, wantDaily: boolean, wantWeekly: boolean) {
   const [history, library] = await Promise.all([db.history.toArray(), db.tracks.toArray()]);
   const weight = tasteProfile(history, library, state.suggested);
-  const { radio, fromSpotify, fromYouTube, related, disliked, topNames } = await candidates(weight, library, history);
+  const { radio, fromSpotify, fromYouTube, related, disliked, topNames } = await candidates(weight, library, tasteHistory(history, library, state.suggested));
   const known = new Set([
     ...library.filter((t) => t.saved).map(songKey),
     ...history.map((h) => library.find((t) => t.id === h.trackId)).filter((t): t is QueueItem => !!t).map(songKey),

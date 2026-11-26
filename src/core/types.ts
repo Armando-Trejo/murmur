@@ -97,4 +97,6 @@ export interface HistoryEntry {
   at: number;
   seconds: number;
   skipped: boolean;
+  /** Played with «Modo invitado» on: kept in the history, never teaches taste. */
+  guest?: boolean;
 }

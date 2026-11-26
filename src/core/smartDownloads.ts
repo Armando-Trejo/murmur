@@ -1,4 +1,5 @@
 import { Audio, isNative } from "../native";
+import { tasteHistory } from "./tasteGuard";
 import { db } from "./db";
 import { listeningStats } from "./musicOrder";
 import { youtubeTwin } from "./spotifyBridge";
@@ -54,7 +55,7 @@ export async function runSmartDownloads(onProgress?: (done: number, total: numbe
     const network = await Audio.networkState().catch(() => undefined);
     if (!network?.online || network.metered) return;
     const [tracks, history] = await Promise.all([db.tracks.toArray(), db.history.toArray()]);
-    const top = topSongs(tracks.filter((t) => !t.deleted), listeningStats(history));
+    const top = topSongs(tracks.filter((t) => !t.deleted), listeningStats(tasteHistory(history, tracks)));
     const files = await owned();
     const keep = new Set(top.map((t) => t.id));
 

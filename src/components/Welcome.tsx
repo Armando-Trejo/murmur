@@ -89,6 +89,7 @@ export function Welcome({ notify, youtubeConnected, spotifyConnected, onDone }: 
       {spotifyAvailable() && <button className="button secondary full" disabled={!!busy || spotifyConnected} onClick={() => void connect("spotify")}>
         {spotifyConnected ? <><Check size={18} /> Spotify conectado</> : busy === "spotify" ? "Abriendo…" : "Conectar Spotify"}
       </button>}
+      {!spotifyAvailable() && <small className="welcome-hint">¿Usas Spotify? Conéctalo cuando quieras en Opciones (⋯): te guía paso a paso.</small>}
       <button className="text-button welcome-next" onClick={() => setStep(2)}>
         {youtubeConnected || spotifyConnected ? "Continuar" : "Ahora no"} <ArrowRight size={16} />
       </button>

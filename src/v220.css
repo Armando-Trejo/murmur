@@ -1,0 +1,88 @@
+/* 2.20 · Spotify guiado, cómo suena Spotify y actualizaciones desde la app. */
+
+/* Guided Spotify key. */
+.spotify-setup { margin: 14px 0 4px; }
+.spotify-setup .setup-lead { color: #d4d4d8; font-size: 0.9rem; line-height: 1.5; margin: 0 0 12px; }
+.setup-steps { list-style: none; counter-reset: step; margin: 0; padding: 0; display: grid; gap: 10px; }
+.setup-steps > li {
+  counter-increment: step; position: relative;
+  padding: 14px 14px 14px 52px; border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.setup-steps > li::before {
+  content: counter(step); position: absolute; left: 14px; top: 13px;
+  width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--brand-readable, var(--accent)); color: #111; font-weight: 800; font-size: 0.8rem;
+}
+.setup-steps strong { display: block; font-size: 0.95rem; margin-bottom: 4px; }
+.setup-steps p { color: #a1a1aa; font-size: 0.82rem; line-height: 1.5; margin: 4px 0 8px; }
+.setup-steps p b { color: #e4e4e7; }
+.setup-steps .button { min-height: 40px; padding: 8px 16px; margin-top: 2px; }
+.setup-field {
+  display: grid; grid-template-columns: 1fr 40px; align-items: center; column-gap: 6px; row-gap: 3px;
+  padding: 6px 0 4px;
+}
+.setup-field span { grid-column: 1 / -1; color: #a1a1aa; font-size: 0.75rem; }
+.setup-field code {
+  font: 0.82rem/1.35 ui-monospace, monospace; color: #f4f4f5; word-break: normal; overflow-wrap: anywhere;
+  background: rgba(0, 0, 0, 0.35); padding: 8px 10px; border-radius: 8px;
+}
+.spotify-setup .setup-again { min-height: 36px; margin: 0 0 6px; }
+.setup-field .icon-button, .setup-paste .icon-button { width: 40px; height: 40px; min-width: 40px; }
+.setup-paste {
+  display: flex; align-items: center; gap: 6px; margin-top: 6px;
+  border-radius: 12px; background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 2px 2px 2px 12px; transition: border-color 180ms ease;
+}
+.setup-paste.ready { border-color: var(--brand-readable, var(--accent)); }
+.setup-paste input {
+  flex: 1; min-width: 0; background: transparent; border: 0; color: #fff;
+  font: 0.85rem/1.4 ui-monospace, monospace; min-height: 40px; outline: none;
+}
+.spotify-setup .setup-foot { color: #a1a1aa; font-size: 0.78rem; line-height: 1.5; margin: 12px 0 0; }
+
+/* How Spotify sounds. */
+.spotify-route { display: grid; gap: 8px; margin: 16px 0 4px; }
+.spotify-route .route-title { font-size: 0.8rem; color: #a1a1aa; letter-spacing: 0.02em; }
+.route-option {
+  display: flex; align-items: flex-start; gap: 12px; text-align: left; width: 100%;
+  padding: 12px 14px; border-radius: 14px; color: #fff;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+.route-option.selected { border-color: var(--brand-readable, var(--accent)); background: rgba(180, 162, 255, 0.08); }
+.route-option strong { display: block; font-size: 0.92rem; }
+.route-option small { display: block; color: #a1a1aa; font-size: 0.78rem; line-height: 1.45; margin-top: 2px; }
+.route-dot {
+  flex-shrink: 0; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%;
+  display: grid; place-items: center; border: 2px solid rgba(255, 255, 255, 0.3); color: #111;
+}
+.route-option.selected .route-dot { background: var(--brand-readable, var(--accent)); border-color: transparent; }
+
+/* MURMUR al día. */
+.update-card {
+  background: var(--surface); border-radius: 12px; padding: 18px; margin-bottom: 16px;
+  position: relative; overflow: hidden;
+}
+.update-head { display: flex; gap: 12px; align-items: center; }
+.update-head h3 { font-size: 1rem; margin: 0; }
+.update-head p { color: #a1a1aa; font-size: 0.82rem; line-height: 1.45; margin: 3px 0 0; }
+.update-icon {
+  width: 44px; height: 44px; flex-shrink: 0; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(180, 162, 255, 0.14); color: var(--brand-readable, var(--accent));
+}
+.update-actions { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 14px; }
+.update-actions .button { min-height: 44px; padding: 10px 14px; font-size: 0.85rem; white-space: nowrap; }
+.update-actions .button.ghost { background: transparent; color: #e4e4e7; border: 1px solid rgba(255, 255, 255, 0.14); }
+.update-progress { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); margin-top: 14px; overflow: hidden; }
+.update-progress span {
+  display: block; height: 100%; border-radius: 3px; background: var(--brand-readable, var(--accent));
+  transition: width 240ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-progress span, .route-option, .setup-paste { transition: none; }
+}
+
+/* With the key already pasted only the field remains: no step number. */
+.setup-steps.compact > li { padding-left: 14px; }
+.setup-steps.compact > li::before { display: none; }

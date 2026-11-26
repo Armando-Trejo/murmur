@@ -1,3 +1,18 @@
+# Continuidad de MURMUR 2.20.0
+
+## Estado de 2.20.0 (26 nov 2026, código 37)
+
+Hecha en la PC Maindsoft e instalada en el HONOR del dueño por USB. **Desde esta versión todo se firma con la llave de release** (`murmur-release.jks`, SHA-256 `d03a64dd…`), también las de prueba cuando la llave está disponible (`scripts/dev/compilar-prueba.ps1`). Las 2.14–2.19 de GitHub iban firmadas con la llave de prueba de la PC RAM (`78d2b623…`): quien las tenga instala una vez desde cero (respaldo → desinstalar → instalar → restaurar). La app lo detecta y lo explica (`UPDATE_SIGNATURE`).
+
+- **Spotify suena desde Spotify, sin su app.** En el teléfono del dueño librespot sigue rechazado (`audio key error 0 1`), pero el **Web Playback SDK dentro del WebView sí funciona** (Widevine L3, `WebSdkEngine`), también con la pantalla apagada (probado 45 s bloqueado). La nota de 2.8 que decía «sin DRM en WebView» ya no aplica. `chooseSpotifyRoute` (spotifyBridge.ts) elige solo la primera vez que la cuenta se verifica: Premium + permisos `streaming` → modo `web` y `murmur.spotifyVia=spotify`; si no, gemela de YouTube. `murmur.spotifyRouteSet` evita volver a decidir. Opciones › Spotify › «Cómo suena Spotify».
+- **Respaldo por canción:** cualquier fallo del reproductor de Spotify (sesión cerrada, sin Premium, `playback_error`) toca la gemela de esa canción una vez (`twinOnce` en AudioOrchestrator). Solo `eme_unavailable`, `initialization_error` y `key_refused` cambian la ruta para siempre (`permanent` en `SPOTIFY_RETRY_YOUTUBE`).
+- **Plug and play:** sin Client ID integrado. `SpotifySetup.tsx` guía: abrir developer.spotify.com/dashboard/create (`Audio.openLink`, lista blanca de hosts), copiar nombre/descripción/Redirect URI, marcar Web API + Web Playback SDK y pegar el Client ID. Spotify (feb 2026) exige Premium al dueño de la llave y limita usuarios por llave.
+- **Android Auto:** `HybridMediaService` ahora es `MediaLibraryService`. La web escribe una copia de la biblioteca (`core/autoLibrary.ts` → `Audio.setAutoLibrary` → `files/auto-library.json`, cada cambio con 20 s de espera). `AutoLibrary.kt` arma Para ti / Playlists / Álbumes, búsqueda y `song:<lista>#<i>`. Con la app viva, el coche manda `onAutoPlay`/`onAutoSearch` a la web; sin app, el servicio toca solo lo que puede (YouTube y Spotify modo web). `MEDIA_PLAY_FROM_SEARCH` en MainActivity → «pon …». Sin probar en un coche real (no hay unidad): falta abrirlo con Android Auto/DHU.
+- **Actualizar desde la app:** `UpdateInstaller.kt` + `installUpdate` (descarga de github.com/…/releases, sigue a *.githubusercontent.com, compara firma y versión, abre el instalador; `REQUEST_INSTALL_PACKAGES`). Tarjeta «Tu MURMUR» en Opciones y el aviso de versión nueva. Los releases llevan `MURMUR.apk` (nombre fijo para `releases/latest/download/MURMUR.apk`) y `MURMUR-<v>-arm64.apk`.
+- **Tu algoritmo es tuyo:** `core/tasteGuard.ts` (`judgeHistory`). Un artista fuera de tus gustos no entrena (tasteProfile, momentMix, blendMixes, smartDownloads) hasta volverse gusto: ♥, 3 días distintos o 2 canciones en 2 días (ventana 45 días). Las recomendaciones de MURMUR siempre cuentan. «Modo invitado» (3 h, `murmur.guestUntil`) marca `guest: true` en el historial.
+- **Batería:** «Ok MURMUR» ya no escucha 3 min al iniciar sin música (`lastMusicAt` arranca vencido). Medido: la escucha cuesta ~15 % de un núcleo mientras está activa; con música sigue activa por diseño (modo «solo en pantalla» la apaga).
+- **README y página:** README para usuarios con SVG animados (`docs/assets`), `docs/index.html` para GitHub Pages (rama main, carpeta /docs) y `docs/DESARROLLO.md` con lo técnico.
+
 # Continuidad de MURMUR 2.11.0
 
 ## Estado de 2.11.0 (24 nov 2026, código 25)

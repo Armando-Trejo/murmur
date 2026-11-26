@@ -21,6 +21,12 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.LibraryResult
+import androidx.media3.common.MediaItem
+import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
@@ -34,7 +40,7 @@ import java.nio.ByteOrder
 import kotlin.math.*
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-class HybridMediaService : MediaSessionService() {
+class HybridMediaService : MediaLibraryService() {
     companion object {
         var instance: HybridMediaService? = null
             private set
@@ -57,7 +63,7 @@ class HybridMediaService : MediaSessionService() {
     private val handler = Handler(Looper.getMainLooper())
     lateinit var primaryPlayer: ExoPlayer
     private lateinit var secondaryPlayer: ExoPlayer
-    private var session: MediaSession? = null
+    private var session: MediaLibrarySession? = null
     private var enhancer: LoudnessEnhancer? = null
     private var fade: Job? = null
     private var preparing: Job? = null
@@ -88,6 +94,23 @@ class HybridMediaService : MediaSessionService() {
         override fun seekToPreviousMediaItem()=previousNative()
         override fun seekToNext()=advanceNative()
         override fun seekToNextMediaItem()=advanceNative()
+        // Android Auto (or any media browser) asks to play one of MURMUR's own items: MURMUR builds
+        // the queue itself instead of handing raw ids to ExoPlayer.
+        private fun fromBrowser(items:List<MediaItem>,index:Int):Boolean{
+            if(items.isEmpty())return autoStarting
+            val id=items.getOrNull(index.coerceAtLeast(0))?.mediaId ?: items.firstOrNull()?.mediaId ?: return false
+            if(!id.startsWith("song:")&&!id.startsWith("list:"))return false
+            playFromBrowser(id);return true
+        }
+        override fun setMediaItems(items:MutableList<MediaItem>){if(!fromBrowser(items,0))super.setMediaItems(items)}
+        override fun setMediaItems(items:MutableList<MediaItem>,resetPosition:Boolean){if(!fromBrowser(items,0))super.setMediaItems(items,resetPosition)}
+        override fun setMediaItems(items:MutableList<MediaItem>,startIndex:Int,startPositionMs:Long){if(!fromBrowser(items,startIndex))super.setMediaItems(items,startIndex,startPositionMs)}
+        override fun setMediaItem(item:MediaItem){if(!fromBrowser(listOf(item),0))super.setMediaItem(item)}
+        override fun setMediaItem(item:MediaItem,resetPosition:Boolean){if(!fromBrowser(listOf(item),0))super.setMediaItem(item,resetPosition)}
+        override fun setMediaItem(item:MediaItem,startPositionMs:Long){if(!fromBrowser(listOf(item),0))super.setMediaItem(item,startPositionMs)}
+        override fun addMediaItems(items:MutableList<MediaItem>){if(!fromBrowser(items,0))super.addMediaItems(items)}
+        override fun prepare(){if(!autoStarting)super.prepare()}
+        override fun play(){if(autoStarting)return;super.play()}
 
     }
     private fun sessionPlayer(player:Player){val wrapper=TransportPlayer(player);transportPlayer=wrapper;session?.setPlayer(wrapper);MurmurWidget.sync(this)}
@@ -142,7 +165,7 @@ class HybridMediaService : MediaSessionService() {
     private val alternatives = ArrayDeque<PlaybackSource>()
     private var sourceAttempts = 0
     private var refreshedSource=false
-    private val integratedDelegate=lazy { com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={ advanceNative() },onEnded={ spotifyTrackEnded() },onKeysRefused={ fallBackFromEngine() }) }
+    private val integratedDelegate=lazy { com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={ advanceNative() },onEnded={ spotifyTrackEnded() },onKeysRefused={ code -> fallBackFromEngine(code) }) }
     private var engineFallbackFor = ""
     /**
      * Spotify may refuse audio keys to the librespot engine (it still logs in), and its official Web
@@ -152,7 +175,7 @@ class HybridMediaService : MediaSessionService() {
      * - otherwise, from the integrated engine, try the Web player when its scopes were granted.
      * The chosen mode is kept and can be changed back in Conexiones. One switch per song.
      */
-    private fun fallBackFromEngine(): Boolean {
+    private fun fallBackFromEngine(code: String = ""): Boolean {
         val data = track ?: return false
         if (!spotifyActive) return false
         val id = entryIdentity(data)
@@ -163,12 +186,15 @@ class HybridMediaService : MediaSessionService() {
         spotifyIntegrated.deactivate()
         NativeEvents.emit("onSpotifyEngineError", JSObject().put("trackId", data.optString("id")).put("queueId", data.optString("queueId"))
             .put("code", "SPOTIFY_RETRY_YOUTUBE")
-            .put("message", "Spotify no permite su reproductor en este teléfono. MURMUR toca la misma canción desde YouTube Music."))
+            // Only a route that can never work on this phone (no DRM, keys refused to librespot) is
+            // remembered; a single song Spotify Web could not start plays its twin just this once.
+            .put("permanent", code != "playback_error").put("reason", code)
+            .put("message", "Spotify no pudo reproducir esta canción aquí. MURMUR toca la misma grabación desde YouTube Music."))
         return true
     }
     private val nativeIntegrated by integratedDelegate
     private val webSession by lazy{SpotifySession.stored(this)}
-    private val webDelegate=lazy{com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={advanceNative()},backend=com.personal.murmur.spotify.SpotifyWebBackend(this,tokenProvider={force->webSession.webToken(force)}),manageFocus=false,deviceLabel="MURMUR · Web",tokenSupplier={webSession.webToken()},onEnded={spotifyTrackEnded()},onKeysRefused={fallBackFromEngine()})}
+    private val webDelegate=lazy{com.personal.murmur.spotify.SpotifyIntegratedPlayer(this,onNext={advanceNative()},backend=com.personal.murmur.spotify.SpotifyWebBackend(this,tokenProvider={force->webSession.webToken(force)}),manageFocus=false,deviceLabel="MURMUR · Web",tokenSupplier={webSession.webToken()},onEnded={spotifyTrackEnded()},onKeysRefused={code->fallBackFromEngine(code)})}
     private val webIntegrated by webDelegate
     private var selectedWeb=false
     private val spotifyIntegrated get()=if(selectedWeb)webIntegrated else nativeIntegrated
@@ -194,6 +220,32 @@ class HybridMediaService : MediaSessionService() {
     fun resumeIntegrated() {check(spotifyIntegrated.resumeIntegrated()) { "Vuelve a cargar la canción de Spotify integrado." }}
     fun seekIntegrated(ms:Long)=spotifyIntegrated.seekIntegrated(ms)
     fun shutdownIntegrated(clearCache:Boolean=false):Job {sourceEpoch++;spotifyActive=false;sessionPlayer(primaryPlayer);return scope.launch{if(integratedDelegate.isInitialized())nativeIntegrated.shutdown(clearCache).join();if(webDelegate.isInitialized())webIntegrated.shutdown().join();if(clearCache)withContext(Dispatchers.IO){com.personal.murmur.spotify.SpotifyEngineAuthorization.clearRuntimeFiles(this@HybridMediaService)}}}
+    /** The car refreshes its lists after the app wrote a new library copy. */
+    fun libraryChanged(){val current=session?:return;listOf(AutoLibrary.ROOT,"folder:foryou","folder:playlists","folder:albums").forEach{current.notifyChildrenChanged(it,Int.MAX_VALUE,null)}}
+    @Volatile private var autoStarting=false
+    /**
+     * Starts a list chosen in Android Auto. With MURMUR's screen alive, the app plays it (so the queue,
+     * Spotify player and twins behave as usual); otherwise the service plays the songs it can start
+     * by itself (YouTube and Spotify's in-app player).
+     */
+    fun playFromBrowser(mediaId:String){
+        val (list,start)=AutoLibrary.locate(this,mediaId) ?: return
+        val tracks=list.optJSONArray("tracks") ?: return
+        autoStarting=true
+        handler.postDelayed({autoStarting=false},1500)
+        if(NativeEvents.plugin!=null){
+            NativeEvents.emit("onAutoPlay",JSObject().put("collection",list.optString("id")).put("index",start).put("tracks",tracks))
+            return
+        }
+        val mode=com.personal.murmur.spotify.SpotifyEngineAuthorization(this).mode()
+        val stamp=System.nanoTime()
+        val entries=(0 until tracks.length()).map{i->JSONObject(tracks.getJSONObject(i).toString()).put("queueId","auto-$stamp-$i")}
+        val playable=entries.withIndex().filter{AutoLibrary.playableAlone(it.value,mode)}
+        val first=playable.indexOfFirst{it.index>=start}.takeIf{it>=0} ?: return
+        played.clear();played.addAll(playable.take(first).map{it.value})
+        setUpcoming(playable.drop(first).map{it.value})
+        advanceNative()
+    }
     fun advanceNative() {
         val next = upcoming.firstOrNull() ?: run {
             PlaybackRequests.next()
@@ -311,7 +363,32 @@ class HybridMediaService : MediaSessionService() {
         primaryPlayer = createPlayer(); secondaryPlayer = createPlayer(false); attach(primaryPlayer)
         val open=android.app.PendingIntent.getActivity(this,0,Intent(this,MainActivity::class.java).apply{putExtra("open_player",true);flags=Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP},android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
         val initialTransport=TransportPlayer(primaryPlayer);transportPlayer=initialTransport
-        session = MediaSession.Builder(this, initialTransport).setSessionActivity(open).setCallback(object : MediaSession.Callback {
+        session = MediaLibrarySession.Builder(this, initialTransport, object : MediaLibrarySession.Callback {
+            override fun onGetLibraryRoot(session:MediaLibrarySession,browser:MediaSession.ControllerInfo,params:LibraryParams?):ListenableFuture<LibraryResult<MediaItem>> =
+                Futures.immediateFuture(LibraryResult.ofItem(AutoLibrary.root(),params))
+            override fun onGetChildren(session:MediaLibrarySession,browser:MediaSession.ControllerInfo,parentId:String,page:Int,pageSize:Int,params:LibraryParams?):ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+                val all=AutoLibrary.children(this@HybridMediaService,parentId)
+                val from=(page.toLong()*pageSize).coerceAtMost(all.size.toLong()).toInt();val to=(from+pageSize).coerceAtMost(all.size)
+                return Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.copyOf(if(pageSize>0)all.subList(from,to) else all),params))
+            }
+            override fun onGetItem(session:MediaLibrarySession,browser:MediaSession.ControllerInfo,mediaId:String):ListenableFuture<LibraryResult<MediaItem>> =
+                Futures.immediateFuture(AutoLibrary.item(this@HybridMediaService,mediaId)?.let{LibraryResult.ofItem(it,null)} ?: LibraryResult.ofError(androidx.media3.session.SessionError.ERROR_BAD_VALUE))
+            override fun onSearch(session:MediaLibrarySession,browser:MediaSession.ControllerInfo,query:String,params:LibraryParams?):ListenableFuture<LibraryResult<Void>> {
+                session.notifySearchResultChanged(browser,query,AutoLibrary.search(this@HybridMediaService,query).size,params)
+                return Futures.immediateFuture(LibraryResult.ofVoid())
+            }
+            override fun onGetSearchResult(session:MediaLibrarySession,browser:MediaSession.ControllerInfo,query:String,page:Int,pageSize:Int,params:LibraryParams?):ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
+                Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.copyOf(AutoLibrary.search(this@HybridMediaService,query)),params))
+            /** A spoken request to the car ("pon ...") arrives as a search query. */
+            override fun onAddMediaItems(session:MediaSession,controller:MediaSession.ControllerInfo,items:MutableList<MediaItem>):ListenableFuture<MutableList<MediaItem>> {
+                val query=items.firstOrNull()?.requestMetadata?.searchQuery
+                if(!query.isNullOrBlank()){
+                    if(NativeEvents.plugin!=null){NativeEvents.emit("onAutoSearch",JSObject().put("query",query));autoStarting=true;handler.postDelayed({autoStarting=false},1500);return Futures.immediateFuture(mutableListOf())}
+                    val found=AutoLibrary.search(this@HybridMediaService,query,1).firstOrNull()
+                    return Futures.immediateFuture(if(found!=null)mutableListOf(found) else mutableListOf())
+                }
+                return Futures.immediateFuture(items)
+            }
             override fun onConnect(session:MediaSession,controller:MediaSession.ControllerInfo)=MediaSession.ConnectionResult.AcceptedResultBuilder(session).setAvailableSessionCommands(MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon().add(previousCommand).add(nextCommand).build()).build()
             override fun onCustomCommand(session:MediaSession,controller:MediaSession.ControllerInfo,command:SessionCommand,args:Bundle):com.google.common.util.concurrent.ListenableFuture<SessionResult>{when(command.customAction){"murmur.previous"->previousNative();"murmur.next"->advanceNative();else->return com.google.common.util.concurrent.Futures.immediateFuture(SessionResult(androidx.media3.session.SessionError.ERROR_NOT_SUPPORTED))};return com.google.common.util.concurrent.Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))}
             override fun onMediaButtonEvent(session: MediaSession, controllerInfo: MediaSession.ControllerInfo, intent: Intent): Boolean {
@@ -320,7 +397,7 @@ class HybridMediaService : MediaSessionService() {
                 if (key?.keyCode in listOf(KeyEvent.KEYCODE_HEADSETHOOK, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)) { if (key?.action == KeyEvent.ACTION_UP) { presses++; handler.removeCallbacks(headset); handler.postDelayed(headset, 420) }; return true }
                 return super.onMediaButtonEvent(session, controllerInfo, intent)
             }
-        }).build()
+        }).setSessionActivity(open).build()
         addSession(session!!)
         updateMediaButtons()
         handler.post(ticker)
@@ -880,6 +957,6 @@ class HybridMediaService : MediaSessionService() {
         }
     }
     override fun onTaskRemoved(rootIntent: Intent?) { PlaybackRequests.next();pausePlayback();preparing?.cancel();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();super.onTaskRemoved(rootIntent) }
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
     override fun onDestroy() { if(integratedDelegate.isInitialized())nativeIntegrated.shutdown();if(webDelegate.isInitialized())webIntegrated.shutdown();handler.removeCallbacksAndMessages(null); scope.cancel(); enhancer?.release(); session?.release(); primaryPlayer.release(); secondaryPlayer.release(); instance = null; MurmurWidget.sync(this); super.onDestroy() }
 }

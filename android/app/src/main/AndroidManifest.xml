@@ -22,6 +22,7 @@
             android:launchMode="singleTask"
             android:exported="true">
 
+            <intent-filter><action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH"/><category android:name="android.intent.category.DEFAULT"/></intent-filter>
             <intent-filter><action android:name="android.intent.action.SEND"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="text/plain"/></intent-filter>
             <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="com.personal.murmur" android:host="oauth"/></intent-filter>
             <intent-filter><action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/><data android:scheme="com.personal.murmur" android:host="oauth-return"/></intent-filter>
@@ -30,7 +31,9 @@
         <activity android:name=".VoiceCaptureActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" android:theme="@style/Theme.MurmurVoice" android:excludeFromRecents="true"/>
         <activity android:name=".VideoActivity" android:exported="false" android:supportsPictureInPicture="true" android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"/>
         <activity android:name=".BackupWriter" android:exported="false" android:theme="@android:style/Theme.Material.NoActionBar"/>
-        <service android:name=".HybridMediaService" android:exported="true" android:foregroundServiceType="mediaPlayback"><intent-filter><action android:name="androidx.media3.session.MediaSessionService"/></intent-filter></service>
+        <service android:name=".HybridMediaService" android:exported="true" android:foregroundServiceType="mediaPlayback"><intent-filter><action android:name="androidx.media3.session.MediaLibraryService"/><action android:name="androidx.media3.session.MediaSessionService"/><action android:name="android.media.browse.MediaBrowserService"/></intent-filter></service>
+        <!-- Android Auto: MURMUR appears as a media app (browse + playback through HybridMediaService). -->
+        <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc"/>
         <service android:name=".WakeWordService" android:exported="false" android:foregroundServiceType="microphone"/>
         <service android:name=".LoginKeepAlive" android:exported="false" android:foregroundServiceType="dataSync"/>
         <receiver android:name=".MurmurWidgetProvider" android:exported="true" android:label="@string/murmur_widget_label"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/murmur_widget_info"/></receiver>
@@ -50,6 +53,7 @@
 
     <!-- Permissions -->
 
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>

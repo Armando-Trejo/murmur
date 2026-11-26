@@ -85,6 +85,12 @@ interface AudioBridge {
   ttsVoices(): Promise<{ voices: { name: string; label: string; gender?: string; network: boolean; selected: boolean }[] }>;
   setTtsVoice(o: { name?: string; preview?: boolean; sample?: string }): Promise<void>;
   openUpdate(o: { url: string }): Promise<void>;
+  /** Downloads the release APK from GitHub and opens Android's installer (progress: onUpdateProgress). */
+  installUpdate(o: { url: string; reuse?: boolean }): Promise<{ installing: boolean }>;
+  /** The library copy Android Auto browses (see core/autoLibrary). */
+  setAutoLibrary(o: { json: string }): Promise<void>;
+  /** Spotify for Developers or MURMUR's GitHub pages in the browser. */
+  openLink(o: { url: string }): Promise<void>;
   /** `every`: the presenter talks every song (1), every 3 or every 5; `moods`: in blocks, the endless queue changes mood. */
   voicePrefs(o?: { replies?: boolean; presenter?: boolean; host?: PresenterHost; every?: number; moods?: boolean }): Promise<{ replies: boolean; presenter: boolean; host?: PresenterHost; every?: number; moods?: boolean }>;
   /** A sample of the presenter's woman's or man's voice. */

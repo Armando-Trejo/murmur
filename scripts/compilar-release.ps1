@@ -16,9 +16,11 @@ try {
     Select-String "BUILD|FAILED|error" | Select-Object -Last 5
   Pop-Location
   $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-  $out = Join-Path $root "MURMUR-$version.apk"
+  $out = Join-Path $root "MURMUR-$version-arm64.apk"
   Copy-Item android\app\build\outputs\apk\release\app-release.apk $out -Force
-  Write-Host "APK: $out"
+  # Fixed name for https://github.com/Armando-Trejo/murmur/releases/latest/download/MURMUR.apk
+  Copy-Item android\app\build\outputs\apk\release\app-release.apk (Join-Path $root "MURMUR.apk") -Force
+  Write-Host "APK: $out y MURMUR.apk (sube los dos al release)"
   Pop-Location
 } finally {
   Remove-Item Env:MURMUR_KEYSTORE_PASSWORD -ErrorAction SilentlyContinue

@@ -1,4 +1,5 @@
 import { Audio, Auth, Voice, isNative } from "../native";
+import { tasteHistory } from "./tasteGuard";
 import { db } from "./db";
 import { normalize, stripTitleNoise } from "./FanUploadParser";
 import { listeningStats } from "./musicOrder";
@@ -162,7 +163,7 @@ export async function generateBlendMixes(force = false): Promise<BlendMix[]> {
   const ytHome = (home?.shelves ?? []).flatMap((shelf) => shelf.items.flatMap((item) => (item.track ? [item.track] : [])));
 
   // What you really listen to in MURMUR, most played first.
-  const stats = listeningStats(history);
+  const stats = listeningStats(tasteHistory(history, library));
   const byId = new Map(library.map((t) => [t.id, t]));
   const local = Object.entries(stats).sort((a, b) => b[1].plays - a[1].plays)
     .flatMap(([id]) => (byId.get(id) ? [byId.get(id)!] : [])).slice(0, 40);

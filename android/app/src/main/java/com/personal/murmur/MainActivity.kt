@@ -1,4 +1,4 @@
-package com.personal.murmur
+﻿package com.personal.murmur
 import android.content.Intent
 import android.os.Bundle
 import android.content.BroadcastReceiver
@@ -71,6 +71,12 @@ class MainActivity : BridgeActivity() {
         intent?.getStringExtra("voice_text")?.let { text ->
             intent.removeExtra("voice_text")
             NativeEvents.emit("onVoiceCommandCaptured", JSObject().put("text", text.take(1000)))
+        }
+        // "Reproduce Soda Stereo en MURMUR" (Google Assistant, Android Auto): same as «Ok MURMUR, pon …».
+        if (intent?.action == android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH) {
+            val query = intent.getStringExtra(android.app.SearchManager.QUERY).orEmpty().trim()
+            intent.action = Intent.ACTION_MAIN
+            NativeEvents.emit("onVoiceCommandCaptured", JSObject().put("text", (if (query.isBlank()) "sorpréndeme" else "pon $query").take(1000)))
         }
         intent?.getStringExtra("voice_error")?.let { message ->
             intent.removeExtra("voice_error")

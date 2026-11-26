@@ -4,6 +4,7 @@ import { mergeSyncedTrack } from "./libraryEdit";
 import { parseFanUpload, normalize, stripTitleNoise } from "./FanUploadParser";
 import { similarity } from "./SourceResolver";
 import type { QueueItem } from "./types";
+import { guestModeOn } from "./tasteGuard";
 export function hybridScore(
   tags: string[],
   spotify: Record<string, number>,
@@ -27,8 +28,10 @@ export async function recordListening(
   // The queue's copy refreshes what the provider sends, never what the owner changed: a song taken
   // out of Guardadas, a corrected name, the album's cover or when it entered the library.
   await db.tracks.put(mergeSyncedTrack(existing, { ...track, saved: existing?.saved ?? false }));
-  await db.history.add({ trackId: track.id, at: Date.now(), seconds, skipped });
-  if (skipped && seconds < 30)
+  const guest = guestModeOn();
+  await db.history.add({ trackId: track.id, at: Date.now(), seconds, skipped, ...(guest ? { guest } : {}) });
+  // A skip while a guest chooses the music says nothing about the owner's taste.
+  if (skipped && seconds < 30 && !guest)
     for (const tag of track.tags) {
       const previous = await db.affinity.get(tag);
       await db.affinity.put({ tag, weight: (previous?.weight || 0) - 35 });

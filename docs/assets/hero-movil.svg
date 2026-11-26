@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 500" width="720" height="500" role="img" aria-labelledby="t d">
+<title id="t">MURMUR</title>
+<desc id="d">Tu música de Spotify y YouTube Music en un solo reproductor. App para Android.</desc>
+<defs>
+  <clipPath id="clip"><rect width="720" height="500" rx="28"/></clipPath>
+  <linearGradient id="bar" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#d9cfff"/><stop offset=".45" stop-color="#9b87f5"/><stop offset="1" stop-color="#5b48c9" stop-opacity=".15"/>
+  </linearGradient>
+  <linearGradient id="title" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ffffff"/><stop offset=".55" stop-color="#e6defe"/><stop offset="1" stop-color="#b4a2ff"/>
+  </linearGradient>
+  <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/>
+  </linearGradient>
+  <radialGradient id="a1"><stop offset="0" stop-color="#7c5cff" stop-opacity=".55"/><stop offset="1" stop-color="#7c5cff" stop-opacity="0"/></radialGradient>
+  <radialGradient id="a2"><stop offset="0" stop-color="#b4a2ff" stop-opacity=".35"/><stop offset="1" stop-color="#b4a2ff" stop-opacity="0"/></radialGradient>
+  <radialGradient id="a3"><stop offset="0" stop-color="#3d7bff" stop-opacity=".25"/><stop offset="1" stop-color="#3d7bff" stop-opacity="0"/></radialGradient>
+  <radialGradient id="vig" cx=".5" cy=".42" r=".75"><stop offset=".55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".7"/></radialGradient>
+</defs>
+<style>
+  .b{fill:url(#bar);transform-box:fill-box;transform-origin:50% 100%;animation:eq 1.2s ease-in-out infinite alternate}
+  @keyframes eq{0%{transform:scaleY(.28)}55%{transform:scaleY(.82)}100%{transform:scaleY(1)}}
+  .au1{animation:drift1 16s ease-in-out infinite alternate}
+  .au2{animation:drift2 21s ease-in-out infinite alternate}
+  .au3{animation:drift3 18s ease-in-out infinite alternate}
+  @keyframes drift1{from{transform:translate(-60px,10px)}to{transform:translate(120px,-30px)}}
+  @keyframes drift2{from{transform:translate(80px,-20px)}to{transform:translate(-140px,30px)}}
+  @keyframes drift3{from{transform:translate(0,0)}to{transform:translate(-90px,-40px)}}
+  .w{fill:none;stroke-linecap:round}
+  .w1{stroke:#b4a2ff;stroke-opacity:.38;stroke-width:1.6;animation:slide 9s linear infinite}
+  .w2{stroke:#9b87f5;stroke-opacity:.22;stroke-width:1.2;animation:slide 13s linear infinite reverse}
+  .w3{stroke:#ffffff;stroke-opacity:.10;stroke-width:1;animation:slide 17s linear infinite}
+  @keyframes slide{from{transform:translateX(0)}to{transform:translateX(-360px)}}
+  .in{animation:rise .9s cubic-bezier(.2,.8,.2,1) both}
+  .in2{animation-delay:.18s}.in3{animation-delay:.36s}
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .dot{animation:pulse 2.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.45}50%{opacity:1}}
+  @media (prefers-reduced-motion: reduce){
+    .b,.au1,.au2,.au3,.w1,.w2,.w3,.dot{animation:none}
+    .in{animation:none}
+  }
+</style>
+<g clip-path="url(#clip)">
+  <rect width="720" height="500" fill="#050507"/>
+  <g class="au1"><ellipse cx="300" cy="170" rx="420" ry="260" fill="url(#a1)"/></g>
+  <g class="au2"><ellipse cx="980" cy="120" rx="380" ry="240" fill="url(#a2)"/></g>
+  <g class="au3"><ellipse cx="760" cy="420" rx="460" ry="200" fill="url(#a3)"/></g>
+  <g transform="translate(0,0)">
+    <path class="w w3" d="M -360 340 q 90 -32 180 0 q 90 32 180 0 q 90 -32 180 0 q 90 32 180 0 q 90 -32 180 0 q 90 32 180 0 q 90 -32 180 0 q 90 32 180 0 q 90 -32 180 0 q 90 32 180 0"/>
+    <path class="w w2" d="M -360 358 q 90 -52 180 0 q 90 52 180 0 q 90 -52 180 0 q 90 52 180 0 q 90 -52 180 0 q 90 52 180 0 q 90 -52 180 0 q 90 52 180 0 q 90 -52 180 0 q 90 52 180 0"/>
+    <path class="w w1" d="M -360 374 q 90 -40 180 0 q 90 40 180 0 q 90 -40 180 0 q 90 40 180 0 q 90 -40 180 0 q 90 40 180 0 q 90 -40 180 0 q 90 40 180 0 q 90 -40 180 0 q 90 40 180 0"/>
+  </g>
+  <g opacity=".9"><rect class="b" x="43.8" y="425.6" width="8.3" height="50.4" rx="4.2" style="animation-duration:1.74s;animation-delay:-0.38s"/><rect class="b" x="59.8" y="423.0" width="8.3" height="53.0" rx="4.2" style="animation-duration:0.92s;animation-delay:-1.35s"/><rect class="b" x="75.8" y="409.1" width="8.3" height="66.9" rx="4.2" style="animation-duration:1.20s;animation-delay:-1.99s"/><rect class="b" x="91.8" y="393.9" width="8.3" height="82.1" rx="4.2" style="animation-duration:1.44s;animation-delay:-1.55s"/><rect class="b" x="107.8" y="388.2" width="8.3" height="87.8" rx="4.2" style="animation-duration:1.16s;animation-delay:-0.12s"/><rect class="b" x="123.8" y="392.0" width="8.3" height="84.0" rx="4.2" style="animation-duration:1.59s;animation-delay:-1.95s"/><rect class="b" x="139.8" y="396.7" width="8.3" height="79.3" rx="4.2" style="animation-duration:1.72s;animation-delay:-1.02s"/><rect class="b" x="155.8" y="402.8" width="8.3" height="73.2" rx="4.2" style="animation-duration:0.93s;animation-delay:-1.21s"/><rect class="b" x="171.8" y="408.2" width="8.3" height="67.8" rx="4.2" style="animation-duration:0.79s;animation-delay:-0.55s"/><rect class="b" x="187.8" y="402.7" width="8.3" height="73.3" rx="4.2" style="animation-duration:1.31s;animation-delay:-0.96s"/><rect class="b" x="203.8" y="400.8" width="8.3" height="75.2" rx="4.2" style="animation-duration:0.78s;animation-delay:-0.83s"/><rect class="b" x="219.8" y="419.8" width="8.3" height="56.2" rx="4.2" style="animation-duration:0.70s;animation-delay:-0.01s"/><rect class="b" x="235.8" y="416.8" width="8.3" height="59.2" rx="4.2" style="animation-duration:0.80s;animation-delay:-0.47s"/><rect class="b" x="251.8" y="400.5" width="8.3" height="75.5" rx="4.2" style="animation-duration:1.56s;animation-delay:-1.53s"/><rect class="b" x="267.8" y="407.2" width="8.3" height="68.8" rx="4.2" style="animation-duration:1.64s;animation-delay:-1.92s"/><rect class="b" x="283.8" y="391.6" width="8.3" height="84.4" rx="4.2" style="animation-duration:1.43s;animation-delay:-1.14s"/><rect class="b" x="299.8" y="401.3" width="8.3" height="74.7" rx="4.2" style="animation-duration:1.15s;animation-delay:-0.99s"/><rect class="b" x="315.8" y="396.3" width="8.3" height="79.7" rx="4.2" style="animation-duration:1.32s;animation-delay:-1.44s"/><rect class="b" x="331.8" y="393.9" width="8.3" height="82.1" rx="4.2" style="animation-duration:1.40s;animation-delay:-1.46s"/><rect class="b" x="347.8" y="393.3" width="8.3" height="82.7" rx="4.2" style="animation-duration:1.63s;animation-delay:-1.98s"/><rect class="b" x="363.8" y="411.6" width="8.3" height="64.4" rx="4.2" style="animation-duration:1.24s;animation-delay:-1.91s"/><rect class="b" x="379.8" y="405.1" width="8.3" height="70.9" rx="4.2" style="animation-duration:1.09s;animation-delay:-0.16s"/><rect class="b" x="395.8" y="423.3" width="8.3" height="52.7" rx="4.2" style="animation-duration:1.67s;animation-delay:-1.42s"/><rect class="b" x="411.8" y="416.5" width="8.3" height="59.5" rx="4.2" style="animation-duration:1.75s;animation-delay:-1.57s"/><rect class="b" x="427.8" y="426.2" width="8.3" height="49.8" rx="4.2" style="animation-duration:0.96s;animation-delay:-1.60s"/><rect class="b" x="443.8" y="425.3" width="8.3" height="50.7" rx="4.2" style="animation-duration:1.71s;animation-delay:-1.60s"/><rect class="b" x="459.8" y="408.5" width="8.3" height="67.5" rx="4.2" style="animation-duration:1.48s;animation-delay:-1.07s"/><rect class="b" x="475.8" y="409.3" width="8.3" height="66.7" rx="4.2" style="animation-duration:1.66s;animation-delay:-1.13s"/><rect class="b" x="491.8" y="396.2" width="8.3" height="79.8" rx="4.2" style="animation-duration:1.00s;animation-delay:-1.37s"/><rect class="b" x="507.8" y="409.2" width="8.3" height="66.8" rx="4.2" style="animation-duration:1.13s;animation-delay:-0.38s"/><rect class="b" x="523.8" y="410.2" width="8.3" height="65.8" rx="4.2" style="animation-duration:0.95s;animation-delay:-1.80s"/><rect class="b" x="539.8" y="413.4" width="8.3" height="62.6" rx="4.2" style="animation-duration:1.07s;animation-delay:-1.37s"/><rect class="b" x="555.8" y="423.3" width="8.3" height="52.7" rx="4.2" style="animation-duration:0.83s;animation-delay:-0.62s"/><rect class="b" x="571.8" y="433.6" width="8.3" height="42.4" rx="4.2" style="animation-duration:0.70s;animation-delay:-0.26s"/><rect class="b" x="587.8" y="448.3" width="8.3" height="27.7" rx="4.2" style="animation-duration:0.72s;animation-delay:-1.39s"/><rect class="b" x="603.8" y="448.1" width="8.3" height="27.9" rx="4.2" style="animation-duration:0.89s;animation-delay:-0.42s"/><rect class="b" x="619.8" y="448.2" width="8.3" height="27.8" rx="4.2" style="animation-duration:1.47s;animation-delay:-0.35s"/><rect class="b" x="635.8" y="452.7" width="8.3" height="23.3" rx="4.2" style="animation-duration:1.39s;animation-delay:-0.03s"/><rect class="b" x="651.8" y="438.3" width="8.3" height="37.7" rx="4.2" style="animation-duration:1.35s;animation-delay:-1.50s"/><rect class="b" x="667.8" y="440.3" width="8.3" height="35.7" rx="4.2" style="animation-duration:1.06s;animation-delay:-1.43s"/></g>
+  <rect y="340" width="720" height="160" fill="url(#fade)"/>
+  <rect width="720" height="500" fill="url(#vig)"/>
+  <g font-family="'Segoe UI Variable Display','Segoe UI','SF Pro Display',-apple-system,'Helvetica Neue',Roboto,Arial,sans-serif" text-anchor="middle">
+    
+    <g class="in">
+      <circle class="dot" cx="210" cy="98" r="5" fill="#b4a2ff"/>
+      <text x="368" y="105" font-size="20" font-weight="600" letter-spacing="6" fill="#c9bdff">APP PARA ANDROID</text>
+    </g>
+    <text class="in in2" x="367" y="210" font-size="96" font-weight="800" letter-spacing="14" fill="url(#title)">MURMUR</text>
+    <text class="in in3" font-size="34" font-weight="400" fill="#ddd6fb"><tspan x="360" y="272">Tu música de Spotify y YouTube Music</tspan><tspan x="360" y="316">en un solo reproductor</tspan></text>
+  </g>
+  <rect x=".75" y=".75" width="718.5" height="498.5" rx="27.5" fill="none" stroke="#ffffff" stroke-opacity=".08" stroke-width="1.5"/>
+</g>
+</svg>

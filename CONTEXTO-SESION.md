@@ -10,7 +10,10 @@ Léelo primero si continúas MURMUR en otra PC u otra sesión. El detalle técni
 - No escribir contraseñas en formularios. Las sesiones de YouTube Music y Spotify las inicia él en el teléfono.
 - No inventar resultados: lo probado en el teléfono se dice como probado, y lo demás como no verificado.
 
-## Estado actual: 2.19.0 (code 36)
+## Estado actual: 2.20.0 (code 37)
+La 2.20.0 hace que Spotify suene desde Spotify dentro de MURMUR (Web Playback SDK, sin la app de Spotify), guía para que cualquiera conecte su propia llave de Spotify, Android Auto, actualización desde la app, «Modo invitado» y un filtro para que pruebas o peticiones ajenas no entrenen el algoritmo. **Cambio de firma:** desde aquí todo va con la llave de release (`d03a64dd…`, solo en la bóveda de la PC Maindsoft). Detalle en [CONTINUAR-MURMUR.md](CONTINUAR-MURMUR.md).
+
+### 2.19.0 (code 36)
 La 2.19.0 trae la edición de la biblioteca (crear, renombrar, quitar y eliminar playlists, álbumes y canciones, sin que una sincronización lo deshaga), guardar un álbum sin llenar Guardadas, la carátula del álbum aplicada a sus canciones, instrucciones de voz de todos los días (volumen, repetir, quitar de favoritos) y una escucha que deja de confundir artistas.
 
 **Ojo con la firma:** el 26 nov 2026 el teléfono se pasó a la llave de prueba de la PC RAM (`78d2b623...`). Hubo que desinstalar y reinstalar, y volver a iniciar sesión en YouTube Music y Spotify. Los respaldos de ese momento están en `../respaldo-telefono-2.18.0/`. Para que la PC Maindsoft vuelva a instalar encima, hay que llevarle `C:\Users\RAM\.android\debug.keystore` por USB.
@@ -63,6 +66,7 @@ La 2.14.0 (code 29) fue la primera versión para compartir: firmada para distrib
 - **APK de prueba:** `npm.cmd run android:sync` y, desde `android`:
   `.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug "-Pkotlin.incremental=false" "-Pabi=arm64-v8a" -x compileSpotifyNative --console=plain`
   En PowerShell los `-P` van entre comillas. Después de sincronizar, deshacer los cambios de saltos de línea: `git checkout -- android/app/capacitor.build.gradle android/capacitor.settings.gradle`.
+- **APK de prueba firmado como los de GitHub (desde 2.20):** `scripts/dev/compilar-prueba.ps1` compila con depuración, firma con la llave de release y lo instala encima por ADB. Cierra antes `npm run dev`: su vigilante traba `cap sync`.
 - **APK para compartir:** `scripts/compilar-release.ps1`. Necesita la llave de la bóveda local de la PC original (`murmur-firma` y `murmur-release.jks` en `%LOCALAPPDATA%\Inedito-Boveda`). **Solo esa PC puede firmar las versiones para compartir.** Si la llave se lleva a otra PC, tiene que ir por un medio seguro, nunca por el repositorio.
 - Las versiones de prueba y las de compartir tienen firmas distintas. Para cambiar de una a otra en el teléfono: Exportar respaldo, desinstalar, instalar e Importar respaldo.
 - **Vista previa web:** `npm.cmd run dev`; abrir `http://localhost:5173/?bienvenida` para ver la bienvenida (con viewport de 390×844 y de 360×640).
@@ -75,7 +79,7 @@ La 2.14.0 (code 29) fue la primera versión para compartir: firmada para distrib
 - La versión para compartir no permite inspeccionarla por dentro: con ella solo sirven logcat, capturas y el reporte de cierres.
 
 ## Decisiones tomadas (no volver a discutir)
-- Spotify reproduce con su gemela de YouTube Music. librespot y el Web SDK fallan por restricciones de Spotify (claves de audio rechazadas, sin DRM en WebView), y el dueño pidió no depender para nada de la app de Spotify.
+- Spotify suena con el Web Playback SDK dentro de MURMUR (desde 2.20; Widevine en el WebView sí funciona en el teléfono del dueño). librespot sigue rechazado por Spotify. La gemela de YouTube Music queda como respaldo y para cuentas sin Premium. **No depender nunca de la app de Spotify** (lo reiteró el dueño el 26 nov 2026): Connect queda solo como opción avanzada.
 - Spotify ya no permite leer playlists ajenas en modo desarrollo. Los ambientes usan playlists de YouTube Music: `youtubePlaylists`, y hay que quitar el prefijo «VL» antes de llamar a `youtubeCollection`.
 - La voz entiende sin comandos fijos: unas pocas reglas para los controles y, para la música, los catálogos deciden. Desde 2.15 la música solo suena con un pedido explícito («pon», «quiero», «en Spotify»): MURMUR no adivina.
 - «Ok MURMUR» comprueba la frase dos veces y solo abre el micrófono con la app en pantalla, con música o hasta 10 min después de pausar.

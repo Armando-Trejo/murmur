@@ -146,6 +146,10 @@ import { VoiceChoices } from "./components/VoiceChoices";
 import type { MomentMixResult } from "./core/momentMix";
 import { heardLabel, spokenReply } from "./core/voiceReplies";
 import { checkForUpdate, dismissUpdate } from "./core/updates";
+import { chooseSpotifyRoute } from "./core/spotifyBridge";
+import { UpdateCard, installRelease } from "./components/UpdateCard";
+import { GuestModeSetting } from "./components/GuestModeSetting";
+import { syncAutoLibrary, type AutoTrack } from "./core/autoLibrary";
 import { Welcome, needsWelcome } from "./components/Welcome";
 import {
   loadRecentSearches,
@@ -356,6 +360,17 @@ export default function App() {
   });
   const [busy, setBusy] = useState("");
   const [online, setOnline] = useState(navigator.onLine);
+  // First verified Spotify account: Premium plays Spotify itself inside MURMUR, Free its twin.
+  useEffect(() => {
+    if (!isNative || !status.spotify) return;
+    void chooseSpotifyRoute(
+      status,
+      async () => (await Auth.spotifyRequest({ path: "/me" })).data?.product as string | undefined,
+      async () => setStatus(await Auth.setSpotifyPlaybackMode({ mode: "web" })),
+    ).then((route) => {
+      if (route === "spotify") notify("Spotify sonará desde Spotify, dentro de MURMUR.", "success");
+    });
+  }, [status.spotify, status.spotifyWebAuthorized]);
 
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [wakeListening, setWakeListening] = useState(false);
@@ -442,6 +457,8 @@ export default function App() {
     [allTracks],
   );
   const storedPlaylists = useLiveQuery(() => db.playlists.toArray(), [], []);
+  // Android Auto keeps a copy of the library to browse while the app is closed.
+  useEffect(() => { syncAutoLibrary(); }, [storedTracks, storedPlaylists]);
   const playlists = useMemo(
     () =>
       storedPlaylists.map((playlist) => {
@@ -802,7 +819,13 @@ export default function App() {
       if (!release) return;
       notify(`Hay una versión nueva de MURMUR (${release.version}).`, "info", {
         label: "Actualizar",
-        run: () => { dismissUpdate(release.version); void Audio.openUpdate({ url: release.url }).catch((e) => notify((e as Error).message, "error")); },
+        run: () => {
+          dismissUpdate(release.version);
+          notify("Descargando la actualización de GitHub…");
+          void installRelease(release)
+            .then(() => notify("Toca Instalar en la ventana de Android. Tu biblioteca y tus cuentas se conservan.", "success"))
+            .catch((e) => notify((e as Error).message, "error"));
+        },
       });
     }), 25000);
     return () => clearTimeout(t);
@@ -941,6 +964,18 @@ export default function App() {
         "onVoiceCommandCaptured",
         (e) => void guard(() => latestNative.current.voiceCommand(e.text, e.source)),
       );
+      // Android Auto: a list or song chosen in the car plays like one chosen here.
+      void add("onAutoPlay", (e) => void guard(async () => {
+        const sent = (e.tracks ?? []) as AutoTrack[];
+        const stored = await db.tracks.bulkGet(sent.map((t) => t.id));
+        const queue = sent.map((t, i) => stored[i] ?? ({ ...t, tags: [] } as QueueItem));
+        if (queue.length) await player.playList(queue, Math.min(Math.max(0, Number(e.index) || 0), queue.length - 1));
+      }));
+      // «Pon …» said to the car: the same as asking «Ok MURMUR».
+      void add("onAutoSearch", (e) => {
+        const query = String(e.query ?? "").trim();
+        if (query) void guard(() => latestNative.current.voiceCommand(/^(pon|reproduce|play)/i.test(query) ? query : "pon " + query, "auto"));
+      });
       void CapacitorApp.addListener(
         "resume",
         () =>
@@ -2507,6 +2542,7 @@ export default function App() {
               <WakeWordSetting notify={notify} />
               <VoiceExtrasSetting notify={notify} />
               <SmartDownloadsSetting notify={notify} />
+              <GuestModeSetting notify={notify} />
               <button
                 className="setting-label setting-button"
                 onClick={() =>
@@ -2560,6 +2596,10 @@ export default function App() {
               </button>
               </details>
             </div>
+            <div className="section-heading">
+              <h2>Tu MURMUR</h2>
+            </div>
+            <UpdateCard notify={notify} />
             <details className="settings-fold advanced-fold">
             <summary>
               <ShieldCheck size={21} />

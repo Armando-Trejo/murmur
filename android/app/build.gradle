@@ -9,8 +9,8 @@ android {
         applicationId "com.personal.murmur"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 36
-        versionName "2.19.0"
+        versionCode 37
+        versionName "2.20.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Optional single-ABI build for direct phone downloads, e.g. -Pabi=arm64-v8a.
         if (project.hasProperty('abi')) {
@@ -38,7 +38,13 @@ android {
     }
     buildTypes {
         // -PtestSuffix=.bench: a second MURMUR beside the owner's, to measure without touching theirs.
-        debug { applicationIdSuffix project.findProperty("testSuffix") ?: "" }
+        debug {
+            applicationIdSuffix project.findProperty("testSuffix") ?: ""
+            // With the release key available (scripts/compilar-release.ps1 sets it), test builds carry
+            // the same signature as the public APKs, so a phone can move between them and still take
+            // updates from GitHub without uninstalling.
+            if (System.getenv('MURMUR_KEYSTORE')) signingConfig signingConfigs.release
+        }
         release {
             minifyEnabled false
             debuggable false

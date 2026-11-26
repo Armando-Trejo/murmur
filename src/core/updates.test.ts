@@ -19,6 +19,7 @@ describe("update check", () => {
     const apk = (name: string) => ({ name, browser_download_url: "https://github.com/Armando-Trejo/murmur/releases/download/v2.16.0/" + name });
     expect(pickDownload({ html_url: page, assets: [apk("MURMUR-2.16.0.apk"), apk("MURMUR-2.16.0-arm64.apk")] })).toMatch(/arm64/);
     expect(pickDownload({ html_url: page, assets: [apk("MURMUR-2.16.0.apk")] })).toMatch(/MURMUR-2\.16\.0\.apk$/);
+    expect(pickDownload({ html_url: page, assets: [apk("MURMUR-2.20.0-arm64.apk"), apk("MURMUR.apk")] })).toMatch(/\/MURMUR\.apk$/);
     expect(pickDownload({ html_url: page, assets: [] })).toBe(page);
   });
 });

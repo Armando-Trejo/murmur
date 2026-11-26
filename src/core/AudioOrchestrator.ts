@@ -91,6 +91,8 @@ export class AudioOrchestrator {
   private loadedId = "";
   private loadedSource: "youtube" | "spotify" | undefined;
   private spotifyTransport = "connect";
+  /** Queue entry whose Spotify player failed: it plays its YouTube Music twin this one time. */
+  private twinOnce = "";
   private queueTimer?: ReturnType<typeof setTimeout>;
   private loadingTimer?: ReturnType<typeof setTimeout>;
   private polling = false;
@@ -291,7 +293,17 @@ export class AudioOrchestrator {
       // Spotify refused its own playback here: play the YouTube Music twin with MURMUR's engine
       // from now on (no Spotify app needed), starting with this same song.
       if (event.code === "SPOTIFY_RETRY_YOUTUBE") {
-        setSpotifyViaYouTube(true);
+        // A route that can never work here is remembered; a single failing song plays its twin once.
+        if (event.permanent === false) this.twinOnce = this.current.queueId ?? "";
+        else setSpotifyViaYouTube(true);
+        this.update({ error: "", errorCode: "", loading: true, playing: false });
+        void this.playCurrent();
+        return;
+      }
+      // Any other failure of Spotify's player: the twin plays this song instead of silence.
+      const queueId = this.current.queueId;
+      if (queueId && this.twinOnce !== queueId) {
+        this.twinOnce = queueId;
         this.update({ error: "", errorCode: "", loading: true, playing: false });
         void this.playCurrent();
         return;
@@ -446,7 +458,7 @@ export class AudioOrchestrator {
         throw new Error(
           "La reproducción requiere la app Android. Puedes explorar y gestionar tu biblioteca aquí.",
         );
-      if (track.source === "spotify" && spotifyViaYouTube()) {
+      if (track.source === "spotify" && (spotifyViaYouTube() || this.twinOnce === track.queueId)) {
         // YouTube Music's twin first, then any other upload of the same song.
         const twin = (await youtubeTwin(track).catch(() => undefined)) ?? (await anotherVersion(track));
         if (generation !== this.generation) return;
@@ -520,6 +532,16 @@ export class AudioOrchestrator {
       }
     } catch (error) {
       const code = (error as { code?: string }).code;
+      // Spotify's player could not start this song (account signed out, a permission missing, no
+      // Premium): play its YouTube Music twin instead of stopping, once per queue entry.
+      const original = this.state.queue[this.state.index];
+      if (generation === this.generation && original?.source === "spotify" && original.queueId &&
+          this.twinOnce !== original.queueId && !spotifyViaYouTube()) {
+        this.twinOnce = original.queueId;
+        this.update({ error: "", errorCode: "" });
+        void this.playCurrent();
+        return;
+      }
       // A song with no playable version anywhere is skipped, so the music doesn't stop.
       if (generation === this.generation && code === "SPOTIFY_NO_TWIN" && this.skipUnplayable()) return;
       if (generation === this.generation && !this.state.error)

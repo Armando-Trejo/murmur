@@ -182,6 +182,50 @@ class YouTubeAudioPlugin : Plugin() {
         try { activity.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); call.resolve() }
         catch (e: Exception) { call.reject("No se encontró un navegador para descargar la actualización") }
     }
+    /** The library copy Android Auto browses; written by the app, read by HybridMediaService. */
+    @PluginMethod fun setAutoLibrary(call: PluginCall) = async(call) {
+        val json = call.getString("json") ?: error("Sin biblioteca")
+        require(json.length < 4_000_000) { "Biblioteca demasiado grande" }
+        withContext(Dispatchers.IO) { AutoLibrary.save(context, json) }
+        HybridMediaService.instance?.libraryChanged()
+        null
+    }
+    /** Opens a help page in the browser: Spotify for Developers (guided setup) or MURMUR's own pages. */
+    @PluginMethod fun openLink(call: PluginCall) {
+        val uri = android.net.Uri.parse(call.getString("url") ?: return call.reject("Sin enlace"))
+        val allowed = uri.scheme == "https" && (uri.host == "developer.spotify.com" ||
+            uri.host == "armando-trejo.github.io" ||
+            (uri.host == "github.com" && (uri.path ?: "").startsWith("/Armando-Trejo/murmur")))
+        if (!allowed) return call.reject("Enlace no permitido")
+        try { activity.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); call.resolve() }
+        catch (_: Exception) { call.reject("No hay un navegador para abrir el enlace") }
+    }
+    private var updateFile: File? = null
+    /**
+     * Downloads the release APK from GitHub (progress in onUpdateProgress) and opens Android's
+     * installer. Rejects with UPDATE_SIGNATURE when the APK is signed with another key (Android would
+     * refuse to install it over this one) and UPDATE_PERMISSION after opening the "install unknown
+     * apps" setting the first time.
+     */
+    @PluginMethod fun installUpdate(call: PluginCall) = async(call) {
+        val url = call.getString("url") ?: error("Sin enlace")
+        if (!UpdateInstaller.allowed(url)) error("Enlace de actualización no permitido")
+        val apk = updateFile?.takeIf { it.exists() && call.getBoolean("reuse") == true } ?: withContext(Dispatchers.IO) {
+            UpdateInstaller.download(context, url) { pct -> notifyListeners("onUpdateProgress", JSObject().put("percent", pct)) }
+        }
+        updateFile = apk
+        when (val problem = withContext(Dispatchers.IO) { UpdateInstaller.verify(context, apk) }) {
+            null -> {}
+            "SIGNATURE" -> throw ProviderFailure("UPDATE_SIGNATURE", 409, "github", "update", "Esta versión está firmada con otra llave. Exporta tu respaldo, desinstala MURMUR e instala el APK nuevo; después importa el respaldo.")
+            else -> error(problem)
+        }
+        if (!UpdateInstaller.canInstall(context)) {
+            activity.startActivity(UpdateInstaller.permissionIntent(context))
+            throw ProviderFailure("UPDATE_PERMISSION", 403, "github", "update", "Permite a MURMUR instalar apps y vuelve a tocar Instalar.")
+        }
+        activity.startActivity(UpdateInstaller.installIntent(context, apk))
+        JSObject().put("installing", true)
+    }
     /** MURMUR speaks a short answer or line (text-to-speech in Spanish; the music dips meanwhile). */
     @PluginMethod fun speak(call: PluginCall) {
         val text = call.getString("text") ?: return call.reject("Sin texto")

@@ -6,10 +6,10 @@ import { creditedArtists } from "../components/ArtistProfile";
 import type { QueueItem } from "./types";
 
 /**
- * Spotify on this phone refuses audio to third-party players (librespot "audio key" refusals, an
- * account-level block reported upstream) and its Web player has no DRM in Android WebView. MURMUR
- * must not depend on the Spotify app, so a Spotify track can play its YouTube Music twin through
- * MURMUR's own engine: same title, same artist, length within a few seconds.
+ * Spotify refuses audio keys to librespot on many accounts, so Premium accounts play through
+ * Spotify's own Web player inside MURMUR. Free accounts (and any song that player cannot start)
+ * play the YouTube Music twin through MURMUR's own engine: same title, same artist, length within a
+ * few seconds. MURMUR never depends on the Spotify app.
  */
 export interface YouTubeSong {
   videoId: string;
@@ -22,13 +22,45 @@ export interface YouTubeSong {
 
 const VIA_KEY = "murmur.spotifyVia";
 /**
- * Spotify songs play through MURMUR's own engine (their YouTube Music twin) unless the user chose
- * a Spotify engine in Opciones avanzadas ("spotify"). New installs never depend on the Spotify app.
+ * Spotify songs play through their YouTube Music twin unless Spotify's own player was chosen
+ * ("spotify"), automatically for Premium accounts or in Opciones.
  */
 export const spotifyViaYouTube = () => typeof localStorage === "undefined" || localStorage.getItem(VIA_KEY) !== "spotify";
 export function setSpotifyViaYouTube(value: boolean) {
   if (value) localStorage.removeItem(VIA_KEY);
   else localStorage.setItem(VIA_KEY, "spotify");
+}
+
+const ROUTE_SET = "murmur.spotifyRouteSet";
+/** True once the person (or the first automatic choice) settled how Spotify sounds. */
+export const spotifyRouteSettled = () => typeof localStorage !== "undefined" && localStorage.getItem(ROUTE_SET) === "1";
+export function settleSpotifyRoute() {
+  try { localStorage.setItem(ROUTE_SET, "1"); } catch { /* ignore */ }
+}
+
+/**
+ * The first time a Spotify account is verified, Premium accounts play Spotify itself inside MURMUR
+ * (the official Web player in MURMUR's own WebView: no Spotify app, works with the screen off).
+ * Free accounts, or a phone without the permission for that player, keep the YouTube Music twin.
+ * A choice made in Opciones is never overridden.
+ */
+export async function chooseSpotifyRoute(
+  status: { spotify?: boolean; spotifyWebAuthorized?: boolean },
+  product: () => Promise<string | undefined>,
+  useWebPlayer: () => Promise<unknown>,
+): Promise<"spotify" | "youtube" | undefined> {
+  if (!status.spotify || spotifyRouteSettled()) return undefined;
+  const plan = await product().catch(() => undefined);
+  if (!plan) return undefined; // offline or unknown: decide next time
+  if (plan === "premium" && status.spotifyWebAuthorized) {
+    await useWebPlayer();
+    setSpotifyViaYouTube(false);
+    settleSpotifyRoute();
+    return "spotify";
+  }
+  setSpotifyViaYouTube(true);
+  settleSpotifyRoute();
+  return "youtube";
 }
 
 const cleanTitle = (title: string) =>

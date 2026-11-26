@@ -1,4 +1,5 @@
 import { Voice, isNative } from "../native";
+import { tasteHistory } from "./tasteGuard";
 import { db } from "./db";
 import { normalize } from "./FanUploadParser";
 import { creditedArtists } from "../components/ArtistProfile";
@@ -367,16 +368,18 @@ export interface MomentProfile {
 
 /** Everything about this moment that needs only the phone's data: no network. */
 export function momentProfile(
-  history: HistoryEntry[],
+  allHistory: HistoryEntry[],
   library: QueueItem[],
   now: Date,
   { minPlays = MIN_WINDOW_PLAYS, hours = 2, days = 60, recentHours = 3 } = {},
 ): MomentProfile {
   const moment = momentFor(now.getHours(), now.getDay());
   const byId = new Map(library.map((t) => [t.id, t]));
-  const taste = tasteProfile(history, library, {});
+  // Your moments come from your listening, not from tests or guests (see tasteGuard).
+  const history = tasteHistory(allHistory, library);
+  const taste = tasteProfile(allHistory, library, {});
   const disliked = new Set([...taste.entries()].filter(([, w]) => w <= -3).map(([a]) => a));
-  const recent = recentKeys(history, byId, now, recentHours);
+  const recent = recentKeys(allHistory, byId, now, recentHours);
   const closeness = (entry: HistoryEntry) => 1 - (0.4 * hourDistance(new Date(entry.at), now)) / hours;
 
   let basis: MixBasis = "hour";

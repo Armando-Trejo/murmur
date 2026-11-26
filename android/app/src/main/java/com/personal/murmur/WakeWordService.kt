@@ -201,7 +201,9 @@ class WakeWordService : Service() {
     }
 
     /** Last time music played: the phrase stays useful a while after a pause ("Ok MURMUR, continúa"). */
-    @Volatile private var lastMusicAt = android.os.SystemClock.elapsedRealtime()
+    // Starts "long ago": right after the service starts the microphone opens only for the app on
+    // screen or for music, not for three minutes of silence with the screen off.
+    @Volatile private var lastMusicAt = android.os.SystemClock.elapsedRealtime() - IDLE_GRACE_MS
     private var listeningShown = true
 
     /**
