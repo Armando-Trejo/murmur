@@ -277,3 +277,13 @@ footer a:hover { color: var(--text); }
   .card h3 { margin-top: 2px; font-size: 17.5px; }
   .card p { margin-top: 4px; font-size: 15px; }
 }
+
+/* Tarjeta ancha para lo más reciente: cierra la cuadrícula sin dejar una tarjeta sola. */
+.card.wide { grid-column: 1 / -1; display: flex; gap: 20px; align-items: flex-start; border-color: rgba(155, 135, 245, 0.35); }
+.card.wide .icon { flex-shrink: 0; margin: 0; }
+.card.wide h3 { margin-top: 6px; }
+.tag {
+  display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase; background: rgba(155, 135, 245, 0.18); color: #c9bcff;
+}
+@media (max-width: 639px) { .card.wide { display: grid; gap: 0 14px; } .card.wide .icon { grid-row: auto; } }

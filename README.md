@@ -35,6 +35,7 @@ MURMUR junta en una sola app la música que tienes en **Spotify** y en **YouTube
 
 - **Spotify dentro de MURMUR.** Suena desde Spotify sin abrir su app; si una canción falla, MURMUR pone la misma grabación de YouTube Music.
 - **YouTube Music con tu cuenta.** Tus playlists, mixes, álbumes y recomendaciones.
+- **Inicio que se renueva.** Desliza hacia abajo y «Para ti» cambia: secciones según el ánimo, otras canciones al frente y otras de tus favoritas de Spotify.
 - **Voz «Ok MURMUR».** Pide una canción, un artista o un mix sin tocar la pantalla.
 - **Android Auto.** Tu biblioteca y tus mixes en la pantalla del coche.
 - **Letras sincronizadas.** La línea que suena se ilumina; toca una para saltar a ese momento.
