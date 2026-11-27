@@ -213,7 +213,7 @@ class WakeWordService : Service() {
     private fun useful(): Boolean {
         val now = android.os.SystemClock.elapsedRealtime()
         val audio = getSystemService(android.media.AudioManager::class.java)
-        if (audio?.isMusicActive == true || HybridMediaService.instance?.visualPlaying == true) lastMusicAt = now
+        if (audio?.isMusicActive == true || HybridMediaService.instance?.playingAnyThread == true) lastMusicAt = now
         if (mode(this) == "screen") return appVisible
         return appVisible || now - lastMusicAt < IDLE_GRACE_MS
     }

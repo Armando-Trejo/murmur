@@ -66,7 +66,6 @@ class VisualizerRenderTest {
                 else -> null
             }
             val stage = checkNotNull(find(root, AuraStageView::class.java))
-            assertNotNull(find(root, DotClockView::class.java))
             stage.setArtwork(BitmapFactory.decodeFile("../../verification/fixtures/cover-2.jpg"))
             look?.let { stage.showLook(it.first, it.second) }
             val signal = song(4.0)

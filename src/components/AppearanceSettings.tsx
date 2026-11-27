@@ -6,7 +6,7 @@ import {
   DEFAULT_ACCENT,
   accentInk,
 } from "../core/appearance";
-import { Palette, Sparkles, Check, Lock, Hand } from "lucide-react";
+import { Palette, Sparkles, Check, Lock, Hand, Volume2 } from "lucide-react";
 import { Audio, isNative } from "../native";
 
 /** On by default (native side); the switch only reflects and changes the stored native preference. */
@@ -27,6 +27,21 @@ function useLockVisualizer() {
   const change = async (value: boolean) => {
     setEnabled(value);
     if (isNative) await Audio.setLockVisualizer({ enabled: value });
+  };
+  return { enabled, change };
+}
+/** On by default: every song at the same level. */
+function useEvenVolume() {
+  const [enabled, setEnabled] = useState(true);
+  useEffect(() => {
+    if (!isNative) return;
+    let live = true;
+    void Audio.getEvenVolume().then((state) => live && setEnabled(state.enabled)).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  const change = async (value: boolean) => {
+    setEnabled(value);
+    if (isNative) await Audio.setEvenVolume({ enabled: value });
   };
   return { enabled, change };
 }
@@ -92,6 +107,7 @@ export function AppearanceSettings({
   const [draft, setDraft] = useState(appearance.accent);
   const lock = useLockVisualizer();
   const seekLock = useSeekLock();
+  const evenVolume = useEvenVolume();
   useEffect(() => setDraft(appearance.accent), [appearance.accent]);
   const save = async (color: string) => {
     try {
@@ -187,6 +203,22 @@ export function AppearanceSettings({
             void lock
               .change(event.target.checked)
               .catch(() => notify("No se pudo guardar el ajuste de bloqueo.", "error"))
+          }
+        />
+      </label>
+      <label className="glow-option">
+        <Volume2 size={20} />
+        <span>
+          Volumen parejo
+          <small>Todas las canciones suenan al mismo nivel, como en YouTube Music y Spotify: las muy fuertes bajan y las bajitas suben</small>
+        </span>
+        <input
+          type="checkbox"
+          checked={evenVolume.enabled}
+          onChange={(event) =>
+            void evenVolume
+              .change(event.target.checked)
+              .catch(() => notify("No se pudo guardar el volumen parejo.", "error"))
           }
         />
       </label>

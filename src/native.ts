@@ -54,6 +54,9 @@ interface AudioBridge {
   /** Music screen over the lock screen when the display turns off during playback. */
   setLockVisualizer(o: { enabled: boolean }): Promise<void>;
   getLockVisualizer(): Promise<{ enabled: boolean }>;
+  /** «Volumen parejo»: every song at the same level (YouTube's loudness, or measured). On by default. */
+  setEvenVolume(o: { enabled: boolean }): Promise<void>;
+  getEvenVolume(): Promise<{ enabled: boolean }>;
   /** Opciones › lock the seek bar of the music screen (pockets). */
   setVisualSeekLock(o: { locked: boolean }): Promise<void>;
   getVisualSeekLock(): Promise<{ locked: boolean }>;

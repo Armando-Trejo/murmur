@@ -15,7 +15,6 @@ import android.graphics.RadialGradient
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
-import android.graphics.Typeface
 import android.view.View
 import kotlin.math.PI
 import kotlin.math.abs
@@ -28,13 +27,12 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * MURMUR's music stage, modern-brutalist. Layers, back to front:
+ * MURMUR's music stage. Layers, back to front:
  *  1. a fluid background that rotates between looks (liquid light, colour mesh, silk, aurora), dyed
  *     with the artwork palette and crossfaded on every change;
  *  2. one rhythm indicator, also rotating: gradient pulse lines from the disc, animated topographic
  *     contours, or glowing scan lines that follow the spectrum;
  *  3. the circular artwork disc on a spring: it breathes with the bass and kicks on beats;
- *  4. hairline rules and monospaced labels (the brutalist frame).
  * Looks change with each new song and every 90 s of playback. Everything reuses its buffers; shaders
  * are rebuilt only when the artwork palette changes.
  */
@@ -151,10 +149,6 @@ internal class AuraStageView(context: Context) : View(context) {
     private val discPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val fieldPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
     private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val mono = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        letterSpacing = .18f
-    }
     private val matrix = Matrix()
     private val fieldRect = Rect()
     private val fieldTarget = RectF()
@@ -242,7 +236,7 @@ internal class AuraStageView(context: Context) : View(context) {
         if (width <= 0 || height <= 0) return
         val area = stage()
         // The disc and its indicator fill the space between the frame's labels (no beat strip). The
-        // indicator, its ruler ticks included, reaches about 1.75 radii and never crosses the rules.
+        // indicator reaches about 1.7 radii and never runs into the clock or the title.
         val labels = dp(LABEL_SPACE)
         val free = area.height() - 2f * labels
         discRadius = min(area.width() * .29f, free / (2f * OUTER)).coerceAtLeast(dp(36f))
@@ -366,7 +360,6 @@ internal class AuraStageView(context: Context) : View(context) {
         canvas.restore()
         drawDisc(canvas)
         canvas.restore()
-        drawFrame(canvas)
 
         val wasAnimating = animating
         animating = running && allowMotion && isShown && windowVisibility == VISIBLE && (playing || settling())
@@ -693,18 +686,6 @@ internal class AuraStageView(context: Context) : View(context) {
             lines[n++] = cx + ux * (r0 + len)
             lines[n++] = cy + uy * (r0 + len)
         }
-        // Faint ruler ticks: the brutalist scale the spokes rise from.
-        stroke.shader = null
-        stroke.color = Color.WHITE
-        stroke.alpha = (44 * alpha).toInt()
-        stroke.strokeWidth = dp(.8f)
-        stroke.strokeCap = Paint.Cap.BUTT
-        val tick = discRadius * .05f
-        for (s in 0 until SPOKES step 2) {
-            val a = 2f * PI.toFloat() * s / SPOKES + sway
-            val r = r0 + reach + dp(6f)
-            canvas.drawLine(cx + cos(a) * r, cy + sin(a) * r, cx + cos(a) * (r + tick), cy + sin(a) * (r + tick), stroke)
-        }
         val shader = spokeShade ?: return
         val outer = r0 + reach
         matrix.setScale(outer, outer)
@@ -883,43 +864,6 @@ internal class AuraStageView(context: Context) : View(context) {
         fill.alpha = 255
     }
 
-    // ---------------------------------------------------------------- brutalist frame
-
-    /** Hairline rules above and below the stage, with monospaced labels: what plays, how loud. */
-    private fun drawFrame(canvas: Canvas) {
-        val area = stage()
-        if (area.width() < dp(160f)) return
-        val left = area.left + dp(22f)
-        val right = area.right - dp(22f)
-        val top = area.top + dp(4f)
-        val bottom = area.bottom - dp(2f)
-        stroke.shader = null
-        stroke.color = Color.WHITE
-        stroke.alpha = 46
-        stroke.strokeWidth = dp(.7f)
-        stroke.strokeCap = Paint.Cap.BUTT
-        canvas.drawLine(left, top, right, top, stroke)
-        canvas.drawLine(left, bottom, right, bottom, stroke)
-        // Corner ticks.
-        val t = dp(7f)
-        stroke.alpha = 120
-        canvas.drawLine(left, top, left, top + t, stroke)
-        canvas.drawLine(right, top, right, top + t, stroke)
-        canvas.drawLine(left, bottom, left, bottom - t, stroke)
-        canvas.drawLine(right, bottom, right, bottom - t, stroke)
-        mono.textSize = dp(8.5f)
-        mono.color = Color.WHITE
-        mono.alpha = 150
-        mono.textAlign = Paint.Align.LEFT
-        val label = "%02d/%02d  %s × %s".format(background + 1, BACKGROUNDS.size, BACKGROUNDS[background], INDICATORS[indicator])
-        canvas.drawText(label, left, top + t + dp(10f), mono)
-        mono.textAlign = Paint.Align.RIGHT
-        val meter = (level * 100).roundToInt().coerceIn(0, 99)
-        canvas.drawText(if (playing) "SONANDO" else "EN PAUSA", right, top + t + dp(10f), mono)
-        mono.alpha = if (beatFlash > .2f) 255 else 120
-        canvas.drawText("NV %02d".format(meter) + if (beatFlash > .2f) "  ●" else "  ○", right, bottom - t - dp(4f), mono)
-    }
-
     // ---------------------------------------------------------------- helpers
 
     private fun ease(t: Float) = t * t * (3f - 2f * t)
@@ -939,10 +883,10 @@ internal class AuraStageView(context: Context) : View(context) {
         const val SPOKES = 72
         /** How far the indicator reaches, in disc radii. */
         const val REACH = 1.62f
-        /** The whole indicator with its ruler ticks, in disc radii (for layout). */
-        const val OUTER = 1.76f
+        /** The whole indicator, in disc radii (for layout). */
+        const val OUTER = 1.68f
         /** Room for the frame's labels above and below the stage, in dp. */
-        const val LABEL_SPACE = 30f
+        const val LABEL_SPACE = 10f
         const val RIPPLE_LIFE = 1.6f
         const val LOOK_SECONDS = 90f
         const val DISC_W = 15.08f // 2π · 2.4 Hz

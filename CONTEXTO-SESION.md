@@ -10,7 +10,19 @@ Léelo primero si continúas MURMUR en otra PC u otra sesión. El detalle técni
 - No escribir contraseñas en formularios. Las sesiones de YouTube Music y Spotify las inicia él en el teléfono.
 - No inventar resultados: lo probado en el teléfono se dice como probado, y lo demás como no verificado.
 
-## Estado actual: 2.22.0 (code 44)
+## Estado actual: 2.22.1 (code 45)
+La 2.22.1 trae:
+- **«Volumen parejo»** (`Loudness.kt`, Opciones › Apariencia, encendido por defecto). Lleva cada canción de YouTube a −11 LUFS (`TARGET_DB = 3` sobre la referencia de −14 de YouTube). Baja hasta 12 dB con el volumen del reproductor y sube hasta 6 dB con LoudnessEnhancer, aplicado a los dos reproductores, a la mezcla y a la cadena sin pausas.
+  - **De dónde sale el dato:** la respuesta del reproductor ya no trae `loudnessDb`, sino `trackAbsoluteLoudnessLkfs` y `loudnessTargetLkfs`. Se lee del `playerResponse` privado del extractor de NewPipe por reflexión; el cliente directo ANDROID_MUSIC hoy recibe LOGIN_REQUIRED.
+  - **Canciones descargadas:** el dato se pide en segundo plano una vez.
+  - **Sin dato:** se mide durante 25 s (falta calibrar `measureOffsetDb`).
+  - Los valores se guardan en `shared_prefs/loudness.xml`.
+- **«Ok MURMUR» ya no se apaga tras «para».** `WakeWordService.useful()` leía `primaryPlayer.isPlaying` desde su hilo, ExoPlayer lanzaba «wrong thread» y la escucha quedaba «en espera». Ahora usa `playingAnyThread`. El fallo venía de antes.
+- La búsqueda de YouTube de la voz tiene un límite de 4 s.
+- **Visualizador:** sin etiquetas, cifras, líneas de marco ni marcas; reloj con tipografía delgada del sistema en lugar del de puntos.
+- **Para probar:** las teclas multimedia mandadas por ADB pueden llegarle a otra app; mejor `scripts/dev/voz.ps1 "siguiente"`.
+
+### 2.22.0 (code 44)
 La 2.22.0 trae:
 - **Visualizador nuevo** (`AuraStageView.kt`). Cuatro fondos fluidos rotan con cada canción y cada 90 s, con fundido: líquido, malla, seda y aurora. Tres indicadores de ritmo rotan aparte: pulso (rayos con degradado), topolíneas (con ondas en cada golpe) y glow (líneas con brillo). Tiene marco brutalista con etiquetas mono. Ya no hay franja de puntos ni chispas, y los controles quedan más arriba. `showLook()` fija un estilo para las pruebas; `VisualizerRenderTest.everyLookRenders` deja una imagen por estilo en `android/app/build/visualizer-preview`.
 - **Opciones › Apariencia › «Bloquear la barra en la pantalla musical»** (`VisualSeekLock`, apagada por defecto).

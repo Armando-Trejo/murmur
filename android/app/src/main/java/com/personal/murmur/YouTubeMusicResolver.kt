@@ -21,6 +21,12 @@ object YouTubeMusicResolver {
             .map{PlaybackSource(it.getString("url"),it.optString("mimeType").substringBefore(';'))}.distinctBy{it.uri}
         if(candidates.isEmpty())throw YoutubeSourceFailure("direct_audio_unavailable")
         val details=data.optJSONObject("videoDetails")?:JSONObject()
+        // «Volumen parejo»: how loud YouTube says this upload is against its reference.
+        val audioConfig=data.optJSONObject("playerConfig")?.optJSONObject("audioConfig")
+        val loudness=audioConfig?.let{config->Loudness.fromAudioConfig{key->config.optDouble(key,Double.NaN).takeUnless{it.isNaN()}}}
+            ?: (0 until (formats?.length()?:0)).map{formats!!.getJSONObject(it)}
+            .firstOrNull{it.optString("mimeType").startsWith("audio/") && it.has("loudnessDb")}?.optDouble("loudnessDb",Double.NaN)
+        if(loudness!=null) Loudness.report(details.optString("videoId"),loudness)
         return Audio(details.optString("lengthSeconds").toLongOrNull()?:0L,details.optString("shortDescription"),candidates)
     }
     fun resolve(videoId:String):Audio {

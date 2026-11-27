@@ -56,6 +56,8 @@ class HybridMediaService : MediaLibraryService() {
         @Volatile var uiVisible = true
         /** Music level while the person talks to MURMUR (about -26 dB): low enough for the recognizer, still continuous. */
         const val DUCK_GAIN = 0.05f
+        /** 25 s of sound at one sample every 100 ms (a song's first seconds alone mislead). */
+        const val MEASURE_SAMPLES = 250
         /** Music level under the presenter's voice: a dip you still hear (about -9 dB), not a mute. */
         const val TALK_GAIN = 0.35f
     }
@@ -64,7 +66,8 @@ class HybridMediaService : MediaLibraryService() {
     lateinit var primaryPlayer: ExoPlayer
     private lateinit var secondaryPlayer: ExoPlayer
     private var session: MediaLibrarySession? = null
-    private var enhancer: LoudnessEnhancer? = null
+    /** One LoudnessEnhancer per player: quiet songs come up (also the incoming one during a mix). */
+    private val enhancers = mutableMapOf<ExoPlayer, LoudnessEnhancer>()
     private var fade: Job? = null
     private var preparing: Job? = null
     private var volumeFade:Job?=null
@@ -155,6 +158,11 @@ class HybridMediaService : MediaLibraryService() {
     private var ducking = false
     private val meters = mutableMapOf<ExoPlayer, Meter>()
     val visualPlaying get() = if (spotifyActive) spotifyIntegrated.playing else primaryPlayer.isPlaying
+    /**
+     * Whether music plays, readable from any thread ("Ok MURMUR" listens on its own thread; ExoPlayer
+     * may only be asked on the main thread, and asking from elsewhere stopped the listener after a pause).
+     */
+    @Volatile var playingAnyThread = false; private set
     val visualAmplitude get()=if(spotifyActive)spotifyIntegrated.visualAmplitude else if(primaryPlayer.isPlaying)meters[primaryPlayer]?.amplitude ?: 0f else 0f
     private val visualAnalyzer = SpectrumAnalyzer()
     /** Spectrum + beat analysis of what is audible now. Main thread; idempotent per frame time. */
@@ -356,6 +364,8 @@ class HybridMediaService : MediaLibraryService() {
     }
     override fun onCreate() {
         super.onCreate(); instance = this; mode = getSharedPreferences("playback", 0).getString("mix_mode", "smooth") ?: "smooth"
+        Loudness.init(this)
+        handler.post(loudnessSampler)
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel("hybrid_playback", "Reproducción", NotificationManager.IMPORTANCE_LOW))
         setMediaNotificationProvider(DefaultMediaNotificationProvider.Builder(this).setNotificationId(1001).setChannelId("hybrid_playback").build().apply{setSmallIcon(R.drawable.ic_stat_sound)})
@@ -404,7 +414,7 @@ class HybridMediaService : MediaLibraryService() {
     }
     private val headset = Runnable { if (presses >= 2) { VoiceTriggerManager.launch(this, "headset") } else if(spotifyActive){if(spotifyIntegrated.playing)spotifyIntegrated.pauseIntegrated()else spotifyIntegrated.resumeIntegrated()}else if (primaryPlayer.isPlaying) primaryPlayer.pause() else primaryPlayer.play(); presses = 0 }
     private val listener = object : Player.Listener {
-        override fun onIsPlayingChanged(isPlaying: Boolean) { if(spotifyActive)return; if (!isPlaying && fade != null && !primaryPlayer.playWhenReady) pausePlayback(); NativeEvents.emit("onPlaybackStateChanged", JSObject().put("trackId",track?.optString("id")).put("queueId",track?.optString("queueId")).put("playing", isPlaying).put("loading", youtubeLoading)); MurmurWidget.sync(this@HybridMediaService)
+        override fun onIsPlayingChanged(isPlaying: Boolean) { if(!spotifyActive) playingAnyThread = isPlaying; if(spotifyActive)return; if (!isPlaying && fade != null && !primaryPlayer.playWhenReady) pausePlayback(); NativeEvents.emit("onPlaybackStateChanged", JSObject().put("trackId",track?.optString("id")).put("queueId",track?.optString("queueId")).put("playing", isPlaying).put("loading", youtubeLoading)); MurmurWidget.sync(this@HybridMediaService)
             // Presenter (off by default): names a song once, when it actually starts sounding.
             if (isPlaying) SpokenReplies.announce(this@HybridMediaService, track) }
         override fun onPlaybackStateChanged(state: Int) {
@@ -472,7 +482,7 @@ class HybridMediaService : MediaLibraryService() {
                 else -> "AUDIO_PLAYBACK_FAILED"
             }, message)
         }
-        override fun onAudioSessionIdChanged(audioSessionId: Int) { configureEnhancer(audioSessionId) }
+        override fun onAudioSessionIdChanged(audioSessionId: Int) { configureEnhancer(primaryPlayer, track) }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             if (spotifyActive || primaryPlayer.currentMediaItemIndex == 0) return
             chainedTrack?.let { adoptChained(it) }
@@ -488,12 +498,32 @@ class HybridMediaService : MediaLibraryService() {
     }
 
     private fun attach(player: ExoPlayer) { player.addListener(listener) }
-    private fun configureEnhancer(id: Int) {
-        val gain = if (track?.optJSONArray("tags")?.toString()?.contains(Regex("live|bootleg")) == true) 400 else 0
-        enhancer?.release(); enhancer = null
-        if (id == C.AUDIO_SESSION_ID_UNSET || gain == 0) return
-        try { enhancer = LoudnessEnhancer(id).apply { setTargetGain(gain); enabled = true } } catch (_: Exception) { }
+    /**
+     * «Volumen parejo»: a quiet song is brought up to the reference with the enhancer (loud ones go
+     * down with the player's volume, see [baseGain]). Live and bootleg uploads keep their small lift
+     * while their level is unknown.
+     */
+    private fun configureEnhancer(player: ExoPlayer, data: JSONObject?) {
+        val known = Loudness.correctionDb(data?.optString("videoId"))
+        if (android.util.Log.isLoggable(DEBUG_TAG, android.util.Log.DEBUG))
+            android.util.Log.d(DEBUG_TAG, "level ${data?.optString("videoId")} correction=$known volume=${attenuation(data)} boostMb=${Loudness.boostMb(data?.optString("videoId"))}")
+        val gain = if (known != null) Loudness.boostMb(data?.optString("videoId"))
+            else if (data?.optJSONArray("tags")?.toString()?.contains(Regex("live|bootleg")) == true) 400 else 0
+        val id = player.audioSessionId
+        val current = enhancers[player]
+        if (gain == 0 || id == C.AUDIO_SESSION_ID_UNSET) { current?.let { runCatching { it.enabled = false } }; return }
+        try {
+            val enhancer = current?.takeIf { enhancerSessions[player] == id } ?: run {
+                current?.release()
+                LoudnessEnhancer(id).also { enhancers[player] = it; enhancerSessions[player] = id }
+            }
+            enhancer.setTargetGain(gain)
+            enhancer.enabled = true
+        } catch (_: Exception) { }
     }
+    private val enhancerSessions = mutableMapOf<ExoPlayer, Int>()
+    /** Player volume for a song with «Volumen parejo»: loud songs are turned down to the reference. */
+    private fun attenuation(data: JSONObject?) = Loudness.attenuation(data?.optString("videoId"))
     private fun item(url: String, data: JSONObject, mime: String? = null) = MediaItem.Builder().setUri(url).setMimeType(mime).setMediaId(data.optString("id"))
         .setCustomCacheKey(MediaCache.key(url, data.optString("videoId"))).setMediaMetadata(MediaMetadata.Builder().setTitle(data.optString("title")).setArtist(data.optString("artist")).setCover(data).build()).build()
     fun play(url: String, data: JSONObject) = playSources(listOf(PlaybackSource(url)), data)
@@ -517,7 +547,8 @@ class HybridMediaService : MediaLibraryService() {
         fade?.cancel(); fade = null; preparing?.cancel(); secondaryPlayer.stop(); secondaryPlayer.clearMediaItems(); nextTrack = null; pendingTrack = null; chainedTrack = null
         sourceTrackId = data.optString("id"); sourceAttempts = 1; alternatives.clear(); alternatives.addAll(sources.drop(1))
         track = data; primaryPlayer.volume = baseGain()
-        primaryPlayer.setMediaItem(item(first.uri, data, first.mime), startPosition); primaryPlayer.prepare(); primaryPlayer.play(); configureEnhancer(primaryPlayer.audioSessionId)
+        primaryPlayer.setMediaItem(item(first.uri, data, first.mime), startPosition); primaryPlayer.prepare(); primaryPlayer.play(); configureEnhancer(primaryPlayer, data)
+        lookUpLevel(data)
         updateMediaButtons()
     }
     private fun entryIdentity(data:JSONObject?) = data?.optString("queueId")?.takeIf{it.isNotBlank()} ?: data?.optString("id").orEmpty()
@@ -593,7 +624,9 @@ class HybridMediaService : MediaLibraryService() {
         nextTrack = null
         pendingTrack = null
         tailIdentity = ""
-        configureEnhancer(primaryPlayer.audioSessionId)
+        // Gapless: the new song's level as it starts.
+        if (fade == null && volumeFade?.isActive != true) primaryPlayer.volume = baseGain()
+        configureEnhancer(primaryPlayer, target)
         updateMediaButtons()
         emitNativeTrack(target)
     }
@@ -623,6 +656,7 @@ class HybridMediaService : MediaLibraryService() {
         secondaryPlayer.setMediaItem(item(source.uri, data, source.mime), 0L)
         secondaryPlayer.volume = 0f
         secondaryPlayer.prepare()
+        configureEnhancer(secondaryPlayer, data)
         nextTrack = data
         pendingTrack = null
     }
@@ -662,7 +696,9 @@ class HybridMediaService : MediaLibraryService() {
     private var talkGain = 1f
     private var talkFade: Job? = null
     /** Level the players sit at when nothing else fades them: listening duck × presenter dip. */
-    private fun baseGain() = (if (ducking) DUCK_GAIN else 1f) * talkGain
+    private fun baseGain() = levelGain() * attenuation(track)
+    /** Listening duck × presenter dip, without the song's own level. */
+    private fun levelGain() = (if (ducking) DUCK_GAIN else 1f) * talkGain
 
     /**
      * Presenter voice over the music: the song dips to [TALK_GAIN] in 0.3 s and, when the voice
@@ -761,7 +797,7 @@ class HybridMediaService : MediaLibraryService() {
         secondaryPlayer.volume = 0f
         attach(primaryPlayer)
         primaryPlayer.play()
-        configureEnhancer(primaryPlayer.audioSessionId)
+        configureEnhancer(primaryPlayer, target)
         sessionPlayer(primaryPlayer)
         if (announce) emitNativeTrack(target)
     }
@@ -790,9 +826,9 @@ class HybridMediaService : MediaLibraryService() {
                 }
                 val fraction = ((android.os.SystemClock.elapsedRealtime() - started).toDouble() / duration).coerceIn(0.0, 1.0)
                 val gains = AutoMixCurve.gains(fraction)
-                val base = baseGain()
-                outgoing.volume = gains.first * base
-                incoming.volume = gains.second * base
+                val level = levelGain()
+                outgoing.volume = gains.first * level * attenuation(track)
+                incoming.volume = gains.second * level * attenuation(target)
                 if (fraction >= 1) break
                 delay(25)
             }
@@ -893,10 +929,82 @@ class HybridMediaService : MediaLibraryService() {
     /** Something time-critical is happening: transitions, preloads and fades need the fast tick. */
     private val busy get() = (!spotifyActive && (primaryPlayer.isPlaying || youtubeLoading)) ||
         (spotifyActive && spotifyIntegrated.playing) || fade != null || preparing?.isActive == true
+    /**
+     * Measures a song YouTube gave no level for: the tapped RMS (before the player's volume and the
+     * enhancer) over its first seconds, ignoring silence. At 25 s of sound the level is applied, eased
+     * in, and kept for next time. Songs with YouTube's level are also measured once, only to log both
+     * numbers (calibration of [Loudness.measureOffsetDb], adb setprop log.tag.MURMUR DEBUG).
+     */
+    private var measuring = ""
+    private var measureSum = 0.0
+    private var measureCount = 0
+    private val loudnessSampler = object : Runnable {
+        override fun run() {
+            if (::primaryPlayer.isInitialized && !spotifyActive && primaryPlayer.isPlaying && fade == null) {
+                val data = track
+                val videoId = data?.optString("videoId").orEmpty()
+                val identity = entryIdentity(data)
+                if (identity != measuring) { measuring = identity; measureSum = 0.0; measureCount = 0 }
+                val rms = meters[primaryPlayer]?.amplitude ?: 0f
+                if (videoId.isNotBlank() && measureCount >= 0 && rms > 0.003f) {
+                    measureSum += rms.toDouble() * rms
+                    measureCount++
+                    if (measureCount == MEASURE_SAMPLES) {
+                        val estimate = Loudness.fromMeanSquare(measureSum / measureCount)
+                        val reported = Loudness.known(videoId)
+                        if (android.util.Log.isLoggable(DEBUG_TAG, android.util.Log.DEBUG))
+                            android.util.Log.d(DEBUG_TAG, "loudness $videoId youtube=$reported measured=$estimate rmsOffset=${Loudness.measureOffsetDb}")
+                        if (reported == null && !estimate.isNaN()) {
+                            Loudness.measure(videoId, estimate)
+                            applyMeasuredLevel(data!!)
+                        }
+                        measureCount = -1 // done with this song
+                    }
+                }
+            }
+            handler.postDelayed(this, 100)
+        }
+    }
+    /**
+     * A downloaded song plays from the phone, so YouTube was not asked: its level is looked up once in
+     * the background (and kept); meanwhile the song plays as it is.
+     */
+    private fun lookUpLevel(data: JSONObject) {
+        val videoId = data.optString("videoId")
+        if (data.optString("offlinePath").isBlank() || !videoId.matches(Regex("[A-Za-z0-9_-]{11}")) ||
+            Loudness.known(videoId) != null || !Loudness.enabled()) return
+        scope.launch {
+            val found = withContext(Dispatchers.IO) { runCatching { NativeNetwork.extract(videoId) }.isSuccess && Loudness.known(videoId) != null }
+            if (found) applyMeasuredLevel(data)
+        }
+    }
+    /** A level just learned for the song that plays: eased in over a second, never a jump. */
+    private fun applyMeasuredLevel(data: JSONObject) {
+        if (entryIdentity(data) != entryIdentity(track)) return
+        configureEnhancer(primaryPlayer, data)
+        if (fade != null || volumeFade?.isActive == true) return
+        val from = primaryPlayer.volume
+        scope.launch {
+            val start = android.os.SystemClock.elapsedRealtime()
+            while (isActive && entryIdentity(data) == entryIdentity(track) && fade == null) {
+                val p = ((android.os.SystemClock.elapsedRealtime() - start) / 1200f).coerceIn(0f, 1f)
+                primaryPlayer.volume = from + (baseGain() - from) * p * p * (3 - 2 * p)
+                if (p >= 1f) break
+                delay(40)
+            }
+        }
+    }
+    /** «Volumen parejo» switched in Opciones: the song that plays follows at once. */
+    fun refreshLoudness() {
+        if (!::primaryPlayer.isInitialized || spotifyActive) return
+        configureEnhancer(primaryPlayer, track)
+        if (fade == null && volumeFade?.isActive != true) primaryPlayer.volume = baseGain()
+    }
     private val ticker = object : Runnable {
         override fun run() {
             if (::primaryPlayer.isInitialized) {
                 tickCount++
+                playingAnyThread = if (spotifyActive) spotifyIntegrated.playing else primaryPlayer.isPlaying
                 val duration = primaryPlayer.duration.takeIf { it > 0 } ?: 0L; val position = youtubePositionMs
                 // Progress wakes the WebView: every 500 ms on screen, every 2 s in the background,
                 // and only on change while paused, so an idle or locked phone does no repaint work.
@@ -958,5 +1066,5 @@ class HybridMediaService : MediaLibraryService() {
     }
     override fun onTaskRemoved(rootIntent: Intent?) { PlaybackRequests.next();pausePlayback();preparing?.cancel();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();super.onTaskRemoved(rootIntent) }
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
-    override fun onDestroy() { if(integratedDelegate.isInitialized())nativeIntegrated.shutdown();if(webDelegate.isInitialized())webIntegrated.shutdown();handler.removeCallbacksAndMessages(null); scope.cancel(); enhancer?.release(); session?.release(); primaryPlayer.release(); secondaryPlayer.release(); instance = null; MurmurWidget.sync(this); super.onDestroy() }
+    override fun onDestroy() { if(integratedDelegate.isInitialized())nativeIntegrated.shutdown();if(webDelegate.isInitialized())webIntegrated.shutdown();handler.removeCallbacksAndMessages(null); scope.cancel(); enhancers.values.forEach { runCatching { it.release() } }; session?.release(); primaryPlayer.release(); secondaryPlayer.release(); instance = null; MurmurWidget.sync(this); super.onDestroy() }
 }

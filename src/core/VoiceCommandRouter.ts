@@ -523,6 +523,14 @@ async function resolveNamed(alts: Alt[], want: Want, platform: Platform | undefi
   return decide(once(sortOptions([...options.map((o) => ({ ...o, score: o.score + 0.03, base: o.base + 0.03, boost: 0.03 })), ...found], songFirst)), ctx);
 }
 
+/** The promise's value, or a rejection after `ms` (so a stalled provider never freezes a voice request). */
+function withinMs<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), ms);
+    promise.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
 /** One option per song, artist, album or playlist (the best scored). */
 function once(options: Option[]) {
   const seen = new Set<string>();
@@ -560,7 +568,8 @@ async function catalogueOptions(queries: string[], alts: Alt[], want: Want, lib:
       isNative ? Auth.spotifyRequest({ path: "/search?type=track,artist,album&limit=5&q=" + encodeURIComponent(q) }) : Promise.reject(new Error("web")),
       songsOn("youtube", q),
       // YouTube itself (not only YouTube Music) for what was said: it knows a chorus as people sing it.
-      n === 0 && isNative ? Promise.resolve().then(() => Audio.searchYouTube({ query: q })).then((r) => r.tracks.slice(0, 3)) : Promise.resolve([] as QueueItem[]),
+      // Never waits more than 4 s: a slow YouTube only loses this hint, the request still answers.
+      n === 0 && isNative ? withinMs(Promise.resolve().then(() => Audio.searchYouTube({ query: q })).then((r) => r.tracks.slice(0, 3)), 4000) : Promise.resolve([] as QueueItem[]),
     ]);
     return {
       data: spotify.status === "fulfilled" ? spotify.value.data : undefined,

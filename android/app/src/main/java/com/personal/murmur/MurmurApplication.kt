@@ -9,6 +9,7 @@ class MurmurApplication : android.app.Application() {
     override fun onCreate() {
         super.onCreate()
         CrashLog.install(this)
+        Loudness.init(this)
     }
 }
 

@@ -29,7 +29,27 @@ object NativeNetwork {
     @Synchronized fun init() { if (!ready) { NewPipe.init(OkHttpDownloader()); ready = true } }
     fun extract(videoId: String): StreamInfo {
         require(videoId.matches(Regex("[A-Za-z0-9_-]{11}"))) { "Enlace de YouTube inválido" }
-        init(); return StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$videoId")
+        init()
+        val extractor = ServiceList.YouTube.getStreamExtractor("https://www.youtube.com/watch?v=$videoId")
+        val info = StreamInfo.getInfo(extractor)
+        reportLoudness(videoId, extractor)
+        return info
+    }
+    /**
+     * «Volumen parejo»: YouTube's level for the upload (playerConfig.audioConfig.loudnessDb) sits in the
+     * player response the extractor already downloaded; NewPipe does not expose it, so it is read here.
+     */
+    private fun reportLoudness(videoId: String, extractor: Any) = runCatching {
+        for (name in listOf("playerResponse")) {
+            val field = generateSequence(extractor.javaClass as Class<*>?) { it.superclass }
+                .firstNotNullOfOrNull { type -> runCatching { type.getDeclaredField(name) }.getOrNull() } ?: continue
+            field.isAccessible = true
+            val response = field.get(extractor) as? Map<*, *> ?: continue
+            val audio = (response["playerConfig"] as? Map<*, *>)?.get("audioConfig") as? Map<*, *> ?: continue
+            val db = Loudness.fromAudioConfig { key -> (audio[key] as? Number)?.toDouble() } ?: continue
+            Loudness.report(videoId, db)
+            return@runCatching
+        }
     }
     fun audioCandidates(info: StreamInfo) = AudioStreamSelector.rank(info.audioStreams).ifEmpty {
         throw IllegalStateException("Este video no ofrece audio reproducible. Prueba otra versión.")

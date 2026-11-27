@@ -47,7 +47,7 @@ class MusicVisualActivity : Activity() {
     private lateinit var controlsPanel: View
     private lateinit var title: TextView
     private lateinit var artist: TextView
-    private lateinit var clock: DotClockView
+    private lateinit var clock: TextView
     private lateinit var date: TextView
     private lateinit var elapsed: TextView
     private lateinit var total: TextView
@@ -78,8 +78,8 @@ class MusicVisualActivity : Activity() {
 
             val now = Date()
             val hours24 = android.text.format.DateFormat.is24HourFormat(this@MusicVisualActivity)
-            clock.setTime(android.text.format.DateFormat.format(if (hours24) "H:mm" else "h:mm", now).toString(),
-                if (hours24) "" else android.text.format.DateFormat.format("a", now).toString().uppercase(Locale.getDefault()),
+            setClock(android.text.format.DateFormat.format(if (hours24) "H:mm" else "h:mm", now).toString(),
+                if (hours24) "" else android.text.format.DateFormat.format("a", now).toString().lowercase(Locale.getDefault()),
                 android.text.format.DateFormat.getTimeFormat(this@MusicVisualActivity).format(now))
             date.updateText(android.text.format.DateFormat.format("EEE, d MMM", now).toString().replace(".", ""))
             val state = if (service.spotifyActive) service.integratedState() else null
@@ -179,11 +179,19 @@ class MusicVisualActivity : Activity() {
             letterSpacing = .3f
         }
         addView(date)
-        // Dot-matrix clock: LED dots that swell with the bass and catch a light sweep on beats.
-        clock = DotClockView(this@MusicVisualActivity, art, DotMatrixText.FACE_ROWS, if (wide) 4.7f else 6.3f).apply {
-            setPadding(0, dp(if (wide) 8 else 14), 0, dp(2))
+        // A large, light clock in the system's modern sans (thin weight, tabular figures, tight tracking).
+        clock = TextView(this@MusicVisualActivity).apply {
+            gravity = Gravity.CENTER
+            maxLines = 1
+            includeFontPadding = false
+            textSize = if (wide) 54f else 76f
+            setTextColor(0xFFF7F3FD.toInt())
+            typeface = if (android.os.Build.VERSION.SDK_INT >= 28) Typeface.create(Typeface.create("sans-serif", Typeface.NORMAL), 250, false)
+                else Typeface.create("sans-serif-light", Typeface.NORMAL)
+            letterSpacing = -.045f
+            fontFeatureSettings = "tnum"
+            setPadding(0, dp(if (wide) 4 else 8), 0, dp(2))
         }
-        art.follower = clock
         addView(clock, LinearLayout.LayoutParams(-1, -2))
     }
 
@@ -252,6 +260,20 @@ class MusicVisualActivity : Activity() {
             HybridMediaService.instance?.advanceNative()
         }, LinearLayout.LayoutParams(dp(if (wide) 54 else 64), dp(64)))
         addView(controls, LinearLayout.LayoutParams(-1, dp(90)))
+    }
+
+    private var clockText = ""
+    private fun setClock(time: String, suffix: String, spoken: String) {
+        val text = if (suffix.isBlank()) time else "$time $suffix"
+        if (text == clockText) return
+        clockText = text
+        clock.text = android.text.SpannableString(text).apply {
+            if (suffix.isNotBlank()) {
+                setSpan(android.text.style.RelativeSizeSpan(.26f), time.length, text.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                setSpan(android.text.style.ForegroundColorSpan(secondary), time.length, text.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
+        clock.contentDescription = spoken
     }
 
     private fun label(size: Float, color: Int, family: String = "sans-serif", style: Int = Typeface.NORMAL) = TextView(this).apply {
