@@ -46,3 +46,21 @@ describe("«Para ti» changes on every reload", () => {
     expect(pickWindow([1, 2], 5, 20)).toEqual([1, 2]);
   });
 });
+
+import { genericPlaylist, withoutGeneric } from "./feedRotation";
+describe("Inicio leaves out YouTube Music's generic playlists", () => {
+  const item = (id: string, subtitle: string) => ({ id, title: id, subtitle, link: "https://music.youtube.com/playlist?list=" + id });
+  it("drops editorial playlists, keeps community playlists and personal mixes", () => {
+    expect(genericPlaylist(item("RDCLAK5uy_abc", "Playlist • YouTube Music"))).toBe(true);
+    expect(genericPlaylist(item("PLxyz", "Playlist • YouTube Music"))).toBe(true);
+    expect(genericPlaylist(item("PLcommunity", "Playlist • Juan Pérez • 2.3 K vistas"))).toBe(false);
+    expect(genericPlaylist(item("RDTMAK5uy_mix", "Mi mix • YouTube Music"))).toBe(false);
+  });
+  it("removes a section that ends up empty and keeps the rest", () => {
+    const shelves = [
+      { title: "Playlists destacadas", items: [item("RDCLAK5uy_1", "YouTube Music"), item("RDCLAK5uy_2", "YouTube Music")] },
+      { title: "De la comunidad", items: [item("PLa", "Playlist • Ana"), item("PLb", "Playlist • Beto"), item("RDCLAK5uy_3", "YouTube Music"), item("PLc", "Playlist • Caro")] },
+    ];
+    expect(withoutGeneric(shelves).map((s) => [s.title, s.items.length])).toEqual([["De la comunidad", 3]]);
+  });
+});

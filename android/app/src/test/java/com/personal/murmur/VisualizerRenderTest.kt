@@ -46,7 +46,7 @@ class VisualizerRenderTest {
         }
     }
 
-    private fun render(name: String, widthDp: Int, heightDp: Int) {
+    private fun render(name: String, widthDp: Int, heightDp: Int, look: Pair<Int, Int>? = null) {
         val service = Robolectric.buildService(HybridMediaService::class.java).create()
         org.robolectric.util.ReflectionHelpers.setField(service.get(), "track",
             org.json.JSONObject().put("title", "Afuera (El nervio del volcán)").put("artist", "Caifanes").put("duration", 290))
@@ -68,6 +68,7 @@ class VisualizerRenderTest {
             val stage = checkNotNull(find(root, AuraStageView::class.java))
             assertNotNull(find(root, DotClockView::class.java))
             stage.setArtwork(BitmapFactory.decodeFile("../../verification/fixtures/cover-2.jpg"))
+            look?.let { stage.showLook(it.first, it.second) }
             val signal = song(4.0)
             val analyzer = SpectrumAnalyzer()
             val window = FloatArray(analyzer.fftSize)
@@ -112,4 +113,12 @@ class VisualizerRenderTest {
     @Test @Config(qualifiers = "w390dp-h844dp-port-xxhdpi") fun portraitStageReactsToBeats() = render("portrait", 390, 844)
 
     @Test @Config(qualifiers = "w844dp-h390dp-land-xxhdpi") fun landscapeStageReactsToBeats() = render("landscape", 844, 390)
+
+    /** One preview per look: every background with a rhythm indicator (build/visualizer-preview). */
+    @Test @Config(qualifiers = "w390dp-h844dp-port-xxhdpi") fun everyLookRenders() {
+        render("look-liquido-pulso", 390, 844, 0 to 0)
+        render("look-malla-topo", 390, 844, 1 to 1)
+        render("look-seda-glow", 390, 844, 2 to 2)
+        render("look-aurora-pulso", 390, 844, 3 to 0)
+    }
 }

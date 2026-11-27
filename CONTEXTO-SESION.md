@@ -10,7 +10,16 @@ Léelo primero si continúas MURMUR en otra PC u otra sesión. El detalle técni
 - No escribir contraseñas en formularios. Las sesiones de YouTube Music y Spotify las inicia él en el teléfono.
 - No inventar resultados: lo probado en el teléfono se dice como probado, y lo demás como no verificado.
 
-## Estado actual: 2.21.1 (code 43)
+## Estado actual: 2.22.0 (code 44)
+La 2.22.0 trae:
+- **Visualizador nuevo** (`AuraStageView.kt`). Cuatro fondos fluidos rotan con cada canción y cada 90 s, con fundido: líquido, malla, seda y aurora. Tres indicadores de ritmo rotan aparte: pulso (rayos con degradado), topolíneas (con ondas en cada golpe) y glow (líneas con brillo). Tiene marco brutalista con etiquetas mono. Ya no hay franja de puntos ni chispas, y los controles quedan más arriba. `showLook()` fija un estilo para las pruebas; `VisualizerRenderTest.everyLookRenders` deja una imagen por estilo en `android/app/build/visualizer-preview`.
+- **Opciones › Apariencia › «Bloquear la barra en la pantalla musical»** (`VisualSeekLock`, apagada por defecto).
+- **Inicio sin playlists editoriales genéricas de YouTube Music** (`withoutGeneric`: `RDCLAK…` o de autor «YouTube Music»). Se quedan las de la comunidad y los mixes personales.
+- **Encabezado del reproductor en una línea** e icono de onda para el visualizador.
+- **Mini reproductor en Buscar:** se oculta solo con el teclado abierto (`MainActivity` pone `data-keyboard`).
+- **Invitación a la JAM** con texto, versión HTML y vista previa: la página trae Open Graph y `og.jpg`, generado con `scripts/build-jam-card.mjs`; el servidor sustituye `{{ORIGIN}}`.
+
+### 2.21.1 (code 43)
 La 2.21.1 trae:
 - **Gestos en la página del invitado:** a la derecha añade (en resultados) o pone «que suene después» (en la cola, solo un DJ); a la izquierda quita una canción de la JAM, solo al soltar.
 - **DJ por invitado:** el anfitrión toca a un invitado en el panel JAM. Un DJ puede pausar, saltar, poner canciones primero y mover la primera de la cola (`control`, `add` con `next`, `move` a 0). Los demás solo añaden y ordenan.

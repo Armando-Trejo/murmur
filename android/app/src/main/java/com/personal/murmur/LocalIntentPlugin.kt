@@ -23,6 +23,8 @@ class LocalIntentPlugin : Plugin() {
         val text = call.getString("text")?.take(20_000) ?: return@runOnUiThread call.reject("Nada que compartir")
         val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
             .putExtra(Intent.EXTRA_SUBJECT, call.getString("title") ?: "Reporte de MURMUR")
+        // Apps that read HTML (Gmail, Outlook) show the link as a real hyperlink.
+        call.getString("html")?.take(20_000)?.let { send.putExtra(Intent.EXTRA_HTML_TEXT, it) }
         activity.startActivity(Intent.createChooser(send, call.getString("title") ?: "Compartir"))
         call.resolve()
     } }

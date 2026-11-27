@@ -23,6 +23,8 @@ class YouTubeAudioPlugin : Plugin() {
     private fun data(call: PluginCall) = JSONObject(call.data.toString())
     @PluginMethod fun setLockVisualizer(call: PluginCall) { LockVisualizer.set(context, call.getBoolean("enabled") ?: true); call.resolve() }
     @PluginMethod fun getLockVisualizer(call: PluginCall) { call.resolve(JSObject().put("enabled", LockVisualizer.enabled(context))) }
+    @PluginMethod fun setVisualSeekLock(call: PluginCall) { VisualSeekLock.set(context, call.getBoolean("locked") ?: false); call.resolve() }
+    @PluginMethod fun getVisualSeekLock(call: PluginCall) { call.resolve(JSObject().put("locked", VisualSeekLock.locked(context))) }
     @PluginMethod fun openVisualizer(call: PluginCall) { activity.startActivity(Intent(context, MusicVisualActivity::class.java)); call.resolve() }
     @PluginMethod fun openGeniusLyrics(call: PluginCall) {
         val uri = android.net.Uri.parse(call.getString("url").orEmpty())

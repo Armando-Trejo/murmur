@@ -113,7 +113,7 @@ import { artworkFor } from "./core/artwork";
 import { Cover } from "./components/Cover";
 import { ArtistProfile } from "./components/ArtistProfile";
 import { OverflowMenu, type MenuEntry } from "./components/OverflowMenu";
-import { ListPlus, Sparkles, Link as LinkIcon, ArrowDownUp, Share2 } from "lucide-react";
+import { ListPlus, Sparkles, Link as LinkIcon, ArrowDownUp, Share2, AudioWaveform } from "lucide-react";
 import { JamButton, JamPanel, ShareOptions } from "./components/ShareAndJam";
 import { orderMusic, listeningStats, type MusicOrder } from "./core/musicOrder";
 import { PlayerBackdrop, useArtworkTone } from "./components/PlayerBackdrop";
@@ -2793,15 +2793,13 @@ export default function App() {
                 <ChevronDown />
               </button>
               {/* Pull handle: the whole panel follows a downward drag from here (PlayerLayer). */}
-              <div className="player-dismiss-grip">
-                REPRODUCIENDO DESDE
-                <br />
+              <div className="player-dismiss-grip compact" aria-label={"Reproduciendo desde " + (current.source === "youtube" ? "YouTube" : "Spotify")}>
                 <b>
                   {current.source === "youtube"
-                    ? "YOUTUBE AUDIO"
+                    ? "YouTube"
                     : state.deviceName.includes("MURMUR")
-                      ? "SPOTIFY INTEGRADO"
-                      : "SPOTIFY CONNECT"}
+                      ? "Spotify"
+                      : "Spotify Connect"}
                 </b>
               </div>
               <div className="player-top-actions">
@@ -2820,7 +2818,7 @@ export default function App() {
                     aria-label="Pantalla musical animada"
                     onClick={() => void guard(() => Audio.openVisualizer())}
                   >
-                    <Sparkles size={21} />
+                    <AudioWaveform size={21} />
                   </motion.button>
                 )}
                 <button

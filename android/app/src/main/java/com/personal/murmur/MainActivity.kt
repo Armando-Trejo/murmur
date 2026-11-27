@@ -1,4 +1,4 @@
-﻿package com.personal.murmur
+package com.personal.murmur
 import android.content.Intent
 import android.os.Bundle
 import android.content.BroadcastReceiver
@@ -28,6 +28,13 @@ class MainActivity : BridgeActivity() {
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
             view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, keyboard.bottom))
+            // The web layer hides the tabs and mini player only while the keyboard is really open
+            // (a search field keeps its focus after Android's back closes the keyboard).
+            val open = insets.isVisible(WindowInsetsCompat.Type.ime())
+            if (open != keyboardOpen) {
+                keyboardOpen = open
+                bridge?.webView?.evaluateJavascript("document.documentElement.dataset.keyboard='${if (open) "open" else "closed"}'", null)
+            }
             WindowInsetsCompat.CONSUMED
         }
         ViewCompat.requestApplyInsets(content)
@@ -39,6 +46,7 @@ class MainActivity : BridgeActivity() {
     /** Screen-off while MURMUR is in front and music plays: show the music screen over the lock screen. */
     private val screenOff = object : BroadcastReceiver() { override fun onReceive(context: Context?, intent: Intent?) { if (visible) showLockVisualizer() } }
     private var visible = false
+    private var keyboardOpen = false
     private var lockShownAt = 0L
     override fun onPause() { super.onPause(); showLockVisualizer() }
     private fun showLockVisualizer() {

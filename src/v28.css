@@ -230,7 +230,7 @@ input, textarea { caret-color: currentColor; }
 .search-field:focus-within { box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.45); }
 
 /* While typing, the tabs and mini player would ride on top of the keyboard and cover the results. */
-body:has(input:not([type="checkbox"]):not([type="range"]):not([type="color"]):focus, textarea:focus) .bottom-shell {
+:root[data-keyboard="open"] .bottom-shell {
   transform: translateY(110%);
   opacity: 0;
   pointer-events: none;

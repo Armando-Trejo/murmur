@@ -133,7 +133,12 @@ class JamPlugin : Plugin() {
         }
         val rest = match.groupValues[2]
         when {
-            rest == "/" || rest == "/index.html" -> sendAsset(out, "index.html")
+            rest == "/" || rest == "/index.html" -> {
+                // Link previews (WhatsApp, Telegram…) need absolute addresses: the page gets this JAM's own.
+                val host = headers["host"]?.takeIf { it.matches(Regex("[A-Za-z0-9.:-]{3,80}")) }
+                    ?: "${localAddress()}:${server?.localPort}"
+                sendAsset(out, "index.html", origin = "http://$host/j/$current/")
+            }
             rest == "/api/state" -> send(out, 200, "application/json; charset=utf-8", state.toByteArray())
             rest.startsWith("/api/") -> {
                 if (method != "GET" && method != "POST") return send(out, 405, "application/json", "{}".toByteArray())
@@ -153,19 +158,20 @@ class JamPlugin : Plugin() {
                 pending.remove(id)
                 send(out, status, "application/json; charset=utf-8", response.toByteArray())
             }
-            rest.matches(Regex("^/[a-z0-9_-]{1,40}\\.(png|svg|css|js|webmanifest)$")) -> sendAsset(out, rest.removePrefix("/"))
+            rest.matches(Regex("^/[a-z0-9_-]{1,40}\\.(png|jpg|svg|css|js|webmanifest)$")) -> sendAsset(out, rest.removePrefix("/"))
             else -> send(out, 404, "text/plain; charset=utf-8", "No encontrado".toByteArray())
         }
     }
 
-    private fun sendAsset(out: OutputStream, name: String, status: Int = 200) {
-        val bytes = runCatching { context.assets.open("public/jam/$name").use { it.readBytes() } }.getOrNull()
+    private fun sendAsset(out: OutputStream, name: String, status: Int = 200, origin: String? = null) {
+        val raw = runCatching { context.assets.open("public/jam/$name").use { it.readBytes() } }.getOrNull()
             ?: return send(out, 404, "text/plain; charset=utf-8", "No encontrado".toByteArray())
+        val bytes = if (origin != null) String(raw, Charsets.UTF_8).replace("{{ORIGIN}}", origin).toByteArray() else raw
         val type = when (name.substringAfterLast('.')) {
-            "html" -> "text/html; charset=utf-8"; "png" -> "image/png"; "svg" -> "image/svg+xml"
+            "html" -> "text/html; charset=utf-8"; "png" -> "image/png"; "jpg" -> "image/jpeg"; "svg" -> "image/svg+xml"
             "css" -> "text/css; charset=utf-8"; "js" -> "text/javascript; charset=utf-8"; else -> "application/manifest+json"
         }
-        send(out, status, type, bytes, cache = name.endsWith(".png") || name.endsWith(".svg"))
+        send(out, status, type, bytes, cache = name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".svg"))
     }
 
     private fun send(out: OutputStream, status: Int, type: String, bytes: ByteArray, cache: Boolean = false) {

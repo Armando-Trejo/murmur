@@ -54,3 +54,20 @@ export function pickWindow<T>(pool: T[], round: number, size: number): T[] {
   if (pool.length <= size) return pool;
   return rotate(pool, round * size).slice(0, size);
 }
+
+/**
+ * YouTube Music's own editorial playlists («RDCLAK5uy_…», by «YouTube Music») are generic music for
+ * everyone, not the owner's taste: they are left out of Inicio. Community playlists («PL…»), the
+ * owner's personal mixes («RDTMAK…», «My Mix»), albums, artists and songs stay. A section that ends
+ * up nearly empty goes too.
+ */
+export const genericPlaylist = (item: { id?: string; subtitle?: string; link?: string }) =>
+  !!item.id?.startsWith("RDCLAK") ||
+  (!!item.link?.includes("playlist?list=") && !item.id?.startsWith("RD") && /(^|[•·]\s*)YouTube Music\s*$/i.test(item.subtitle ?? ""));
+
+export function withoutGeneric(shelves: FeedShelf[]): FeedShelf[] {
+  return shelves
+    .map((shelf) => ({ shelf, items: shelf.items.filter((item) => !genericPlaylist(item)) }))
+    .filter(({ shelf, items }) => items.length >= Math.min(3, shelf.items.length) && items.length > 0)
+    .map(({ shelf, items }) => ({ ...shelf, items }));
+}

@@ -135,6 +135,18 @@ export function BrandedQr({ url, size = 236 }: { url: string; size?: number }) {
 
 const useJam = () => useSyncExternalStore(onJamChange, jamSession);
 
+/**
+ * The invitation as it lands in WhatsApp, Telegram or a mail: a short message with the link last
+ * (chat apps turn it into a card with MURMUR's image, title and description from the guest page),
+ * and an HTML version with a real hyperlink for the apps that read it.
+ */
+export function jamInvite(url: string) {
+  const text = `🎧 Te invito a mi JAM en MURMUR\nBusca y pon tus canciones desde el navegador, sin instalar nada.\n\n${url}`;
+  const html = `<p><b>🎧 Te invito a mi JAM en MURMUR</b></p><p>Busca y pon tus canciones desde el navegador, sin instalar nada.</p>` +
+    `<p><a href="${url}">Entrar a la JAM</a></p>`;
+  return { title: "Te invito a mi JAM en MURMUR", text, html };
+}
+
 /** Starts the JAM and shows its QR, who joined and how to end it. */
 export function JamPanel({ notify, onClose }: { notify: Notify; onClose: () => void }) {
   const session = useJam();
@@ -191,7 +203,7 @@ export function JamPanel({ notify, onClose }: { notify: Notify; onClose: () => v
             <button
               className="button secondary"
               onClick={() => void (isNative
-                ? Voice.shareText({ title: "Únete a mi JAM", text: "Únete a mi JAM de MURMUR y pon canciones: " + session.url })
+                ? Voice.shareText(jamInvite(session.url))
                 : navigator.clipboard.writeText(session.url)).catch(() => {})}
             >
               <Link2 size={18} /> Enviar enlace

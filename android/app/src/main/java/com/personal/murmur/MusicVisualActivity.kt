@@ -57,6 +57,8 @@ class MusicVisualActivity : Activity() {
     private var active = false
     private var entered = false
     private var seeking = false
+    /** Opciones › «Bloquear la barra en la pantalla musical»: the bar only shows progress. */
+    private var seekLocked = false
     private var coverKey: String? = null
     private var artworkJob: Job? = null
     private val accent = 0xFFE6DAFF.toInt()
@@ -90,7 +92,7 @@ class MusicVisualActivity : Activity() {
             durationMs = reportedDuration.takeIf { it > 0L }
                 ?: (data?.optDouble("duration", 0.0)?.times(1000)?.toLong() ?: 0L)
             val fraction = if (durationMs > 0) (position.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
-            timeline.isEnabled = durationMs > 0
+            timeline.isEnabled = durationMs > 0 && !seekLocked
             if (!seeking) {
                 timeline.progress = (fraction * 1000).roundToInt()
                 elapsed.updateText(formatTime(position))
@@ -187,7 +189,8 @@ class MusicVisualActivity : Activity() {
 
     private fun createControls(wide: Boolean): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(if (wide) 18 else 26), dp(9), dp(if (wide) 18 else 26), dp(if (wide) 7 else 26))
+        // Without the beat strip the controls sit higher, easier to reach.
+        setPadding(dp(if (wide) 18 else 26), dp(9), dp(if (wide) 18 else 26), dp(if (wide) 7 else 46))
         title = label(if (wide) 25f else 31f, 0xFFF7F3FD.toInt(), "sans-serif-condensed", Typeface.BOLD).apply {
             setSingleLine(true)
             ellipsize = TextUtils.TruncateAt.MARQUEE
@@ -337,6 +340,10 @@ class MusicVisualActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        seekLocked = VisualSeekLock.locked(this)
+        // Locked: a plain progress line, no thumb to catch a stray touch.
+        timeline.thumbTintList = ColorStateList.valueOf(if (seekLocked) Color.TRANSPARENT else accent)
+        timeline.contentDescription = if (seekLocked) "Posición de reproducción (bloqueada)" else "Posición de reproducción"
         active = true
         art.allowMotion = ValueAnimator.areAnimatorsEnabled()
         art.running = true

@@ -5,7 +5,7 @@ import { Audio, Auth, isNative, type ConnectionStatus, type FeedItem, type FeedS
 import { unwrapSpotifyTrack } from "../core/SpotifyLibrary";
 import { settle } from "../core/motion";
 import type { QueueItem } from "../core/types";
-import { feedMoods, moodShelves, nextFeedRound, pickWindow, rotateShelves } from "../core/feedRotation";
+import { feedMoods, moodShelves, nextFeedRound, pickWindow, rotateShelves, withoutGeneric } from "../core/feedRotation";
 
 type Provider = "youtube" | "spotify";
 type Feed = { shelves: FeedShelf[]; loading: boolean; error?: string };
@@ -18,13 +18,13 @@ let moodChips: { title: string; params: string }[] | undefined;
 
 async function loadFeed(provider: Provider, round: number): Promise<FeedShelf[]> {
   if (provider === "youtube") {
-    const base = (await Auth.youtubeHome()).shelves ?? [];
+    const base = withoutGeneric((await Auth.youtubeHome()).shelves ?? []);
     // A different mood each reload brings sections the plain feed does not have.
     try {
       moodChips ??= feedMoods((await Auth.youtubeHomeChips()).chips ?? []);
       const mood = moodChips.length ? moodChips[round % moodChips.length] : undefined;
       if (mood) {
-        const extra = moodShelves(mood.title, (await Auth.youtubeHome({ params: mood.params })).shelves ?? [], base);
+        const extra = moodShelves(mood.title, withoutGeneric((await Auth.youtubeHome({ params: mood.params })).shelves ?? []), base);
         const rotated = rotateShelves(base, round);
         return [...rotated.slice(0, 1), ...extra, ...rotated.slice(1)];
       }

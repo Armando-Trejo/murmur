@@ -6,7 +6,7 @@ import {
   DEFAULT_ACCENT,
   accentInk,
 } from "../core/appearance";
-import { Palette, Sparkles, Check, Lock } from "lucide-react";
+import { Palette, Sparkles, Check, Lock, Hand } from "lucide-react";
 import { Audio, isNative } from "../native";
 
 /** On by default (native side); the switch only reflects and changes the stored native preference. */
@@ -29,6 +29,21 @@ function useLockVisualizer() {
     if (isNative) await Audio.setLockVisualizer({ enabled: value });
   };
   return { enabled, change };
+}
+/** Off by default: the music screen's seek bar can be locked so a pocket touch never moves the song. */
+function useSeekLock() {
+  const [locked, setLocked] = useState(false);
+  useEffect(() => {
+    if (!isNative) return;
+    let live = true;
+    void Audio.getVisualSeekLock().then((state) => live && setLocked(state.locked)).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  const change = async (value: boolean) => {
+    setLocked(value);
+    if (isNative) await Audio.setVisualSeekLock({ locked: value });
+  };
+  return { locked, change };
 }
 export function useAppearance() {
   const [accent, setAccent] = useState(() =>
@@ -76,6 +91,7 @@ export function AppearanceSettings({
 }) {
   const [draft, setDraft] = useState(appearance.accent);
   const lock = useLockVisualizer();
+  const seekLock = useSeekLock();
   useEffect(() => setDraft(appearance.accent), [appearance.accent]);
   const save = async (color: string) => {
     try {
@@ -171,6 +187,22 @@ export function AppearanceSettings({
             void lock
               .change(event.target.checked)
               .catch(() => notify("No se pudo guardar el ajuste de bloqueo.", "error"))
+          }
+        />
+      </label>
+      <label className="glow-option">
+        <Hand size={20} />
+        <span>
+          Bloquear la barra en la pantalla musical
+          <small>En el bolsillo, un toque no adelanta ni regresa la canción. Anterior, pausa y siguiente siguen funcionando</small>
+        </span>
+        <input
+          type="checkbox"
+          checked={seekLock.locked}
+          onChange={(event) =>
+            void seekLock
+              .change(event.target.checked)
+              .catch(() => notify("No se pudo guardar el ajuste de la barra.", "error"))
           }
         />
       </label>

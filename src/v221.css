@@ -50,3 +50,9 @@
 .jam-guest.dj { border-color: rgba(var(--brand-rgb), 0.7); background: rgba(var(--brand-rgb), 0.14); }
 .jam-guest .dj-tag { font-family: monospace; font-size: 9px; font-weight: 800; letter-spacing: 0.1em; color: #000; background: var(--brand-accent); border-radius: 5px; padding: 2px 5px; }
 .jam-guests-note { width: 100%; margin: 2px 0 6px; color: var(--secondary); font-size: 0.75rem; line-height: 1.45; }
+
+/* 2.22: the player header is one short line (the source also shows under the title). */
+.expanded-player .player-top { min-height: 0; padding-top: 6px; padding-bottom: 2px; }
+.player-dismiss-grip.compact { min-height: 44px; padding: 8px 4px 6px; line-height: 1.2; font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase; }
+.player-dismiss-grip.compact::before { margin-bottom: 8px; }
+.player-dismiss-grip.compact b { font-weight: 650; color: rgba(255, 255, 255, 0.78); }

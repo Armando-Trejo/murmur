@@ -54,6 +54,9 @@ interface AudioBridge {
   /** Music screen over the lock screen when the display turns off during playback. */
   setLockVisualizer(o: { enabled: boolean }): Promise<void>;
   getLockVisualizer(): Promise<{ enabled: boolean }>;
+  /** Opciones › lock the seek bar of the music screen (pockets). */
+  setVisualSeekLock(o: { locked: boolean }): Promise<void>;
+  getVisualSeekLock(): Promise<{ locked: boolean }>;
   pause(): Promise<void>;
   resume(): Promise<void>;
   seekTo(o: { positionMs: number }): Promise<void>;
@@ -185,7 +188,7 @@ interface VoiceBridge {
   /** Report of the last unexpected close, once (null when there was none). */
   lastCrash(): Promise<{ report: string | null; version: string }>;
   /** Android's share sheet with a text. */
-  shareText(o: { text: string; title?: string }): Promise<void>;
+  shareText(o: { text: string; title?: string; html?: string }): Promise<void>;
   /** The phone's media volume: a few steps, or a percentage. Returns the new level. */
   adjustVolume(o: { direction?: "up" | "down"; percent?: number }): Promise<{ percent: number }>;
   /** Names the speech recognizer should expect (artists, playlists). */
