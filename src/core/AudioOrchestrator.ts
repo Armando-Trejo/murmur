@@ -433,8 +433,12 @@ export class AudioOrchestrator {
   async playList(queue: QueueItem[], index = 0) {
     this.generation++;
     this.context++;
+    // What JAM guests added and has not played yet stays: it plays right after the new song,
+    // whether the owner chose it by voice, a search or an album.
+    const guests = this.state.queue.slice(this.state.index + 1).filter((t) => t.jamGuest);
+    const fresh = queue.map((track) => ({ ...track, userQueued: undefined, queueId: crypto.randomUUID() }));
     this.update({
-      queue: queue.map((track) => ({ ...track, userQueued: undefined, queueId: crypto.randomUUID() })),
+      queue: guests.length ? [...fresh.slice(0, index + 1), ...guests, ...fresh.slice(index + 1)] : fresh,
       index,
       position: 0,
       playing: false,

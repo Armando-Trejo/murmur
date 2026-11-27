@@ -42,3 +42,11 @@
 .jam-button.live > svg { display: none; }
 .queue-guest { display: inline-flex; align-items: center; margin-left: 6px; padding: 1px 7px; border-radius: 20px; font-size: 0.66rem; font-weight: 700; color: var(--brand-readable); background: rgba(var(--brand-rgb), 0.14); vertical-align: 1px; }
 @media (prefers-reduced-motion: reduce) { .jam-live i, .jam-button.live::before { animation: none; } }
+/* Mix and JAM always side by side, same width (a live JAM with guests used to wrap below). */
+.mix-controls { flex-wrap: nowrap; gap: 10px; width: 100%; max-width: 400px; margin-left: auto; margin-right: auto; }
+.mix-controls > .mix-now { flex: 1 1 0; min-width: 0; padding: 10px 12px; white-space: nowrap; }
+.jam-button .jam-count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--brand-accent); color: #000; font-size: 0.7rem; font-weight: 800; }
+.jam-guest { cursor: pointer; transition: background 0.2s, border-color 0.2s; }
+.jam-guest.dj { border-color: rgba(var(--brand-rgb), 0.7); background: rgba(var(--brand-rgb), 0.14); }
+.jam-guest .dj-tag { font-family: monospace; font-size: 9px; font-weight: 800; letter-spacing: 0.1em; color: #000; background: var(--brand-accent); border-radius: 5px; padding: 2px 5px; }
+.jam-guests-note { width: 100%; margin: 2px 0 6px; color: var(--secondary); font-size: 0.75rem; line-height: 1.45; }

@@ -45,3 +45,13 @@ describe("Aleatorio mágico", () => {
     expect(p.getSnapshot().queue.slice(1).map((t) => t.id)).toEqual(original);
   });
 });
+
+describe("JAM guests' songs survive a new choice", () => {
+  it("playing something else (voice, search) keeps the guests' upcoming songs right after it", async () => {
+    const p = new AudioOrchestrator();
+    await p.playList([song(1), song(2)]);
+    p.enqueue({ ...song(50), jamGuest: { id: "abc123", name: "Ana" } });
+    await p.playList([song(7), song(8)]);
+    expect(p.getSnapshot().queue.map((t) => t.id)).toEqual(["yt:7", "yt:50", "yt:8"]);
+  });
+});

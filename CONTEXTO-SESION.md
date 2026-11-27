@@ -10,7 +10,15 @@ Léelo primero si continúas MURMUR en otra PC u otra sesión. El detalle técni
 - No escribir contraseñas en formularios. Las sesiones de YouTube Music y Spotify las inicia él en el teléfono.
 - No inventar resultados: lo probado en el teléfono se dice como probado, y lo demás como no verificado.
 
-## Estado actual: 2.21.0 (code 42)
+## Estado actual: 2.21.1 (code 43)
+La 2.21.1 trae:
+- **Gestos en la página del invitado:** a la derecha añade (en resultados) o pone «que suene después» (en la cola, solo un DJ); a la izquierda quita una canción de la JAM, solo al soltar.
+- **DJ por invitado:** el anfitrión toca a un invitado en el panel JAM. Un DJ puede pausar, saltar, poner canciones primero y mover la primera de la cola (`control`, `add` con `next`, `move` a 0). Los demás solo añaden y ordenan.
+- **Controles en la página del invitado**, bloqueados si no es DJ.
+- **`playList` conserva las canciones de invitados que no han sonado**, justo después de la nueva (voz, búsqueda, álbum).
+- **Mezclar ahora y JAM** en una sola fila; el buscador del invitado ya no muestra dos «X».
+
+### 2.21.0 (code 42)
 La 2.21.0 trae:
 - **JAM** (`JamPlugin.kt`, `src/core/jam.ts`, `public/jam/`). El teléfono sirve una página en la red local (`http://<ip>:8737/j/<token>/`), y los invitados en el mismo Wi-Fi o en el hotspot la abren con el QR para buscar, añadir, ordenar y quitar lo que añadió la JAM. Sus canciones llevan `jamGuest` y no entrenan el algoritmo salvo con ♥.
 - **Compartir** (`src/core/share.ts`): enlace de YouTube Music o de Spotify, solo si es la misma canción.

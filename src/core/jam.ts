@@ -9,7 +9,8 @@ import { parseFanUpload } from "./FanUploadParser";
  * songs in this phone's queue. Their songs carry `jamGuest`, so they never teach the owner's taste
  * unless the owner saves or likes them (DiscoveryEngine.recordListening, tasteGuard).
  */
-export interface JamGuest { id: string; name: string; added: number; lastSeen: number }
+/** `dj`: the owner let this guest pause, skip and put songs first. */
+export interface JamGuest { id: string; name: string; added: number; lastSeen: number; dj?: boolean }
 export interface JamSession { url: string; startedAt: number; guests: JamGuest[] }
 
 const VIDEO = /^[A-Za-z0-9_-]{11}$/;
@@ -38,8 +39,15 @@ function guestOf(request: JamRequest): { id: string; name: string } {
 function seen(guest: { id: string; name: string }) {
   if (!session) return;
   const known = session.guests.find((g) => g.id === guest.id);
-  if (known) { known.name = guest.name; known.lastSeen = Date.now(); }
-  else session.guests = [...session.guests, { ...guest, added: 0, lastSeen: Date.now() }];
+  // A new object each time, so the owner's panel redraws (useSyncExternalStore compares references).
+  const isNew = !known;
+  session = {
+    ...session,
+    guests: known
+      ? session.guests.map((g) => (g.id === guest.id ? { ...g, name: guest.name, lastSeen: Date.now() } : g))
+      : [...session.guests, { ...guest, added: 0, lastSeen: Date.now() }],
+  };
+  if (isNew || known?.name !== guest.name) changed();
 }
 
 /** A queue entry as the guest page shows it (no local paths, nothing private). */
@@ -59,6 +67,7 @@ function snapshot() {
     current: current ? shown(current) : null,
     upcoming: state.queue.slice(state.index + 1, state.index + 51).map(shown),
     guests: session?.guests.length ?? 0,
+    djs: session?.guests.filter((g) => g.dj).map((g) => g.id) ?? [],
     at: Date.now(),
   });
 }
@@ -97,6 +106,17 @@ async function search(query: string) {
   return out;
 }
 
+const NOT_DJ = "Solo los DJ de la JAM pueden hacer esto. Pídele al anfitrión que te haga DJ.";
+const isDj = (id: string) => !!session?.guests.find((g) => g.id === id)?.dj;
+
+/** The owner turns a guest into a DJ (pause, skip, put songs first) or back. */
+export function setGuestDj(id: string, dj: boolean) {
+  if (!session) return;
+  session = { ...session, guests: session.guests.map((g) => (g.id === id ? { ...g, dj } : g)) };
+  changed();
+  publish(true);
+}
+
 async function handle(request: JamRequest): Promise<{ status: number; body: unknown }> {
   const guest = guestOf(request);
   seen(guest);
@@ -123,10 +143,14 @@ async function handle(request: JamRequest): Promise<{ status: number; body: unkn
         artworkUrl: /^https:\/\/[^\s"']+$/.test(body.artworkUrl ?? "") ? String(body.artworkUrl).slice(0, 600) : undefined,
         tags: [], jamGuest: guest,
       };
+      // A DJ can put it first: right after the song that is playing, before everything else.
       if (!state.queue.length) await player.playList([{ ...track }]);
-      else player.enqueue(track);
-      const known = session?.guests.find((g) => g.id === guest.id);
-      if (known) known.added++;
+      else if (body.next === true && isDj(guest.id)) {
+        const queue = [...state.queue];
+        queue.splice(state.index + 1, 0, { ...track, queueId: crypto.randomUUID(), userQueued: true });
+        player.reorder(queue);
+      } else player.enqueue(track);
+      if (session) session = { ...session, guests: session.guests.map((g) => (g.id === guest.id ? { ...g, added: g.added + 1 } : g)) };
       changed();
       publish(true);
       return { status: 200, body: { ok: true } };
@@ -138,6 +162,8 @@ async function handle(request: JamRequest): Promise<{ status: number; body: unkn
       const upcoming = state.queue.slice(state.index + 1);
       const from = upcoming.findIndex((t) => t.queueId === queueId);
       if (from < 0 || !Number.isInteger(to) || to < 0 || to >= upcoming.length) return { status: 400, body: { error: "Esa canción ya no está en la cola." } };
+      // What plays next is a DJ's call.
+      if ((to === 0 || from === 0) && !isDj(guest.id)) return { status: 403, body: { error: NOT_DJ } };
       const [item] = upcoming.splice(from, 1);
       upcoming.splice(to, 0, item);
       player.reorder([...state.queue.slice(0, state.index + 1), ...upcoming]);
@@ -151,6 +177,16 @@ async function handle(request: JamRequest): Promise<{ status: number; body: unkn
       // A guest only takes out what a guest added; the owner's songs stay.
       if (at < 0 || !state.queue[at].jamGuest) return { status: 403, body: { error: "Solo puedes quitar canciones que añadió la JAM." } };
       player.reorder(state.queue.filter((_, i) => i !== at));
+      publish(true);
+      return { status: 200, body: { ok: true } };
+    }
+    case "control": {
+      if (!isDj(guest.id)) return { status: 403, body: { error: NOT_DJ } };
+      const action = clean(body.action, 12);
+      if (action === "toggle") await player.toggle();
+      else if (action === "next") await player.next();
+      else if (action === "previous") await player.previous();
+      else return { status: 400, body: { error: "Acción desconocida" } };
       publish(true);
       return { status: 200, body: { ok: true } };
     }

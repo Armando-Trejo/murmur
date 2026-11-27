@@ -5,7 +5,7 @@ import qrcode from "qrcode-generator";
 import mark from "../assets/murmur-mark.png";
 import { Voice, isNative } from "../native";
 import { shareLinks, shareTrack, type ShareLink } from "../core/share";
-import { jamSession, onJamChange, refreshJamAddress, startJam, stopJam } from "../core/jam";
+import { jamSession, onJamChange, refreshJamAddress, setGuestDj, startJam, stopJam } from "../core/jam";
 import { haptic } from "../core/haptics";
 import { settle } from "../core/motion";
 import type { QueueItem } from "../core/types";
@@ -208,12 +208,21 @@ export function JamPanel({ notify, onClose }: { notify: Notify; onClose: () => v
           </div>
           <section className="jam-guests" aria-label="Personas en la JAM">
             <h3><Users size={16} /> {guests.length ? guests.length === 1 ? "1 persona" : guests.length + " personas" : "Esperando a tus invitados"}</h3>
+            {guests.length > 0 && <p className="jam-guests-note">Toca a alguien para hacerlo DJ: podrá pausar, saltar y poner canciones primero. Los demás solo añaden y ordenan.</p>}
             {guests.map((g) => (
-              <span className="jam-guest" key={g.id}>
+              <button
+                type="button"
+                className={"jam-guest" + (g.dj ? " dj" : "")}
+                key={g.id}
+                aria-pressed={!!g.dj}
+                aria-label={(g.dj ? "Quitar DJ a " : "Hacer DJ a ") + g.name}
+                onClick={() => { haptic(g.dj ? "tick" : "confirm"); setGuestDj(g.id, !g.dj); notify(g.dj ? g.name + " ya no es DJ" : g.name + " ahora es DJ"); }}
+              >
                 <b>{g.name.slice(0, 1).toUpperCase()}</b>
                 {g.name}
+                {g.dj && <span className="dj-tag">DJ</span>}
                 {g.added > 0 && <small>{g.added} {g.added === 1 ? "canción" : "canciones"}</small>}
-              </span>
+              </button>
             ))}
           </section>
         </>
@@ -228,7 +237,7 @@ export function JamButton({ onOpen }: { onOpen: () => void }) {
   return (
     <button className={"mix-now jam-button" + (session ? " live" : "")} onClick={() => { haptic(); onOpen(); }}>
       <Radio size={18} />
-      {session ? <>JAM en vivo{session.guests.length ? " · " + session.guests.length : ""}</> : "JAM"}
+      JAM{session && session.guests.length > 0 && <span className="jam-count" aria-label={session.guests.length + " invitados"}>{session.guests.length}</span>}
     </button>
   );
 }

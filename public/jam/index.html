@@ -30,6 +30,18 @@ header{display:flex;align-items:center;justify-content:space-between;margin-bott
 .label{font-family:ui-monospace,monospace;font-size:9px;font-weight:800;letter-spacing:.1em;color:var(--brand);text-transform:uppercase}
 .now h1{margin:6px 0 3px;font-size:1.15rem;line-height:1.2;letter-spacing:-.02em;font-weight:720;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .now p{margin:0;color:var(--muted);font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ctrl{grid-column:1/-1;display:flex;align-items:center;justify-content:center;gap:26px;margin-top:2px}
+.ctrl button{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;color:#fff;transition:transform .15s,opacity .2s,background .2s}
+.ctrl button:active{transform:scale(.9)}
+.ctrl .play{width:58px;height:58px;background:var(--brand);color:#000}
+.ctrl.locked button{opacity:.38}
+.now p.lock{white-space:normal;overflow:visible;line-height:1.45}
+.lock{grid-column:1/-1;text-align:center;font-size:.72rem;color:var(--muted);margin-top:-4px}
+.lock b{color:var(--brand)}
+.djbadge{display:none;font-family:ui-monospace,monospace;font-size:9px;font-weight:800;letter-spacing:.1em;color:#000;background:var(--brand);border-radius:6px;padding:3px 6px}
+.djbadge.on{display:inline-block}
+.addnext{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--active);color:var(--brand);margin-right:6px}
+.radd{display:flex;align-items:center}
 .bar{grid-column:1/-1;height:4px;border-radius:4px;background:rgba(255,255,255,.12);overflow:hidden}
 .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--brand),var(--pink));border-radius:4px;transition:width .9s linear}
 .search{position:sticky;top:0;z-index:5;margin:22px -18px 0;padding:12px 18px;background:linear-gradient(#000 70%,rgba(0,0,0,0))}
@@ -37,6 +49,7 @@ header{display:flex;align-items:center;justify-content:space-between;margin-bott
 .field:focus-within{border-color:rgba(var(--brand-rgb),.7);box-shadow:0 0 0 4px rgba(var(--brand-rgb),.15)}
 .field input{flex:1;min-width:0;height:100%;background:none;border:0;outline:0;font-size:1rem}
 .field input::placeholder{color:#71717a}
+.field input::-webkit-search-cancel-button,.field input::-webkit-search-decoration{-webkit-appearance:none;appearance:none;display:none}
 .field svg{flex:none;color:var(--muted)}
 .clear{width:32px;height:32px;border-radius:50%;display:none;place-items:center;color:var(--muted)}
 .clear.on{display:grid}
@@ -57,7 +70,18 @@ h2 small{color:var(--muted);font-weight:500;font-size:.78rem}
 .tool{width:40px;height:44px;display:grid;place-items:center;color:var(--muted);border-radius:10px;touch-action:none}
 .tool:active{color:#fff;background:var(--active)}
 .handle{cursor:grab}
-.row.dragging{background:var(--active);box-shadow:0 14px 34px rgba(0,0,0,.6);z-index:3;position:relative;transition:none}
+.sw{position:relative;border-radius:14px;overflow:hidden;transition:height .22s ease,opacity .22s ease}
+.sw>.row{position:relative;z-index:1;background:#000;touch-action:pan-y;will-change:transform}
+.rv{position:absolute;inset:0;display:none;align-items:center;gap:8px;padding:0 20px;font-size:.82rem;font-weight:750;border-radius:14px}
+.rv svg{flex:none;transition:transform .18s cubic-bezier(.2,.9,.3,1.4)}
+.sw[data-dir=right] .rv-add,.sw[data-dir=right] .rv-next{display:flex;justify-content:flex-start;background:rgba(var(--brand-rgb),.16);color:var(--brand)}
+.sw[data-dir=left] .rv-del{display:flex;justify-content:flex-end;background:rgba(248,113,113,.14);color:#fca5a5}
+.sw.armed[data-dir=right] .rv-add,.sw.armed[data-dir=right] .rv-next{background:var(--brand);color:#000}
+.sw.armed[data-dir=left] .rv-del{background:#ef4444;color:#fff}
+.sw.armed .rv svg{transform:scale(1.25)}
+.sw.dragging{box-shadow:0 14px 34px rgba(0,0,0,.6);z-index:3;overflow:visible}
+.sw.dragging>.row{background:var(--active)}
+.hint{color:#52525b;font-size:.72rem;margin:-4px 0 10px;display:flex;gap:14px;flex-wrap:wrap}
 .empty{color:var(--muted);font-size:.88rem;text-align:center;padding:26px 10px;border:1px dashed var(--border);border-radius:16px}
 .skel{height:64px;border-radius:14px;background:linear-gradient(90deg,#111 0%,#1b1b1b 50%,#111 100%);background-size:200% 100%;animation:sh 1.2s infinite}
 @keyframes sh{to{background-position:-200% 0}}
@@ -84,7 +108,7 @@ h2 small{color:var(--muted);font-weight:500;font-size:.78rem}
 <main>
   <header>
     <div class="brand"><img src="mark.png" alt="" width="30" height="30"><b>MURMUR</b><span>JAM</span></div>
-    <div class="live" id="live"><i></i><span>En vivo</span></div>
+    <div style="display:flex;align-items:center;gap:10px"><span class="djbadge" id="djBadge">ERES DJ</span><div class="live" id="live"><i></i><span>En vivo</span></div></div>
   </header>
 
   <section class="now" aria-live="polite">
@@ -95,6 +119,12 @@ h2 small{color:var(--muted);font-weight:500;font-size:.78rem}
       <p id="nowArtist">&nbsp;</p>
     </div>
     <div class="bar"><i id="nowBar"></i></div>
+    <div class="ctrl locked" id="ctrl">
+      <button data-act="previous" aria-label="Canción anterior"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+      <button class="play" data-act="toggle" aria-label="Pausar o reproducir" id="playBtn"></button>
+      <button data-act="next" aria-label="Siguiente canción"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+    </div>
+    <p class="lock" id="lockNote">Solo los <b>DJ</b> controlan la música. Pídele al anfitrión que te haga DJ.</p>
   </section>
 
   <div class="search">
@@ -107,11 +137,13 @@ h2 small{color:var(--muted);font-weight:500;font-size:.78rem}
 
   <section id="resultsBox" hidden>
     <h2>Resultados <small id="resultsNote"></small></h2>
+    <p class="hint">Desliza a la derecha para añadir →</p>
     <ul class="list" id="results"></ul>
   </section>
 
   <section>
     <h2>A continuación <small id="count"></small></h2>
+    <p class="hint"><span id="hintNext" hidden>→ que suene después</span><span>← quitar lo que añadió la JAM</span></p>
     <ul class="list" id="queue"><li class="skel"></li><li class="skel"></li><li class="skel"></li></ul>
   </section>
 
@@ -140,6 +172,15 @@ h2 small{color:var(--muted);font-weight:500;font-size:.78rem}
   let state = null, lastAt = 0, ended = false, failures = 0, dragging = false;
   const added = new Set();
 
+  const ICON = {
+    add: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`,
+    next: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M6 12l6-6 6 6M5 3h14"/></svg>`,
+    del: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>`,
+  };
+  const PLAY = `<svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg>`;
+  const PAUSE = `<svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>`;
+  const amDj = () => !!(state && state.djs && state.djs.includes(me));
+  const DJ_ONLY = "Solo los DJ controlan la música. Pídele al anfitrión que te haga DJ.";
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const img = (url) => /^https:\/\//.test(url || "") ? `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML='<div class=ph></div>'">` : `<div class="ph"></div>`;
   const time = (s) => { s = Math.max(0, Math.round(s || 0)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
@@ -170,6 +211,13 @@ h2 small{color:var(--muted);font-weight:500;font-size:.78rem}
     $("nowTitle").textContent = c ? c.title : "Nada suena todavía";
     $("nowArtist").textContent = c ? c.artist + (c.guest ? " · añadida por " + c.guest : "") : "Añade la primera canción";
     $("nowLabel").textContent = state && state.playing ? "Sonando ahora" : "En pausa";
+    const dj = amDj();
+    $("ctrl").classList.toggle("locked", !dj);
+    $("lockNote").hidden = dj;
+    $("djBadge").classList.toggle("on", dj);
+    $("hintNext").hidden = !dj;
+    const icon = state && state.playing ? PAUSE : PLAY;
+    if ($("playBtn").innerHTML !== icon) $("playBtn").innerHTML = icon;
     const cover = $("nowCover");
     if (c && /^https:\/\//.test(c.artworkUrl || "")) { if (cover.src !== c.artworkUrl) cover.src = c.artworkUrl; cover.style.visibility = "visible"; }
     else cover.style.visibility = "hidden";
@@ -189,13 +237,17 @@ h2 small{color:var(--muted);font-weight:500;font-size:.78rem}
     const list = $("queue");
     if (!up.length) { list.innerHTML = `<li class="empty">La cola está vacía. Busca algo arriba y añádelo.</li>`; return; }
     list.innerHTML = up.map((t, i) => `
-      <li class="row" data-id="${esc(t.queueId)}" data-i="${i}">
+      <li class="sw" data-id="${esc(t.queueId)}" data-i="${i}" data-mine="${t.guest ? 1 : 0}">
+        <div class="rv rv-next">${ICON.next}<span>Que suene después</span></div>
+        <div class="rv rv-del"><span>Quitar</span>${ICON.del}</div>
+        <div class="row">
         ${img(t.artworkUrl)}
         <div class="t"><strong>${esc(t.title)}</strong><span>${esc(t.artist)}</span>${t.guest ? `<span class="chip">${t.guestId === me ? "Tú" : esc(t.guest)}</span>` : ""}</div>
         <div class="tools">
           ${t.guest ? `<button class="tool" data-remove aria-label="Quitar ${esc(t.title)}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>` : ""}
-          ${i > 0 ? `<button class="tool" data-top aria-label="Que suene después de la actual"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M6 12l6-6 6 6M5 3h14"/></svg></button>` : ""}
+          ${i > 0 && amDj() ? `<button class="tool" data-top aria-label="Que suene después de la actual"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M6 12l6-6 6 6M5 3h14"/></svg></button>` : ""}
           <button class="tool handle" data-drag aria-label="Arrastra para ordenar"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></button>
+        </div>
         </div>
       </li>`).join("");
   }
@@ -207,8 +259,10 @@ h2 small{color:var(--muted);font-weight:500;font-size:.78rem}
       failures = 0;
       $("live").classList.remove("off"); $("live").lastElementChild.textContent = "En vivo";
       if (next.active === false) { end(); return; }
+      const wasDj = amDj();
       state = next; lastAt = Date.now();
       renderNow(); renderQueue();
+      if (wasDj !== amDj()) { if (lastResults.length && !$("resultsBox").hidden) renderResults(lastResults); toast(amDj() ? "Ahora eres DJ: puedes pausar, saltar y poner canciones primero" : "Ya no eres DJ"); }
     } catch (e) {
       if (ended) return;
       if (++failures >= 3) { $("live").classList.add("off"); $("live").lastElementChild.textContent = "Sin conexión"; }
@@ -223,12 +277,16 @@ h2 small{color:var(--muted);font-weight:500;font-size:.78rem}
     $("resultsNote").textContent = note || "";
     lastResults = results;
     $("results").innerHTML = results.length ? results.map((r, i) => `
-      <li class="row">
+      <li class="sw" data-r="${i}">
+        <div class="rv rv-add">${ICON.add}<span>${added.has(r.videoId) ? "Ya está en la cola" : "Añadir a la cola"}</span></div>
+        <div class="row">
         ${img(r.artworkUrl)}
         <div class="t"><strong>${esc(r.title)}</strong><span>${esc(r.artist)}${r.duration ? " · " + time(r.duration) : ""}</span></div>
+        <div class="radd">${amDj() && !added.has(r.videoId) ? `<button class="addnext" data-next="${i}" aria-label="Poner ${esc(r.title)} primero">${ICON.next}</button>` : ""}
         <button class="add${added.has(r.videoId) ? " done" : ""}" data-add="${i}" aria-label="Añadir ${esc(r.title)} a la cola">${added.has(r.videoId)
           ? `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg>`
-          : `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`}</button>
+          : `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`}</button></div>
+        </div>
       </li>`).join("") : `<li class="empty">No encontré canciones con eso. Prueba con otras palabras.</li>`;
   }
   async function search(q) {
@@ -249,27 +307,40 @@ h2 small{color:var(--muted);font-weight:500;font-size:.78rem}
   });
   $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") { clearTimeout(searchTimer); const q = e.target.value.trim(); if (q.length >= 2) search(q); e.target.blur(); } });
   $("clear").addEventListener("click", (e) => { e.preventDefault(); $("q").value = ""; $("clear").classList.remove("on"); searchSeq++; $("resultsBox").hidden = true; $("q").focus(); });
-  $("results").addEventListener("click", async (e) => {
-    const btn = e.target.closest("[data-add]"); if (!btn) return;
-    const r = lastResults[+btn.dataset.add]; if (!r || added.has(r.videoId)) return;
+  async function addResult(i, next = false) {
+    const r = lastResults[i]; if (!r) return;
+    if (added.has(r.videoId)) { toast("Ya está en la cola"); return; }
     buzz(); added.add(r.videoId); renderResults(lastResults, $("resultsNote").textContent);
-    try { const res = await api("add", r); toast(res.already ? "Ya estaba en la cola" : "Añadida a la cola ✓"); poll(); }
+    try { const res = await api("add", next ? { ...r, next: true } : r); toast(res.already ? "Ya estaba en la cola" : next ? "Sonará después de la actual ✓" : "Añadida a la cola ✓"); poll(); }
     catch (err) { added.delete(r.videoId); renderResults(lastResults); toast(err.message); }
+  }
+  $("results").addEventListener("click", (e) => {
+    const nx = e.target.closest("[data-next]"); if (nx) return addResult(+nx.dataset.next, true);
+    const btn = e.target.closest("[data-add]"); if (btn) addResult(+btn.dataset.add);
   });
+  async function removeSong(li) {
+    buzz(); li.style.opacity = ".35";
+    try { await api("remove", { queueId: li.dataset.id }); toast("Quitada de la cola"); poll(); }
+    catch (err) {
+      li.style.opacity = ""; li.style.height = "";
+      const row = li.querySelector(".row"); if (row) { row.style.transition = ""; row.style.transform = ""; }
+      delete li.dataset.dir; toast(err.message);
+    }
+  }
+  async function playNext(li) {
+    buzz();
+    try { await api("move", { queueId: li.dataset.id, to: 0 }); toast("Sonará después de la actual"); poll(); } catch (err) { toast(err.message); }
+  }
 
   // Queue: remove, play next, drag to reorder
   $("queue").addEventListener("click", async (e) => {
-    const row = e.target.closest(".row"); if (!row) return;
-    try {
-      if (e.target.closest("[data-remove]")) { buzz(); row.style.opacity = ".35"; await api("remove", { queueId: row.dataset.id }); toast("Quitada de la cola"); }
-      else if (e.target.closest("[data-top]")) { buzz(); await api("move", { queueId: row.dataset.id, to: 0 }); toast("Sonará después de la actual"); }
-      else return;
-      poll();
-    } catch (err) { row.style.opacity = ""; toast(err.message); }
+    const li = e.target.closest(".sw"); if (!li) return;
+    if (e.target.closest("[data-remove]")) removeSong(li);
+    else if (e.target.closest("[data-top]")) playNext(li);
   });
   $("queue").addEventListener("pointerdown", (e) => {
     const handle = e.target.closest("[data-drag]"); if (!handle) return;
-    const row = handle.closest(".row"); const rows = [...$("queue").children];
+    const row = handle.closest(".sw"); const rows = [...$("queue").children];
     const from = rows.indexOf(row); if (from < 0) return;
     e.preventDefault(); handle.setPointerCapture(e.pointerId);
     dragging = true; buzz(8);
@@ -292,6 +363,66 @@ h2 small{color:var(--muted);font-weight:500;font-size:.78rem}
       dragging = false; poll();
     };
     handle.addEventListener("pointermove", move); handle.addEventListener("pointerup", up); handle.addEventListener("pointercancel", up);
+  });
+
+  $("ctrl").addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-act]"); if (!btn) return;
+    if (!amDj()) { toast(DJ_ONLY); return; }
+    buzz();
+    if (btn.dataset.act === "toggle" && state) { state.playing = !state.playing; renderNow(); }
+    try { await api("control", { action: btn.dataset.act }); setTimeout(poll, 600); } catch (err) { toast(err.message); poll(); }
+  });
+
+  // Swipe: right adds (results) or plays next (queue); left removes a JAM song. Only on release.
+  function swipeable(list, can, commit) {
+    list.addEventListener("pointerdown", (e) => {
+      if (e.button > 0 || e.target.closest("button")) return;
+      const li = e.target.closest(".sw"); const row = li && li.querySelector(".row");
+      if (!row || dragging) return;
+      const sx = e.clientX, sy = e.clientY, W = li.offsetWidth, T = Math.min(110, W * 0.28);
+      let lock = null, dx = 0, armed = false;
+      const move = (ev) => {
+        const x = ev.clientX - sx, y = ev.clientY - sy;
+        if (!lock) {
+          if (Math.abs(x) < 9 && Math.abs(y) < 9) return;
+          lock = Math.abs(x) > Math.abs(y) * 1.15 ? "x" : "y";
+          if (lock === "x") { dragging = true; row.style.transition = "none"; }
+        }
+        if (lock !== "x") return;
+        ev.preventDefault();
+        const dir = x > 0 ? "right" : "left";
+        const ok = can(li, dir);
+        dx = ok ? x : x * 0.15;
+        row.style.transform = `translateX(${dx}px)`;
+        li.dataset.dir = dir;
+        const now = ok && Math.abs(dx) >= T;
+        if (now !== armed) { armed = now; li.classList.toggle("armed", armed); buzz(armed ? 14 : 6); }
+      };
+      const done = () => {
+        window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", done); window.removeEventListener("pointercancel", done);
+        if (lock !== "x") return;
+        dragging = false;
+        li.classList.remove("armed");
+        const dir = dx > 0 ? "right" : "left";
+        const back = () => { row.style.transition = "transform .34s cubic-bezier(.2,.9,.3,1.15)"; row.style.transform = ""; setTimeout(() => delete li.dataset.dir, 340); };
+        if (!armed) {
+          if (!can(li, dir) && Math.abs(dx) > 4) toast(dir === "left" ? "Solo puedes quitar canciones que añadió la JAM" : list === $("queue") && !amDj() ? DJ_ONLY : "Esta canción ya es la siguiente");
+          return back();
+        }
+        commit(li, dir, row, back, W);
+      };
+      window.addEventListener("pointermove", move, { passive: false }); window.addEventListener("pointerup", done); window.addEventListener("pointercancel", done);
+    });
+  }
+  swipeable($("results"), (li, dir) => dir === "right", (li, dir, row, back) => { back(); addResult(+li.dataset.r); });
+  swipeable($("queue"), (li, dir) => dir === "left" ? li.dataset.mine === "1" : amDj() && li.dataset.i !== "0", (li, dir, row, back, W) => {
+    if (dir === "right") { back(); playNext(li); return; }
+    row.style.transition = "transform .2s ease-in"; row.style.transform = `translateX(${-W}px)`;
+    setTimeout(() => {
+      li.style.height = li.offsetHeight + "px";
+      requestAnimationFrame(() => { li.style.height = "0px"; li.style.opacity = "0"; });
+      removeSong(li);
+    }, 190);
   });
 
   // Name
