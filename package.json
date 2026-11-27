@@ -1,6 +1,6 @@
 {
   "name": "murmur",
-  "version": "2.20.4",
+  "version": "2.21.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -19,6 +19,7 @@
     "dexie-react-hooks": "^1.1.7",
     "framer-motion": "^11.18.2",
     "lucide-react": "^0.468.0",
+    "qrcode-generator": "^1.4.4",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },

@@ -52,6 +52,13 @@ export class AudioOrchestrator {
    */
   async cycleShuffle(pickMagic: (queue: QueueItem[], current: QueueItem | undefined, count: number) => Promise<QueueItem[]>) {
     const mode = this.state.shuffleMode;
+    // What follows was chosen by MURMUR (a song on its own, or the end of a list): shuffling it would
+    // only reorder the same songs, so each press brings a new selection instead.
+    if (mode !== "magic" && this.autoUpcoming()) {
+      const count = await this.freshSelection();
+      this.update({ shuffleMode: mode === "off" ? "on" : "magic", shuffled: true });
+      return count ? `Nueva selección: ${count} canciones` : "No encontré otras canciones afines ahora.";
+    }
     if (mode === "off") {
       this.originalOrder = this.state.queue.slice(this.state.index + 1).map((t) => t.queueId!);
       this.reshuffle();
@@ -83,6 +90,26 @@ export class AudioOrchestrator {
     this.update({ queue: [...head, ...known, ...added], shuffleMode: "off", shuffled: false });
     this.syncQueue();
     return "Aleatorio desactivado";
+  }
+  /** True when every song after the current one was added by MURMUR (none chosen by the listener). */
+  autoUpcoming() {
+    if (!this.current) return false;
+    return this.state.queue.slice(this.state.index + 1).every((t) => t.continuation && !t.userQueued && !t.jamGuest);
+  }
+  /** Replaces MURMUR's songs after the current one with a new selection, never the same songs. */
+  async freshSelection(): Promise<number> {
+    const current = this.current;
+    if (!current) return 0;
+    const head = this.state.queue.slice(0, this.state.index + 1);
+    const previous = this.state.queue.slice(this.state.index + 1);
+    const picks = await continuationPicks(head, current, CONTINUE_BATCH, undefined, previous).catch(() => [] as QueueItem[]);
+    if (this.current?.queueId !== current.queueId || !picks.length) return 0;
+    // Songs a guest or the listener queued meanwhile stay.
+    const kept = this.state.queue.slice(this.state.index + 1).filter((t) => !t.continuation || t.userQueued || t.jamGuest);
+    this.update({ queue: [...this.state.queue.slice(0, this.state.index + 1), ...kept, ...picks.map((t) => ({ ...t, queueId: crypto.randomUUID() }))] });
+    this.syncQueue();
+    void this.bridgeUpcoming();
+    return picks.length;
   }
   private listeners = new Set<() => void>();
   private generation = 0;
@@ -602,9 +629,11 @@ export class AudioOrchestrator {
     } else {
       const prefs = await Audio.voicePrefs().catch(() => undefined);
       const every = prefs?.every ?? 1;
-      if (prefs?.presenter && every > 1 && prefs.moods !== false) {
+      // Mood blocks only go on when what plays already comes from a mood: after a song the listener
+      // chose (a search, a voice request, an album), the endless queue follows that song instead.
+      if (prefs?.presenter && every > 1 && prefs.moods !== false && current?.moodKey) {
         const last = [...this.state.queue].reverse().find((t) => t.moodKey)?.moodKey;
-        const picks = await moodPicks(nextMood(last), this.state.queue, every, false).catch(() => []);
+        const picks = await moodPicks(nextMood(last), this.state.queue, Math.max(every, CONTINUE_BATCH), false).catch(() => []);
         if (picks.length) return picks;
       }
     }

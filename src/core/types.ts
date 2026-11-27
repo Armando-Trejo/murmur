@@ -66,6 +66,8 @@ export interface QueueItem extends CustomArtwork {
   moodKey?: string;
   /** The listener asked for the mood ("pon algo triste"): the endless queue keeps it instead of rotating. */
   moodAsked?: boolean;
+  /** Added by a JAM guest from their browser: who added it. It never teaches taste unless the owner saves it. */
+  jamGuest?: { id: string; name: string };
 }
 export interface Playlist extends CustomArtwork {
   kind?: "playlist" | "album";

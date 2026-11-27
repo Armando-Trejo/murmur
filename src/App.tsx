@@ -113,7 +113,8 @@ import { artworkFor } from "./core/artwork";
 import { Cover } from "./components/Cover";
 import { ArtistProfile } from "./components/ArtistProfile";
 import { OverflowMenu, type MenuEntry } from "./components/OverflowMenu";
-import { ListPlus, Sparkles, Link as LinkIcon, ArrowDownUp } from "lucide-react";
+import { ListPlus, Sparkles, Link as LinkIcon, ArrowDownUp, Share2 } from "lucide-react";
+import { JamButton, JamPanel, ShareOptions } from "./components/ShareAndJam";
 import { orderMusic, listeningStats, type MusicOrder } from "./core/musicOrder";
 import { PlayerBackdrop, useArtworkTone } from "./components/PlayerBackdrop";
 import { SyncedLyrics } from "./components/SyncedLyrics";
@@ -331,6 +332,8 @@ export default function App() {
     nav.route.sheet?.kind === "shared" ? nav.route.sheet.track : undefined;
   const newPlaylist = nav.route.sheet?.kind === "create";
   const sleepSheet = nav.route.sheet?.kind === "sleep";
+  const shareTarget = nav.route.sheet?.kind === "share" ? nav.route.sheet.track : undefined;
+  const jamSheet = nav.route.sheet?.kind === "jam";
   const setActionTrack = (track?: QueueItem) =>
     track ? nav.sheet("actions", track) : nav.close("sheet", "actions");
   const setPlaylistPicker = (track?: QueueItem) =>
@@ -406,7 +409,7 @@ export default function App() {
   const sheetDrag = useDragControls();
   /** The open sheet was thrown down by the finger (its exit keeps going down instead of a short drop). */
   const sheetThrown = useRef(false);
-  const sheetOpen = !!(actionTrack || playlistPicker || newPlaylist || shared || sleepSheet);
+  const sheetOpen = !!(actionTrack || playlistPicker || newPlaylist || shared || sleepSheet || shareTarget || jamSheet);
   useEffect(() => {
     if (sheetOpen) sheetThrown.current = false;
   }, [sheetOpen]);
@@ -1128,6 +1131,8 @@ export default function App() {
     newPlaylist ||
     shared ||
     sleepSheet ||
+    shareTarget ||
+    jamSheet ||
     expanded
   );
   useEffect(() => {
@@ -1180,7 +1185,7 @@ export default function App() {
       document.removeEventListener("keydown", handler);
       before?.focus();
     };
-  }, [modalOpen, expanded, actionTrack, playlistPicker, newPlaylist, shared, sleepSheet]);
+  }, [modalOpen, expanded, actionTrack, playlistPicker, newPlaylist, shared, sleepSheet, shareTarget, jamSheet]);
 
   async function exportData() {
     const content = await exportBackup();
@@ -2800,6 +2805,14 @@ export default function App() {
                 </b>
               </div>
               <div className="player-top-actions">
+                <motion.button
+                  whileTap={{ scale: 0.88 }}
+                  className="icon-button"
+                  aria-label="Compartir canción"
+                  onClick={() => { haptic(); nav.sheet("share", current); }}
+                >
+                  <Share2 size={20} />
+                </motion.button>
                 {isNative && (
                   <motion.button
                     whileTap={{ scale: 0.88 }}
@@ -2899,12 +2912,13 @@ export default function App() {
                 <button
                   className={"icon-button shuffle-button mode-" + state.shuffleMode}
                   aria-label={
-                    state.shuffleMode === "off" ? "Activar aleatorio"
+                    player.autoUpcoming() && state.shuffleMode !== "magic" ? "Otra selección de canciones"
+                      : state.shuffleMode === "off" ? "Activar aleatorio"
                       : state.shuffleMode === "on" ? "Activar aleatorio mágico"
                         : "Desactivar aleatorio"
                   }
                   aria-pressed={state.shuffleMode !== "off"}
-                  disabled={state.shuffleMode === "off" && state.queue.length - state.index - 1 < 2}
+                  disabled={state.shuffleMode === "off" && state.queue.length - state.index - 1 < 2 && !player.autoUpcoming()}
                   onClick={() => {
                     haptic(state.shuffleMode === "on" ? "confirm" : undefined);
                     void player.cycleShuffle(magicPicks).then((message) => message && notify(message));
@@ -2986,6 +3000,7 @@ export default function App() {
                   <AudioLines size={18} />
                   Mezclar ahora
                 </button>
+                {isNative && <JamButton onOpen={() => nav.sheet("jam")} />}
               </div>
               <p className="mix-mode-note">
                 Auto-Mix · {modes.find((m) => m.value === state.mode)?.label}
@@ -3150,7 +3165,7 @@ export default function App() {
                         onClick={() => void player.playQueueEntry(t.queueId!)}
                       >
                         <strong><MarqueeTitle text={t.title} /></strong>
-                        <small>{t.smart && <span className="smart-mark">✦ Sugerida · </span>}{t.artist}</small>
+                        <small>{t.smart && <span className="smart-mark">✦ Sugerida · </span>}{t.artist}{t.jamGuest && <span className="queue-guest">JAM · {t.jamGuest.name}</span>}</small>
                       </button>
                       <Badge source={t.source} />
                     </QueueRow>
@@ -3200,7 +3215,7 @@ export default function App() {
               setPlaylistPicker(undefined);
               setNewPlaylist(false);
               setShared(undefined);
-              nav.close("sheet", "sleep");
+              nav.close("sheet");
             }}
           >
             <motion.div
@@ -3212,6 +3227,10 @@ export default function App() {
                   ? "Crear playlist"
                   : sleepSheet
                     ? "Temporizador de sueño"
+                    : shareTarget
+                      ? "Compartir canción"
+                      : jamSheet
+                        ? "JAM"
                     : "Acciones de canción"
               }
               className="action-sheet"
@@ -3230,7 +3249,7 @@ export default function App() {
                 setPlaylistPicker(undefined);
                 setNewPlaylist(false);
                 setShared(undefined);
-                nav.close("sheet", "sleep");
+                nav.close("sheet");
               }}
               initial={{ y: reduced ? 0 : 42, opacity: reduced ? 1 : 0.72 }}
               animate={{ y: 0, opacity: 1 }}
@@ -3266,12 +3285,16 @@ export default function App() {
                   setPlaylistPicker(undefined);
                   setNewPlaylist(false);
                   setShared(undefined);
-                  nav.close("sheet", "sleep");
+                  nav.close("sheet");
                 }}
               >
                 <X size={20} />
               </button>
-              {sleepSheet ? (
+              {shareTarget ? (
+                <ShareOptions track={shareTarget} notify={notify} onDone={() => nav.close("sheet", "share")} />
+              ) : jamSheet ? (
+                <JamPanel notify={notify} onClose={() => nav.close("sheet", "jam")} />
+              ) : sleepSheet ? (
                 <>
                   <h2>Temporizador de sueño</h2>
                   <p className="help-copy">
@@ -3435,6 +3458,13 @@ export default function App() {
                   >
                     <ListMusic size={20} />
                     Añadir a la cola
+                  </button>
+                  <button
+                    className="sheet-action"
+                    onClick={() => nav.sheet("share", (actionTrack || shared)!)}
+                  >
+                    <Share2 size={20} />
+                    Compartir
                   </button>
                   <button
                     className="sheet-action"

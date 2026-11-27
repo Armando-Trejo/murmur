@@ -4,7 +4,7 @@ import { resolveView, type ViewId } from "./navigation";
 import { navTransitionKind, startNavTransition } from "./viewTransition";
 import type { QueueItem } from "./types";
 type Sheet = {
-  kind: "actions" | "picker" | "shared" | "create" | "sleep";
+  kind: "actions" | "picker" | "shared" | "create" | "sleep" | "share" | "jam";
   track?: QueueItem;
   parentTrack?: QueueItem;
 };

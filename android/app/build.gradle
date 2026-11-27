@@ -9,8 +9,8 @@ android {
         applicationId "com.personal.murmur"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 41
-        versionName "2.20.4"
+        versionCode 42
+        versionName "2.21.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Optional single-ABI build for direct phone downloads, e.g. -Pabi=arm64-v8a.
         if (project.hasProperty('abi')) {

@@ -1,0 +1,44 @@
+/* 2.21: Compartir y JAM. */
+.share-options h2, .jam-panel h2 { margin: 6px 38px 18px 0; font-size: 1.3rem; letter-spacing: -0.02em; }
+.share-loading, .share-empty, .share-note { display: flex; align-items: center; gap: 10px; color: var(--secondary); font-size: 0.85rem; line-height: 1.5; margin: 6px 0 14px; }
+.share-note { font-size: 0.78rem; margin-top: 10px; }
+.share-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.share-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 14px; min-height: 66px; padding: 10px 16px; border-radius: 16px; background: #161616; border: 1px solid #2a2a2a; text-align: left; transition: background 0.2s, border-color 0.2s; }
+.share-main:active { background: #222; border-color: rgba(var(--brand-rgb), 0.45); }
+.share-main > span:not(.share-glyph) { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.share-main strong { font-size: 0.92rem; font-weight: 650; }
+.share-main small { color: var(--secondary); font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.share-main > svg { color: var(--brand-readable); flex-shrink: 0; }
+.share-glyph { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: #0d0d0d; flex-shrink: 0; }
+.share-copy { width: 52px; height: 66px; border-radius: 16px; background: #161616; border: 1px solid #2a2a2a; color: #e4e4e7; }
+
+.jam-panel { padding-bottom: 4px; }
+.jam-head { display: flex; align-items: center; gap: 10px; margin: 4px 0 10px; }
+.jam-badge { display: inline-flex; align-items: center; gap: 6px; font-family: monospace; font-size: 10px; font-weight: 800; letter-spacing: 0.12em; color: #000; background: var(--brand-accent); border-radius: 7px; padding: 4px 8px; }
+.jam-live { display: inline-flex; align-items: center; gap: 7px; font-size: 0.75rem; font-weight: 650; color: #d4d4d8; }
+.jam-live i, .jam-button.live::before { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55); animation: jam-pulse 2s infinite; }
+@keyframes jam-pulse { 70% { box-shadow: 0 0 0 8px rgba(74, 222, 128, 0); } 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); } }
+.jam-qr-card { position: relative; display: grid; justify-items: center; gap: 10px; margin: 0 auto; padding: 18px 18px 14px; width: fit-content; border-radius: 26px;
+  background: linear-gradient(#0b0b0b, #0b0b0b) padding-box, linear-gradient(135deg, #b69aff, #ff8fd3 55%, #7c5cff) border-box; border: 1.5px solid transparent;
+  box-shadow: 0 0 46px rgba(var(--brand-rgb), 0.28), 0 24px 50px rgba(0, 0, 0, 0.55); }
+.jam-qr-card.loading { min-width: 270px; min-height: 290px; place-content: center; grid-auto-flow: column; gap: 10px; color: var(--secondary); font-size: 0.85rem; }
+.jam-qr { display: block; border-radius: 16px; }
+.jam-qr-caption { margin: 0; font-family: monospace; font-size: 10px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--brand-readable); }
+.jam-help { color: var(--secondary); font-size: 0.8rem; line-height: 1.55; margin: 18px 2px 16px; text-align: center; }
+.jam-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.jam-actions .button { width: 100%; padding: 12px 14px; }
+.jam-actions .button.secondary { background: #2a2a2a; border: 1px solid #3a3a3a; }
+.button.danger { background: rgba(248, 113, 113, 0.12); color: #fca5a5; border: 1px solid rgba(248, 113, 113, 0.28); }
+.jam-guests { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 8px; }
+.jam-guests h3 { width: 100%; display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 0.85rem; font-weight: 650; color: #e4e4e7; }
+.jam-guest { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px 5px 5px; border-radius: 30px; background: #161616; border: 1px solid #262626; font-size: 0.8rem; }
+.jam-guest b { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg, #b69aff, #ff8fd3); color: #000; font-size: 0.75rem; }
+.jam-guest small { color: var(--secondary); font-size: 0.7rem; }
+.jam-error { display: grid; justify-items: center; gap: 10px; text-align: center; padding: 22px 10px; color: var(--secondary); font-size: 0.85rem; line-height: 1.5; }
+.jam-error > svg { color: var(--brand-readable); }
+.jam-error p { margin: 0; }
+.jam-button.live { color: #fff; border-color: rgba(var(--brand-rgb), 0.55); background: rgba(var(--brand-rgb), 0.14); }
+.jam-button.live::before { content: ""; flex-shrink: 0; }
+.jam-button.live > svg { display: none; }
+.queue-guest { display: inline-flex; align-items: center; margin-left: 6px; padding: 1px 7px; border-radius: 20px; font-size: 0.66rem; font-weight: 700; color: var(--brand-readable); background: rgba(var(--brand-rgb), 0.14); vertical-align: 1px; }
+@media (prefers-reduced-motion: reduce) { .jam-live i, .jam-button.live::before { animation: none; } }

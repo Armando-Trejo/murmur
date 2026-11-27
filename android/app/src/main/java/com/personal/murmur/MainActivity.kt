@@ -17,7 +17,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 class MainActivity : BridgeActivity() {
     private val bluetooth = object : BroadcastReceiver() { override fun onReceive(context: Context?, intent: Intent?) { NativeEvents.emit("onCarModeChanged", JSObject().put("connected", intent?.action == BluetoothDevice.ACTION_ACL_CONNECTED)) } }
     override fun onCreate(savedInstanceState: Bundle?) {
-        registerPlugin(YouTubeAudioPlugin::class.java); registerPlugin(AuthBridgePlugin::class.java); registerPlugin(LocalIntentPlugin::class.java)
+        registerPlugin(YouTubeAudioPlugin::class.java); registerPlugin(AuthBridgePlugin::class.java); registerPlugin(LocalIntentPlugin::class.java); registerPlugin(JamPlugin::class.java)
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = Color.BLACK; window.navigationBarColor = Color.BLACK

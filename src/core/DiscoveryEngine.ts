@@ -27,8 +27,10 @@ export async function recordListening(
   const existing = await db.tracks.get(track.id);
   // The queue's copy refreshes what the provider sends, never what the owner changed: a song taken
   // out of Guardadas, a corrected name, the album's cover or when it entered the library.
-  await db.tracks.put(mergeSyncedTrack(existing, { ...track, saved: existing?.saved ?? false }));
-  const guest = guestModeOn();
+  const { jamGuest: _guest, ...stored } = track;
+  await db.tracks.put(mergeSyncedTrack(existing, { ...stored, saved: existing?.saved ?? false }));
+  // «Modo invitado», or a song a JAM guest added: kept in the history, never teaches taste (a ♥ still does).
+  const guest = guestModeOn() || !!track.jamGuest;
   await db.history.add({ trackId: track.id, at: Date.now(), seconds, skipped, ...(guest ? { guest } : {}) });
   // A skip while a guest chooses the music says nothing about the owner's taste.
   if (skipped && seconds < 30 && !guest)

@@ -10,7 +10,15 @@ Léelo primero si continúas MURMUR en otra PC u otra sesión. El detalle técni
 - No escribir contraseñas en formularios. Las sesiones de YouTube Music y Spotify las inicia él en el teléfono.
 - No inventar resultados: lo probado en el teléfono se dice como probado, y lo demás como no verificado.
 
-## Estado actual: 2.20.0 (code 37)
+## Estado actual: 2.21.0 (code 42)
+La 2.21.0 trae:
+- **JAM** (`JamPlugin.kt`, `src/core/jam.ts`, `public/jam/`). El teléfono sirve una página en la red local (`http://<ip>:8737/j/<token>/`), y los invitados en el mismo Wi-Fi o en el hotspot la abren con el QR para buscar, añadir, ordenar y quitar lo que añadió la JAM. Sus canciones llevan `jamGuest` y no entrenan el algoritmo salvo con ♥.
+- **Compartir** (`src/core/share.ts`): enlace de YouTube Music o de Spotify, solo si es la misma canción.
+- **Voz con YouTube primero** (`youtubeUnderstood`). Hay tres niveles. Si YouTube (entre sus primeros 3 videos) y YouTube Music coinciden, la canción suena directo con 0.93 («iwachu» → «Chop Suey!»). Una subida oficial suena con 0.86. Si el primer video comparte palabras con lo pedido, suena con 0.76–0.8 y las demás opciones quedan a un toque («intro 2 de naruto» → «Haruka Kanata»). `learnFromListening` aprende esas palabras cuando el dueño escucha 45 s o la mitad de la canción.
+- **Cola automática** (`continuation.ts`): bloques de 15 canciones. Empieza por las que el dueño suele poner después, sigue con una muestra distinta de su radio personal, recuerda lo que ya sugirió durante 4 días y, con Aleatorio, una cola automática trae otras 15. **Causa de las «5 canciones que no van»:** con el presentador «cada 5» y los ambientes activados, la cola metía bloques de 5 de un ánimo genérico. Ahora los ambientes solo siguen cuando lo que suena ya viene de un ánimo.
+- Todo se probó en el teléfono del dueño con la 2.21.0 instalada. El QR se leyó con ZXing desde una captura y la PC entró como invitado por Wi-Fi para añadir, mover y quitar canciones. jsQR no lee el QR con logo; ZXing, el lector de Android, sí.
+
+### 2.20.0 (code 37)
 La 2.20.0 hace que Spotify suene desde Spotify dentro de MURMUR (Web Playback SDK, sin la app de Spotify), guía para que cualquiera conecte su propia llave de Spotify, Android Auto, actualización desde la app, «Modo invitado» y un filtro para que pruebas o peticiones ajenas no entrenen el algoritmo. **Cambio de firma:** desde aquí todo va con la llave de release (`d03a64dd…`, solo en la bóveda de la PC Maindsoft). Detalle en [CONTINUAR-MURMUR.md](CONTINUAR-MURMUR.md).
 
 ### 2.19.0 (code 36)

@@ -10,14 +10,14 @@ import {
 } from "./DiscoveryEngine";
 import { db, playlistTracks, saveTrack } from "./db";
 import { player } from "./AudioOrchestrator";
-import { Auth, Voice, isNative } from "../native";
+import { Audio, Auth, Voice, isNative } from "../native";
 import { similarity } from "./SourceResolver";
 import { songKey } from "./blendMixes";
 import { albumTracks, fromSpotify, searchAlbums, SPOTIFY_ALBUM_PREFIX, type AlbumResult } from "./albumSearch";
 import { creditedArtists } from "../components/ArtistProfile";
 import { continuationPicks } from "./continuation";
 import { magicPicks } from "./magicShuffle";
-import { normalize } from "./FanUploadParser";
+import { normalize, parseFanUpload } from "./FanUploadParser";
 import { spotifyTrack } from "./DiscoveryEngine";
 import type { QueueItem } from "./types";
 import { phraseScore, songScore, tokens, type Tok } from "./voicePhonetics";
@@ -555,12 +555,18 @@ async function catalogueOptions(queries: string[], alts: Alt[], want: Want, lib:
     }
     return out;
   }
-  const results = await Promise.all(queries.map(async (q) => {
-    const [spotify, youtube] = await Promise.allSettled([
+  const results = await Promise.all(queries.map(async (q, n) => {
+    const [spotify, youtube, videos] = await Promise.allSettled([
       isNative ? Auth.spotifyRequest({ path: "/search?type=track,artist,album&limit=5&q=" + encodeURIComponent(q) }) : Promise.reject(new Error("web")),
       songsOn("youtube", q),
+      // YouTube itself (not only YouTube Music) for what was said: it knows a chorus as people sing it.
+      n === 0 && isNative ? Promise.resolve().then(() => Audio.searchYouTube({ query: q })).then((r) => r.tracks.slice(0, 3)) : Promise.resolve([] as QueueItem[]),
     ]);
-    return { data: spotify.status === "fulfilled" ? spotify.value.data : undefined, youtube: youtube.status === "fulfilled" ? youtube.value.slice(0, 6) : [] as QueueItem[] };
+    return {
+      data: spotify.status === "fulfilled" ? spotify.value.data : undefined,
+      youtube: youtube.status === "fulfilled" ? youtube.value.slice(0, 6) : [] as QueueItem[],
+      videos: videos.status === "fulfilled" ? videos.value : [] as QueueItem[],
+    };
   }));
   const tracks = new Map<string, QueueItem>();
   const artists = new Map<string, { name: string; popularity?: number; source: "spotify" | "youtube" }>();
@@ -626,6 +632,13 @@ async function catalogueOptions(queries: string[], alts: Alt[], want: Want, lib:
     score += ((t.popularity ?? 0) / 100) * 0.02 + (t.source === platform ? 0.02 : 0);
     out.push({ kind: "track", score: Math.min(1, score), base: score, from: t.source, alt: top.alt, label: `${t.title} · ${t.artist}`, key: "t:" + songKey(t), track: t });
   }
+  const understood = youtubeUnderstood(results[0]?.youtube ?? [], results[0]?.videos ?? [], queries[0] ?? "");
+  if (understood) {
+    const key = "t:" + songKey(understood.track);
+    const same = out.find((o) => o.key === key);
+    if (same) { same.score = Math.max(same.score, understood.score); same.base = Math.max(same.base, understood.score); }
+    else out.push({ kind: "track", score: understood.score, base: understood.score, from: "youtube", alt: saids[0]?.alt ?? 0, label: `${understood.track.title} · ${understood.track.artist}`, key, track: understood.track });
+  }
   for (const album of want === "song" ? [] : albums.values()) {
     const title = tokens(titleVariants(album.title)[0]);
     let { score, alt } = best((s) => songScore(s, title, tokens(lead(album.artist))));
@@ -635,6 +648,44 @@ async function catalogueOptions(queries: string[], alts: Alt[], want: Want, lib:
     out.push({ kind: "album", score, base: score, from: "spotify", alt, label: `${album.title} · ${album.artist}`, key: "l:" + normalize(album.title) + "|" + normalize(lead(album.artist)), album: { title: album.title, artist: album.artist, result: album, artworkUrl: album.artworkUrl } });
   }
   return out;
+}
+
+/**
+ * What YouTube understood from the words as they were said. YouTube finds songs from vague or
+ * misheard requests ("iwachu" → Chop Suey! by System of a Down), so its first answer counts even when
+ * the words look nothing like the title: sure when YouTube Music has that same song among its first
+ * answers, a good bet when YouTube's first answer is an official upload (VEVO, "- Topic", official
+ * video). Without either, nothing changes: MURMUR still offers options instead of guessing.
+ */
+export function youtubeUnderstood(songs: QueueItem[], videos: QueueItem[], spoken = ""): { track: QueueItem; score: number } | undefined {
+  const clips = videos.filter((v) => !longForm(v)).slice(0, 3);
+  const video = clips[0];
+  if (!video) return undefined;
+  const usable = songs.filter((t) => !longForm(t)).slice(0, 5);
+  // YouTube's first videos (not only the first: «iwachu» brings a lyric video first, the official one second).
+  for (const clip of clips) {
+    const said = normalize(clip.title + " " + clip.artist);
+    const agree = usable.find((t) => {
+      const title = normalize(titleVariants(t.title)[0] ?? t.title);
+      return title.length >= 2 && said.includes(title) && said.includes(normalize(lead(t.artist)));
+    });
+    if (agree) return { track: agree, score: 0.93 };
+  }
+  // Native YouTube results have no artist: it comes from the title ("Artista - Canción").
+  const named = (clip: QueueItem): QueueItem => {
+    const parsed = parseFanUpload(clip.title);
+    const channel = /artista por identificar/i.test(clip.artist) ? "" : clip.artist.replace(/vevo$|\s-\s*topic$/i, "").trim();
+    const title = parsed.title.replace(/\s*[([][^)\]]*[)\]]/g, "").trim() || clip.title;
+    return { ...clip, title, artist: parsed.candidateArtist ?? (channel || "YouTube") };
+  };
+  const official = /vevo$|\s-\stopic$/i.test(video.artist.trim()) || /official (music )?(video|audio)|video oficial|audio oficial/i.test(video.title);
+  if (official) return { track: named(video), score: 0.86 };
+  // Middle ground: YouTube's first video plays directly (the other options one tap away) when it
+  // shares at least one heard word ("intro 2 de naruto" → "Naruto Shippuden Opening 2"), and the
+  // listening teaches MURMUR (learnFromListening). With nothing in common it is only offered.
+  const heard = new Set(tokens(spoken).map((t) => t.key));
+  const shared = tokens(video.title + " " + video.artist).filter((t) => heard.has(t.key) && t.key.length >= 3).length;
+  return { track: named(video), score: shared >= 2 ? 0.8 : shared ? 0.76 : 0.6 };
 }
 
 const KIND_LABEL: Record<Option["kind"], string> = { track: "Canción", artist: "Artista", album: "Álbum", playlist: "Playlist" };
@@ -673,6 +724,42 @@ function offer(heard: string, options: Option[], played: boolean, platform: Plat
     // The tap teaches MURMUR what these words meant: next time they play it directly.
     chosen: (i) => void learnChoice(alts.map((a) => musicText(a.intent)), picks[i]).then(() => updateVoiceHints()).catch(() => {}),
   });
+}
+
+/**
+ * Learning by listening: a voice pick MURMUR was not sure of is remembered for those words once the
+ * owner listens to it (45 s or half of it). Skipped within 20 s, or replaced by another choice, it is
+ * not learned (and a choice tapped among the options is learned right away, see offer()).
+ */
+let stopWatching: (() => void) | undefined;
+export function learnFromListening(phrases: string[], option: Option) {
+  stopWatching?.();
+  const started = Date.now();
+  let queueId: string | undefined;
+  let heard = 0;
+  const check = () => {
+    const state = player.getSnapshot();
+    const now = state.queue[state.index];
+    const wanted = option.kind === "track" ? now && songKey(now) === songKey(option.track!) : !!now;
+    if (!queueId) {
+      if (wanted && now?.queueId) queueId = now.queueId;
+      else if (Date.now() - started > 20_000) return stop();
+      return;
+    }
+    if (now?.queueId === queueId) {
+      heard = Math.max(heard, state.position);
+      if (heard >= Math.min(45, (now.duration || 90) / 2)) {
+        stop();
+        void learnChoice(phrases, option).then(() => updateVoiceHints()).catch(() => {});
+      }
+      return;
+    }
+    // Another song took its place before it was really heard: nothing to learn.
+    stop();
+  };
+  const unsubscribe = player.subscribe(check);
+  const stop = () => { unsubscribe(); if (stopWatching === stop) stopWatching = undefined; };
+  stopWatching = stop;
 }
 
 /** Words → what the owner picked for them among the choices, so the same words play it next time. */
@@ -723,6 +810,8 @@ async function decide(options: Option[], ctx: { alts: Alt[]; platform?: Platform
     return close.length ? `No estoy seguro de qué es «${query}». ¿Es alguna de estas?` : `No encontré «${query}» en tu música, Spotify ni YouTube`;
   }
   const answer = await playOption(best, ctx.platform);
+  // A catalogue pick that was not a sure thing: if the owner listens to it, those words mean it from now on.
+  if (best.from !== "library" && confidence(best) < VOICE_CONFIDENCE.library) learnFromListening(ctx.alts.map((a) => musicText(a.intent)), best);
   const rest = options.filter((o) => o !== best && o.score >= 0.45);
   const unsure = confidence(best) < (best.from === "library" ? VOICE_CONFIDENCE.library : VOICE_CONFIDENCE.sure);
   if (rest.length && (unsure || confidence(rest[0]) >= confidence(best) - 0.04)) offer(heardAs(best), rest, true, ctx.platform, ctx.trace, ctx.alts);

@@ -209,3 +209,24 @@ export const Auth = registerPlugin<AuthBridge>("AuthBridge");
 /** Who presents the songs: a woman and a man taking turns, or one of them. */
 export type PresenterHost = "duo" | "mujer" | "hombre";
 export const Voice = registerPlugin<VoiceBridge>("LocalIntent");
+
+/** JAM: a web page on the local network where people nearby add songs to the queue (JamPlugin.kt). */
+export interface JamRequest {
+  id: string;
+  name: string;
+  method: string;
+  params: Record<string, string>;
+  body: string;
+  /** The guest's own id and name, as their browser sends them. */
+  guest: string;
+  ip: string;
+}
+interface JamBridge {
+  start(): Promise<{ url: string; ip: string; port: number; token: string }>;
+  stop(): Promise<void>;
+  address(): Promise<{ ip?: string; running: boolean; url?: string }>;
+  publish(o: { state: string }): Promise<void>;
+  respond(o: { id: string; status: number; body: string }): Promise<void>;
+  addListener(event: "jamRequest", listener: (request: JamRequest) => void): Promise<PluginListenerHandle>;
+}
+export const Jam = registerPlugin<JamBridge>("Jam");
